@@ -15,11 +15,12 @@ const WebSocket = require('ws');
 const https = require('https');
 
 class TraccarWsClient {
-  constructor({ url, email, password, io }) {
+  constructor({ url, email, password, io, geofenceService }) {
     this.url = url;
     this.email = email;
     this.password = password;
     this.io = io;
+    this.geofenceService = geofenceService;
     this.ws = null;
     this.sessionCookie = null;
     this.reconnectDelay = 5000;
@@ -105,6 +106,10 @@ class TraccarWsClient {
         this.fleetState[pos.deviceId] = pos;
 
         console.log(`Posición recibida — Device: ${pos.deviceId} | Lat: ${pos.latitude} | Lon: ${pos.longitude} | Speed: ${pos.speed} km/h`);
+      
+        if (this.geofenceService) {
+          this.geofenceService.evaluate(pos);
+        }
       });
 
       this.io.emit('fleet:update', {

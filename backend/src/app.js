@@ -15,6 +15,29 @@ const io = new Server(server, {
   transports: ['websocket', 'polling']
 });
 
+const GeofenceAlertService = require('./services/alerts/GeofenceAlertService');
+
+// Inicializar servicio de geocercas
+const geofenceService = new GeofenceAlertService({ io });
+
+// Geocerca de PRUEBA — zona amarilla
+// Centrada cerca de donde están tus tabletas ahora
+geofenceService.addGeofence({
+  id: 'test-warning-1',
+  name: 'Zona Precaución Test',
+  type: 'warning',
+  center: { lat: 19.2539, lon: -103.7166 },
+  radiusMeters: 50
+});
+
+// Geocerca de PRUEBA — zona roja (radio más pequeño)
+geofenceService.addGeofence({
+  id: 'test-danger-1',
+  name: 'Zona Peligro Test',
+  type: 'danger',
+  center: { lat: 19.2539, lon: -103.7166 },
+  radiusMeters: 20
+});
 app.use(express.json());
 const path = require('path');
 
@@ -32,15 +55,36 @@ app.get('/health', (req, res) => {
 io.on('connection', (socket) => {
   console.log(`✅ Cliente conectado: ${socket.id}`);
 
-  // Enviar estado actual de la flota al cliente que se acaba de conectar
+  // Enviar estado actual de la flota
   const currentFleet = traccarClient.getFleetState();
   if (Object.keys(currentFleet).length > 0) {
     socket.emit('fleet:update', {
       positions: Object.values(currentFleet),
       timestamp: new Date().toISOString()
     });
-    console.log(`📡 Estado actual enviado a nuevo cliente: ${Object.keys(currentFleet).length} vehículos`);
+    console.log(`📡 Estado actual enviado: ${Object.keys(currentFleet).length} vehículos`);
   }
+
+  // Enviar alertas activas al nuevo cliente
+  const activeAlerts = geofenceService.getActiveAlerts();
+  Object.entries(activeAlerts).forEach(([deviceId, severity]) => {
+    if (severity === 'danger') {
+      socket.emit('alert:critical', {
+        type: 'geofence_red',
+        deviceId: parseInt(deviceId),
+        message: 'PELIGRO — DETENER VEHÍCULO INMEDIATAMENTE',
+        loop: true,
+        timestamp: new Date().toISOString()
+      });
+    } else if (severity === 'warning') {
+      socket.emit('alert:warning', {
+        type: 'geofence_yellow',
+        deviceId: parseInt(deviceId),
+        message: 'PRECAUCIÓN — ZONA DE RIESGO — REDUCIR VELOCIDAD',
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
 
   socket.on('disconnect', () => {
     console.log(`❌ Cliente desconectado: ${socket.id}`);
@@ -52,7 +96,8 @@ const traccarClient = new TraccarWsClient({
   url: process.env.TRACCAR_WS_URL,
   email: process.env.TRACCAR_EMAIL,
   password: process.env.TRACCAR_PASSWORD,
-  io
+  io,
+  geofenceService
 });
 
 traccarClient.connect();

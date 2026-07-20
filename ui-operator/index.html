@@ -433,6 +433,75 @@
         console.log("Evento recibido:", data);
       });
 
+      // Alerta de zona amarilla — RF-ALR-02
+      socket.on("alert:warning", (data) => {
+        if (data.deviceId === MY_DEVICE_ID) {
+          showWarningAlert(data.message);
+          playWarningSound();
+        }
+      });
+
+      // Alerta de zona roja — RF-ALR-03
+      socket.on("alert:critical", (data) => {
+        if (data.deviceId === MY_DEVICE_ID) {
+          showDangerAlert(data.message);
+          playDangerSound(data.loop);
+        }
+      });
+
+      // Cancelar alerta cuando sale de geocerca
+      socket.on("alert:clear", (data) => {
+        if (data.deviceId === MY_DEVICE_ID) {
+          clearAlert();
+          stopSound();
+        }
+      });
+
+      // Sonidos de alerta
+      let dangerAudio = null;
+
+      function playWarningSound() {
+        stopSound();
+        const ctx = new AudioContext();
+        const oscillator = ctx.createOscillator();
+        oscillator.connect(ctx.destination);
+        oscillator.frequency.value = 880;
+        oscillator.start();
+        setTimeout(() => oscillator.stop(), 500);
+      }
+
+      function playDangerSound(loop) {
+        stopSound();
+        const ctx = new AudioContext();
+
+        const playBeep = () => {
+          const oscillator = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+          oscillator.connect(gainNode);
+          gainNode.connect(ctx.destination);
+          oscillator.frequency.value = 1200;
+          gainNode.gain.setValueAtTime(1, ctx.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(
+            0.001,
+            ctx.currentTime + 0.3,
+          );
+          oscillator.start(ctx.currentTime);
+          oscillator.stop(ctx.currentTime + 0.3);
+        };
+
+        playBeep();
+        if (loop) {
+          dangerAudio = setInterval(playBeep, 600);
+        }
+      }
+
+      function stopSound() {
+        if (dangerAudio) {
+          clearInterval(dangerAudio);
+          dangerAudio = null;
+        }
+      }
+
       // ─── ALERT HELPERS (para RF-ALR-02 y RF-ALR-03) ───────────
       function showWarningAlert(message) {
         document.getElementById("alert-overlay").className = "warning";
