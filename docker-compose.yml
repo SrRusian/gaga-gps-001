@@ -1,0 +1,64 @@
+networks:
+  gaga-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  traccar_logs:
+  traccar_data:
+
+services:
+
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: gaga-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gaga_gps
+      POSTGRES_USER: gaga_app
+      POSTGRES_PASSWORD: gaga_dev_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - gaga-net
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gaga_app -d gaga_gps"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: gaga-redis
+    restart: unless-stopped
+    command: redis-server --requirepass gaga_redis_pass
+    volumes:
+      - redis_data:/data
+    networks:
+      - gaga-net
+    ports:
+      - "6379:6379"
+
+  traccar:
+    image: traccar/traccar:6
+    container_name: gaga-traccar
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - CONFIG_USE_ENVIRONMENT_VARIABLES=true
+    volumes:
+      - ./traccar/traccar.xml:/opt/traccar/conf/traccar.xml
+      - traccar_logs:/opt/traccar/logs
+      - traccar_data:/opt/traccar/data
+    networks:
+      - gaga-net
+    ports:
+      - "8082:8082"
+      - "5055:5055"
+      - "5055:5055/udp"
