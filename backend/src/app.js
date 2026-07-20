@@ -8,6 +8,7 @@ const GeofenceAlertService = require('./services/alerts/GeofenceAlertService');
 const SignalLostService = require('./services/alerts/SignalLostService');
 const CollisionRiskService = require('./services/alerts/CollisionRiskService');
 const StaticEquipmentManager = require('./services/static_equipment/StaticEquipmentManager');
+const PreventiveStopService = require('./services/alerts/PreventiveStopService');
 
 const app = express();
 const server = http.createServer(app);
@@ -17,9 +18,10 @@ const io = new Server(server, {
   transports: ['websocket', 'polling']
 });
 
-// Inicializar servicios
+// Inicializar servicios — orden importa
 const geofenceService = new GeofenceAlertService({ io });
-const signalLostService = new SignalLostService({ io });
+const preventiveStopService = new PreventiveStopService({ io }); // ← primero
+const signalLostService = new SignalLostService({ io, preventiveStopService }); // ← después
 const collisionService = new CollisionRiskService({ io });
 const equipmentManager = new StaticEquipmentManager({ io });
 
@@ -51,6 +53,27 @@ app.use('/operator', express.static(
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Activar parada preventiva — supervisor
+app.post('/api/fleet/stop', (req, res) => {
+  const { reason } = req.body;
+  preventiveStopService.activate(
+    reason || 'Activado manualmente por supervisor',
+    'supervisor'
+  );
+  res.json({ success: true, status: preventiveStopService.getStatus() });
+});
+
+// Desactivar parada preventiva — solo supervisor
+app.post('/api/fleet/resume', (req, res) => {
+  preventiveStopService.deactivate('supervisor');
+  res.json({ success: true, status: preventiveStopService.getStatus() });
+});
+
+// Estado actual
+app.get('/api/fleet/stop/status', (req, res) => {
+  res.json(preventiveStopService.getStatus());
 });
 
 // Iniciar cliente WebSocket de Traccar

@@ -12,8 +12,9 @@
 
 class SignalLostService {
 
-  constructor({ io }) {
+  constructor({ io, preventiveStopService }) {
     this.io = io;
+    this.preventiveStopService = preventiveStopService;
     this.lastSeen = {};
     this.alertLevel = {};
     this.checkInterval = null;
@@ -103,6 +104,14 @@ class SignalLostService {
       elapsedSeconds: seconds,
       timestamp: new Date().toISOString()
     });
+
+    // Activar parada preventiva colectiva automáticamente — RF-ALR-11
+    if (this.preventiveStopService && !this.preventiveStopService.isActive) {
+      this.preventiveStopService.activate(
+        `Vehículo ${deviceId} sin señal por ${seconds} segundos`,
+        'auto'
+      );
+    }
   }
 
   handleRecovery(deviceId) {

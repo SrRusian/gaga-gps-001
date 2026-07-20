@@ -532,6 +532,22 @@
         }
       });
 
+      // Parada preventiva colectiva activada
+      socket.on("fleet:preventive_stop", (data) => {
+        showDangerAlert(data.message);
+        playDangerSound(data.loop);
+        console.log(`🛑 Parada preventiva: ${data.reason}`);
+      });
+
+      // Parada preventiva cancelada por supervisor
+      socket.on("fleet:preventive_stop_clear", (data) => {
+        clearAlert();
+        stopSound();
+        showWarningAlert(data.message);
+        // Limpiar mensaje de advertencia después de 5 segundos
+        setTimeout(() => clearAlert(), 5000);
+      });
+
       // Sonidos de alerta
       let dangerAudio = null;
 
