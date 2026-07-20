@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>GAGA GPS — Operador</title>
+
+    <!-- MapLibre GL JS -->
+    <link
+      href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      rel="stylesheet"
+    />
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+    <!-- Socket.io cliente -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background: #1a1a2e;
+        color: #ffffff;
+        font-family: "Arial", sans-serif;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* Barra de estado superior */
+      #status-bar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 50px;
+        background: rgba(0, 0, 0, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 16px;
+        z-index: 1000;
+        border-bottom: 2px solid #00ff88;
+      }
+
+      #device-name {
+        font-size: 16px;
+        font-weight: bold;
+        color: #00ff88;
+      }
+
+      #connection-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
+
+      #status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #ff4444;
+        transition: background 0.3s;
+      }
+
+      #status-dot.connected {
+        background: #00ff88;
+      }
+
+      #vehicle-count {
+        font-size: 13px;
+        color: #aaaaaa;
+      }
+
+      /* Mapa — ocupa toda la pantalla */
+      #map {
+        position: fixed;
+        top: 50px;
+        left: 0;
+        right: 0;
+        bottom: 60px;
+        z-index: 1;
+      }
+
+      /* Barra inferior de información */
+      #info-bar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 60px;
+        background: rgba(0, 0, 0, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: space-around;
+        padding: 0 16px;
+        z-index: 1000;
+        border-top: 1px solid #333;
+      }
+
+      .info-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .info-label {
+        font-size: 10px;
+        color: #888888;
+        text-transform: uppercase;
+      }
+
+      .info-value {
+        font-size: 16px;
+        font-weight: bold;
+        color: #ffffff;
+      }
+
+      /* Botón centrar en mi posición */
+      #btn-center {
+        position: fixed;
+        bottom: 75px;
+        right: 16px;
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: #00ff88;
+        border: none;
+        color: #000;
+        font-size: 22px;
+        cursor: pointer;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+      }
+
+      /* Overlay de alerta */
+      #alert-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 2000;
+        pointer-events: none;
+      }
+
+      #alert-overlay.warning {
+        display: block;
+        border: 8px solid #ffaa00;
+        animation: pulse-warning 1s infinite;
+      }
+
+      #alert-overlay.danger {
+        display: block;
+        border: 12px solid #ff2222;
+        background: rgba(255, 0, 0, 0.15);
+        animation: pulse-danger 0.5s infinite;
+        pointer-events: all;
+      }
+
+      #alert-message {
+        display: none;
+        position: fixed;
+        top: 60px;
+        left: 16px;
+        right: 16px;
+        padding: 16px;
+        border-radius: 8px;
+        font-size: 18px;
+        font-weight: bold;
+        text-align: center;
+        z-index: 2001;
+      }
+
+      #alert-message.warning {
+        display: block;
+        background: #ffaa00;
+        color: #000;
+      }
+
+      #alert-message.danger {
+        display: block;
+        background: #ff2222;
+        color: #fff;
+        font-size: 22px;
+      }
+
+      @keyframes pulse-warning {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+
+      @keyframes pulse-danger {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Barra de estado -->
+    <div id="status-bar">
+      <div id="device-name">GAGA GPS — Cargando...</div>
+      <div id="connection-status">
+        <div id="status-dot"></div>
+        <span id="status-text">Desconectado</span>
+      </div>
+      <div id="vehicle-count">0 vehículos</div>
+    </div>
+
+    <!-- Mapa principal -->
+    <div id="map"></div>
+
+    <!-- Botón centrar -->
+    <button
+      id="btn-center"
+      onclick="centerOnMyPosition()"
+      title="Centrar en mi posición"
+    >
+      ⊙
+    </button>
+
+    <!-- Barra inferior de información -->
+    <div id="info-bar">
+      <div class="info-item">
+        <span class="info-label">Velocidad</span>
+        <span class="info-value" id="my-speed">0 km/h</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Latitud</span>
+        <span class="info-value" id="my-lat">--</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Longitud</span>
+        <span class="info-value" id="my-lon">--</span>
+      </div>
+      <div class="info-item">
+        <span class="info-label">Estado</span>
+        <span class="info-value" id="my-status">--</span>
+      </div>
+    </div>
+
+    <!-- Overlay de alertas -->
+    <div id="alert-overlay"></div>
+    <div id="alert-message"></div>
+
+    <script>
+      // ─── CONFIGURACIÓN ─────────────────────────────────────────
+      const BACKEND_URL = "http://localhost:3001";
+      const MY_DEVICE_ID = 1; // Cambiar según el dispositivo
+      const MY_VEHICLE_NAME = "Prueba Tableta 01";
+
+      // ─── ESTADO DE LA FLOTA ────────────────────────────────────
+      const fleetState = {};
+      const markers = {};
+      let myPosition = null;
+      let mapInitialized = false;
+
+      // ─── INICIALIZAR MAPA ──────────────────────────────────────
+      const map = new maplibregl.Map({
+        container: "map",
+        style: {
+          version: 8,
+          sources: {
+            osm: {
+              type: "raster",
+              tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+              tileSize: 256,
+              attribution: "© OpenStreetMap contributors",
+            },
+          },
+          layers: [
+            {
+              id: "osm-layer",
+              type: "raster",
+              source: "osm",
+              minzoom: 0,
+              maxzoom: 19,
+            },
+          ],
+        },
+        center: [-103.7166, 19.2539],
+        zoom: 17,
+      });
+
+      map.on("load", () => {
+        mapInitialized = true;
+        console.log("Mapa inicializado");
+      });
+
+      // ─── CONECTAR A SOCKET.IO ──────────────────────────────────
+      const socket = io(BACKEND_URL, {
+        transports: ["websocket", "polling"],
+      });
+
+      socket.on("connect", () => {
+        console.log("Conectado al backend GAGA-GPS");
+        updateConnectionStatus(true);
+        document.getElementById("device-name").textContent = MY_VEHICLE_NAME;
+      });
+
+      socket.on("disconnect", () => {
+        console.log("Desconectado del backend");
+        updateConnectionStatus(false);
+      });
+
+      // ─── RECIBIR POSICIONES DE LA FLOTA ───────────────────────
+      socket.on("fleet:update", (data) => {
+        data.positions.forEach((pos) => {
+          updateVehicleOnMap(pos);
+
+          // Actualizar mi propia posición en la barra inferior
+          if (pos.deviceId === MY_DEVICE_ID) {
+            myPosition = pos;
+            updateMyInfo(pos);
+          }
+        });
+
+        // Actualizar contador de vehículos
+        const activeCount = Object.keys(fleetState).length;
+        document.getElementById("vehicle-count").textContent =
+          `${activeCount} vehículo${activeCount !== 1 ? "s" : ""}`;
+      });
+
+      // ─── ACTUALIZAR VEHÍCULO EN MAPA ──────────────────────────
+      function updateVehicleOnMap(pos) {
+        const isMyVehicle = pos.deviceId === MY_DEVICE_ID;
+        const vehicleId = `vehicle-${pos.deviceId}`;
+
+        // Guardar en estado
+        fleetState[pos.deviceId] = pos;
+
+        if (!mapInitialized) return;
+
+        const lngLat = [pos.longitude, pos.latitude];
+
+        if (markers[vehicleId]) {
+          // Mover marcador existente
+          markers[vehicleId].setLngLat(lngLat);
+        } else {
+          // Crear nuevo marcador
+          const el = document.createElement("div");
+          el.className = "vehicle-marker";
+          el.style.cssText = `
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          border: 3px solid ${isMyVehicle ? "#00ff88" : "#ff6600"};
+          background: ${isMyVehicle ? "#003322" : "#330a00"};
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 10px;
+          font-weight: bold;
+          color: ${isMyVehicle ? "#00ff88" : "#ff6600"};
+          cursor: pointer;
+          box-shadow: 0 0 8px ${isMyVehicle ? "#00ff88" : "#ff6600"};
+        `;
+          el.textContent = isMyVehicle ? "YO" : `V${pos.deviceId}`;
+
+          markers[vehicleId] = new maplibregl.Marker({ element: el })
+            .setLngLat(lngLat)
+            .setPopup(
+              new maplibregl.Popup({ offset: 25 })
+                .setHTML(`<b>Vehículo ${pos.deviceId}</b><br>
+                      Lat: ${pos.latitude.toFixed(6)}<br>
+                      Lon: ${pos.longitude.toFixed(6)}<br>
+                      Speed: ${pos.speed} km/h`),
+            )
+            .addTo(map);
+        }
+      }
+
+      // ─── ACTUALIZAR MI INFORMACIÓN ─────────────────────────────
+      function updateMyInfo(pos) {
+        document.getElementById("my-speed").textContent =
+          `${Math.round(pos.speed || 0)} km/h`;
+        document.getElementById("my-lat").textContent = pos.latitude.toFixed(5);
+        document.getElementById("my-lon").textContent =
+          pos.longitude.toFixed(5);
+        document.getElementById("my-status").textContent = "🟢 En línea";
+      }
+
+      // ─── CENTRAR EN MI POSICIÓN ────────────────────────────────
+      function centerOnMyPosition() {
+        if (myPosition) {
+          map.flyTo({
+            center: [myPosition.longitude, myPosition.latitude],
+            zoom: 18,
+            duration: 800,
+          });
+        }
+      }
+
+      // ─── ESTADO DE CONEXIÓN ────────────────────────────────────
+      function updateConnectionStatus(connected) {
+        const dot = document.getElementById("status-dot");
+        const text = document.getElementById("status-text");
+
+        if (connected) {
+          dot.classList.add("connected");
+          text.textContent = "Conectado";
+        } else {
+          dot.classList.remove("connected");
+          text.textContent = "Sin conexión";
+          document.getElementById("my-status").textContent = "🔴 Offline";
+        }
+      }
+
+      // ─── RECIBIR ALERTAS ──────────────────────────────────────
+      socket.on("fleet:event", (data) => {
+        console.log("Evento recibido:", data);
+      });
+
+      // ─── ALERT HELPERS (para RF-ALR-02 y RF-ALR-03) ───────────
+      function showWarningAlert(message) {
+        document.getElementById("alert-overlay").className = "warning";
+        const msg = document.getElementById("alert-message");
+        msg.className = "warning";
+        msg.textContent = message;
+      }
+
+      function showDangerAlert(message) {
+        document.getElementById("alert-overlay").className = "danger";
+        const msg = document.getElementById("alert-message");
+        msg.className = "danger";
+        msg.textContent = message;
+      }
+
+      function clearAlert() {
+        document.getElementById("alert-overlay").className = "";
+        document.getElementById("alert-message").className = "";
+        document.getElementById("alert-message").textContent = "";
+      }
+    </script>
+  </body>
+</html>

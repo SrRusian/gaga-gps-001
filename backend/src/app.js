@@ -16,6 +16,12 @@ const io = new Server(server, {
 });
 
 app.use(express.json());
+const path = require('path');
+
+// Servir UI del operador
+app.use('/operator', express.static(
+  path.join(__dirname, '../../ui-operator')
+));
 
 // Health check
 app.get('/health', (req, res) => {
@@ -25,6 +31,16 @@ app.get('/health', (req, res) => {
 // Cuando un cliente se conecta
 io.on('connection', (socket) => {
   console.log(`✅ Cliente conectado: ${socket.id}`);
+
+  // Enviar estado actual de la flota al cliente que se acaba de conectar
+  const currentFleet = traccarClient.getFleetState();
+  if (Object.keys(currentFleet).length > 0) {
+    socket.emit('fleet:update', {
+      positions: Object.values(currentFleet),
+      timestamp: new Date().toISOString()
+    });
+    console.log(`📡 Estado actual enviado a nuevo cliente: ${Object.keys(currentFleet).length} vehículos`);
+  }
 
   socket.on('disconnect', () => {
     console.log(`❌ Cliente desconectado: ${socket.id}`);

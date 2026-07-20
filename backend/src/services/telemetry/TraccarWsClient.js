@@ -15,7 +15,6 @@ const WebSocket = require('ws');
 const https = require('https');
 
 class TraccarWsClient {
-
   constructor({ url, email, password, io }) {
     this.url = url;
     this.email = email;
@@ -24,6 +23,7 @@ class TraccarWsClient {
     this.ws = null;
     this.sessionCookie = null;
     this.reconnectDelay = 5000;
+    this.fleetState = {};
   }
 
   // Paso 1: Login en Traccar para obtener cookie de sesión
@@ -99,21 +99,20 @@ class TraccarWsClient {
 
   // Paso 3: Procesar mensajes del WebSocket
   handleMessage(payload) {
-
-    // Posiciones en tiempo real
     if (payload.positions && payload.positions.length > 0) {
       payload.positions.forEach(pos => {
+        // Guardar en estado en memoria
+        this.fleetState[pos.deviceId] = pos;
+
         console.log(`Posición recibida — Device: ${pos.deviceId} | Lat: ${pos.latitude} | Lon: ${pos.longitude} | Speed: ${pos.speed} km/h`);
       });
 
-      // Distribuir a TODOS los clientes conectados via Socket.io
       this.io.emit('fleet:update', {
         positions: payload.positions,
         timestamp: new Date().toISOString()
       });
     }
 
-    // Eventos (geocerca, ignición, etc.)
     if (payload.events && payload.events.length > 0) {
       payload.events.forEach(event => {
         console.log(`Evento — Type: ${event.type} | Device: ${event.deviceId}`);
@@ -124,6 +123,11 @@ class TraccarWsClient {
         timestamp: new Date().toISOString()
       });
     }
+  }
+
+  // Retorna el estado actual de toda la flota en memoria
+  getFleetState() {
+    return this.fleetState;
   }
 }
 
