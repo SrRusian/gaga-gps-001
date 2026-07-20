@@ -457,6 +457,25 @@
         }
       });
 
+      // Nivel 1 — alerta temprana de vehículo perdido
+      socket.on("signal:lost:level1", (data) => {
+        showWarningAlert(data.message);
+        playWarningSound();
+      });
+
+      // Nivel 2 — emergencia colectiva
+      socket.on("signal:lost:level2", (data) => {
+        showDangerAlert(data.message);
+        playDangerSound(data.loop);
+      });
+
+      // Recuperación de señal
+      socket.on("signal:recovered", (data) => {
+        clearAlert();
+        stopSound();
+        console.log(`✅ Vehículo ${data.deviceId} reconectado`);
+      });
+
       // Sonidos de alerta
       let dangerAudio = null;
 

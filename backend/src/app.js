@@ -1,27 +1,26 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const { Server } = require('socket.io');
 const TraccarWsClient = require('./services/telemetry/TraccarWsClient');
+const GeofenceAlertService = require('./services/alerts/GeofenceAlertService');
+const SignalLostService = require('./services/alerts/SignalLostService');
 
 const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  },
+  cors: { origin: '*', methods: ['GET', 'POST'] },
   transports: ['websocket', 'polling']
 });
 
-const GeofenceAlertService = require('./services/alerts/GeofenceAlertService');
-
-// Inicializar servicio de geocercas
+// Inicializar servicios
 const geofenceService = new GeofenceAlertService({ io });
+const signalLostService = new SignalLostService({ io });
 
-// Geocerca de PRUEBA — zona amarilla
-// Centrada cerca de donde están tus tabletas ahora
+// Geocercas de prueba — comentadas hasta necesitarlas
+/*
 geofenceService.addGeofence({
   id: 'test-warning-1',
   name: 'Zona Precaución Test',
@@ -29,8 +28,6 @@ geofenceService.addGeofence({
   center: { lat: 19.2539, lon: -103.7166 },
   radiusMeters: 50
 });
-
-// Geocerca de PRUEBA — zona roja (radio más pequeño)
 geofenceService.addGeofence({
   id: 'test-danger-1',
   name: 'Zona Peligro Test',
@@ -38,8 +35,9 @@ geofenceService.addGeofence({
   center: { lat: 19.2539, lon: -103.7166 },
   radiusMeters: 20
 });
+*/
+
 app.use(express.json());
-const path = require('path');
 
 // Servir UI del operador
 app.use('/operator', express.static(
@@ -50,6 +48,21 @@ app.use('/operator', express.static(
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Iniciar cliente WebSocket de Traccar
+const traccarClient = new TraccarWsClient({
+  url: process.env.TRACCAR_WS_URL,
+  email: process.env.TRACCAR_EMAIL,
+  password: process.env.TRACCAR_PASSWORD,
+  io,
+  geofenceService,
+  signalLostService
+});
+
+traccarClient.connect();
+
+// Iniciar monitoreo de señal
+signalLostService.startMonitoring();
 
 // Cuando un cliente se conecta
 io.on('connection', (socket) => {
@@ -65,7 +78,7 @@ io.on('connection', (socket) => {
     console.log(`📡 Estado actual enviado: ${Object.keys(currentFleet).length} vehículos`);
   }
 
-  // Enviar alertas activas al nuevo cliente
+  // Enviar alertas activas de geocerca
   const activeAlerts = geofenceService.getActiveAlerts();
   Object.entries(activeAlerts).forEach(([deviceId, severity]) => {
     if (severity === 'danger') {
@@ -90,17 +103,6 @@ io.on('connection', (socket) => {
     console.log(`❌ Cliente desconectado: ${socket.id}`);
   });
 });
-
-// Iniciar cliente WebSocket de Traccar
-const traccarClient = new TraccarWsClient({
-  url: process.env.TRACCAR_WS_URL,
-  email: process.env.TRACCAR_EMAIL,
-  password: process.env.TRACCAR_PASSWORD,
-  io,
-  geofenceService
-});
-
-traccarClient.connect();
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {

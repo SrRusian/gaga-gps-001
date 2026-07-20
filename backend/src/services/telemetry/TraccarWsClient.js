@@ -15,12 +15,13 @@ const WebSocket = require('ws');
 const https = require('https');
 
 class TraccarWsClient {
-  constructor({ url, email, password, io, geofenceService }) {
+  constructor({ url, email, password, io, geofenceService, signalLostService }) {
     this.url = url;
     this.email = email;
     this.password = password;
     this.io = io;
     this.geofenceService = geofenceService;
+    this.signalLostService = signalLostService;
     this.ws = null;
     this.sessionCookie = null;
     this.reconnectDelay = 5000;
@@ -102,13 +103,18 @@ class TraccarWsClient {
   handleMessage(payload) {
     if (payload.positions && payload.positions.length > 0) {
       payload.positions.forEach(pos => {
-        // Guardar en estado en memoria
         this.fleetState[pos.deviceId] = pos;
 
         console.log(`Posición recibida — Device: ${pos.deviceId} | Lat: ${pos.latitude} | Lon: ${pos.longitude} | Speed: ${pos.speed} km/h`);
-      
+
+        // Evaluar geocercas — RF-ALR-02 y RF-ALR-03
         if (this.geofenceService) {
           this.geofenceService.evaluate(pos);
+        }
+
+        // Registrar señal activa — RF-ALR-05
+        if (this.signalLostService) {
+          this.signalLostService.recordPosition(pos.deviceId);
         }
       });
 
