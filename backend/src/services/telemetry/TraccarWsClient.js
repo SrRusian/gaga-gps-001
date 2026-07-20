@@ -15,7 +15,7 @@ const WebSocket = require('ws');
 const https = require('https');
 
 class TraccarWsClient {
-  constructor({ url, email, password, io, geofenceService, signalLostService, collisionService }) {
+  constructor({ url, email, password, io, geofenceService, signalLostService, collisionService, equipmentManager }) {
     this.url = url;
     this.email = email;
     this.password = password;
@@ -27,6 +27,7 @@ class TraccarWsClient {
     this.reconnectDelay = 5000;
     this.fleetState = {};
     this.collisionService = collisionService;
+    this.equipmentManager = equipmentManager;
   }
 
   // Paso 1: Login en Traccar para obtener cookie de sesión
@@ -121,6 +122,11 @@ class TraccarWsClient {
         // Evaluar anticolisión — RF-ALR-10
         if (this.collisionService) {
           this.collisionService.evaluate(pos, this.fleetState);
+        }
+
+        // Evaluar aproximación a equipo estático — RF-ALR-12
+        if (this.equipmentManager) {
+          this.equipmentManager.evaluate(pos);
         }
       });
 

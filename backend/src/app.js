@@ -7,6 +7,7 @@ const TraccarWsClient = require('./services/telemetry/TraccarWsClient');
 const GeofenceAlertService = require('./services/alerts/GeofenceAlertService');
 const SignalLostService = require('./services/alerts/SignalLostService');
 const CollisionRiskService = require('./services/alerts/CollisionRiskService');
+const StaticEquipmentManager = require('./services/static_equipment/StaticEquipmentManager');
 
 const app = express();
 const server = http.createServer(app);
@@ -20,6 +21,7 @@ const io = new Server(server, {
 const geofenceService = new GeofenceAlertService({ io });
 const signalLostService = new SignalLostService({ io });
 const collisionService = new CollisionRiskService({ io });
+const equipmentManager = new StaticEquipmentManager({ io });
 
 // Geocercas de prueba — comentadas hasta necesitarlas
 /*
@@ -59,7 +61,20 @@ const traccarClient = new TraccarWsClient({
   io,
   geofenceService,
   signalLostService,
-  collisionService
+  collisionService,
+  equipmentManager
+});
+
+// Equipo estático de prueba — pala cerca de las tabletas
+equipmentManager.registerEquipment({
+  id: 'pala-01',
+  name: 'Pala 01',
+  type: 'pala',
+  lat: 19.2540,
+  lon: -103.7166,
+  swingRadius: 10,
+  safetyRadius: 5,
+  status: 'active_swing'
 });
 
 traccarClient.connect();

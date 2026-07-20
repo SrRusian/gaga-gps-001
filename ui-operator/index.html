@@ -494,6 +494,44 @@
         stopSound();
       });
 
+      // Zona exterior de aproximación
+      socket.on("equipment:approach_outer", (data) => {
+        if (data.deviceId === MY_DEVICE_ID) {
+          showWarningAlert(data.message);
+        }
+      });
+
+      // Zona interior — actualiza distancia
+      socket.on("equipment:approach_inner", (data) => {
+        if (data.deviceId === MY_DEVICE_ID) {
+          showWarningAlert(`${data.message} — VELOCIDAD MÁXIMA 5 km/h`);
+          playWarningSound();
+        }
+      });
+
+      // Límite mínimo — detener
+      socket.on("equipment:minimum_limit", (data) => {
+        if (data.deviceId === MY_DEVICE_ID) {
+          showDangerAlert(data.message);
+          playDangerSound(data.loop);
+        }
+      });
+
+      // Actualización de distancia en tiempo real
+      socket.on("equipment:distance_update", (data) => {
+        if (data.deviceId === MY_DEVICE_ID) {
+          console.log(`Distancia a equipo: ${data.distance}m`);
+        }
+      });
+
+      // Salió de la zona
+      socket.on("equipment:approach_clear", (data) => {
+        if (data.deviceId === MY_DEVICE_ID) {
+          clearAlert();
+          stopSound();
+        }
+      });
+
       // Sonidos de alerta
       let dangerAudio = null;
 
