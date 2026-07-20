@@ -6,6 +6,7 @@ const { Server } = require('socket.io');
 const TraccarWsClient = require('./services/telemetry/TraccarWsClient');
 const GeofenceAlertService = require('./services/alerts/GeofenceAlertService');
 const SignalLostService = require('./services/alerts/SignalLostService');
+const CollisionRiskService = require('./services/alerts/CollisionRiskService');
 
 const app = express();
 const server = http.createServer(app);
@@ -18,6 +19,7 @@ const io = new Server(server, {
 // Inicializar servicios
 const geofenceService = new GeofenceAlertService({ io });
 const signalLostService = new SignalLostService({ io });
+const collisionService = new CollisionRiskService({ io });
 
 // Geocercas de prueba — comentadas hasta necesitarlas
 /*
@@ -56,7 +58,8 @@ const traccarClient = new TraccarWsClient({
   password: process.env.TRACCAR_PASSWORD,
   io,
   geofenceService,
-  signalLostService
+  signalLostService,
+  collisionService
 });
 
 traccarClient.connect();

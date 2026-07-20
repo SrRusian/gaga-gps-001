@@ -476,6 +476,24 @@
         console.log(`✅ Vehículo ${data.deviceId} reconectado`);
       });
 
+      // Proximidad entre vehículos — Umbral 1
+      socket.on("collision:proximity", (data) => {
+        showWarningAlert(data.message);
+        playWarningSound();
+      });
+
+      // Colisión inminente — Umbral 2
+      socket.on("collision:critical", (data) => {
+        showDangerAlert(data.message);
+        playDangerSound(data.loop);
+      });
+
+      // Cancelar alerta de colisión
+      socket.on("collision:clear", (data) => {
+        clearAlert();
+        stopSound();
+      });
+
       // Sonidos de alerta
       let dangerAudio = null;
 
