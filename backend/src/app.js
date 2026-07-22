@@ -50,6 +50,11 @@ app.use('/operator', express.static(
   path.join(__dirname, '../../ui-operator')
 ));
 
+// Servir UI del supervisor
+app.use('/supervisor', express.static(
+  path.join(__dirname, '../../ui-supervisor')
+));
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
