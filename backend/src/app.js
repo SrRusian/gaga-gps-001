@@ -9,6 +9,8 @@ const SignalLostService = require('./services/alerts/SignalLostService');
 const CollisionRiskService = require('./services/alerts/CollisionRiskService');
 const StaticEquipmentManager = require('./services/static_equipment/StaticEquipmentManager');
 const PreventiveStopService = require('./services/alerts/PreventiveStopService');
+const fs = require('fs');
+const sqliteParser = require('better-sqlite3');
 
 const app = express();
 const server = http.createServer(app);
@@ -79,6 +81,36 @@ app.post('/api/fleet/resume', (req, res) => {
 // Estado actual
 app.get('/api/fleet/stop/status', (req, res) => {
   res.json(preventiveStopService.getStatus());
+});
+
+// Servir tiles del MBTiles de Alcarazes
+app.get('/tiles/alcaraces/:z/:x/:y.png', (req, res) => {
+  const { z, x, y } = req.params;
+  const zoom = parseInt(z);
+  const tileX = parseInt(x);
+  // Convertir TMS a XYZ
+  const tileY = (2 ** zoom - 1) - parseInt(y);
+
+  try {
+    const db = new sqliteParser(
+      path.join(__dirname, '../../maps/alcaraces.mbtiles'),
+      { readonly: true }
+    );
+    const row = db.prepare(
+      'SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?'
+    ).get(zoom, tileX, tileY);
+    db.close();
+
+    if (row) {
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(Buffer.from(row.tile_data));
+    } else {
+      res.status(404).send('Tile not found');
+    }
+  } catch (err) {
+    res.status(500).send('Error');
+  }
 });
 
 // Iniciar cliente WebSocket de Traccar
