@@ -3,14 +3,14 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
+const Database = require('better-sqlite3');
+
 const TraccarWsClient = require('./services/telemetry/TraccarWsClient');
 const GeofenceAlertService = require('./services/alerts/GeofenceAlertService');
 const SignalLostService = require('./services/alerts/SignalLostService');
 const CollisionRiskService = require('./services/alerts/CollisionRiskService');
 const StaticEquipmentManager = require('./services/static_equipment/StaticEquipmentManager');
 const PreventiveStopService = require('./services/alerts/PreventiveStopService');
-const fs = require('fs');
-const sqliteParser = require('better-sqlite3');
 
 const app = express();
 const server = http.createServer(app);
@@ -20,49 +20,112 @@ const io = new Server(server, {
   transports: ['websocket', 'polling']
 });
 
-// Inicializar servicios — orden importa
-const geofenceService = new GeofenceAlertService({ io });
-const preventiveStopService = new PreventiveStopService({ io }); // ← primero
-const signalLostService = new SignalLostService({ io, preventiveStopService }); // ← después
-const collisionService = new CollisionRiskService({ io });
-const equipmentManager = new StaticEquipmentManager({ io });
-
-// Geocercas de prueba — comentadas hasta necesitarlas
-/*
-geofenceService.addGeofence({
-  id: 'test-warning-1',
-  name: 'Zona Precaución Test',
-  type: 'warning',
-  center: { lat: 19.2539, lon: -103.7166 },
-  radiusMeters: 50
-});
-geofenceService.addGeofence({
-  id: 'test-danger-1',
-  name: 'Zona Peligro Test',
-  type: 'danger',
-  center: { lat: 19.2539, lon: -103.7166 },
-  radiusMeters: 20
-});
-*/
-
 app.use(express.json());
 
-// Servir UI del operador
-app.use('/operator', express.static(
-  path.join(__dirname, '../../ui-operator')
-));
+// ── Servicios de seguridad ─────────────────────────────────────
+const geofenceService      = new GeofenceAlertService({ io });
+const preventiveStopService = new PreventiveStopService({ io });
+const signalLostService    = new SignalLostService({ io, preventiveStopService });
+const collisionService     = new CollisionRiskService({ io });
+const equipmentManager     = new StaticEquipmentManager({ io });
 
-// Servir UI del supervisor
-app.use('/supervisor', express.static(
-  path.join(__dirname, '../../ui-supervisor')
-));
+// ── UI estáticas ───────────────────────────────────────────────
+app.use('/operator',   express.static(path.join(__dirname, '../../ui-operator')));
+app.use('/supervisor', express.static(path.join(__dirname, '../../ui-supervisor')));
+
+// ── Tiles MBTiles ──────────────────────────────────────────────
+let tilesDb = null;
+
+function getTilesDb() {
+  if (tilesDb) return tilesDb;
+  const dbPath = path.join(__dirname, '../../maps/alcaraces.mbtiles');
+  tilesDb = new Database(dbPath, { readonly: true });
+  console.log('✅ MBTiles cargado');
+  return tilesDb;
+}
+
+app.get('/tiles/alcaraces/:z/:x/:y.png', (req, res) => {
+  const zoom  = parseInt(req.params.z);
+  const tileX = parseInt(req.params.x);
+  const tileY = (2 ** zoom - 1) - parseInt(req.params.y);
+
+  try {
+    const db  = getTilesDb();
+    const row = db.prepare(
+      'SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?'
+    ).get(zoom, tileX, tileY);
+
+    if (row) {
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.send(Buffer.from(row.tile_data));
+    } else {
+      res.status(204).send();
+    }
+  } catch (err) {
+    console.error('Error tile:', err.message);
+    res.status(500).send('Error');
+  }
+});
+
+// ── API REST ───────────────────────────────────────────────────
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    services: {
+      traccar: traccarClient?.ws?.readyState === 1 ? 'connected' : 'disconnected',
+      preventiveStop: preventiveStopService.getStatus()
+    }
+  });
 });
 
-// Activar parada preventiva — supervisor
+// Geocercas
+app.get('/api/geofences', (req, res) => {
+  res.json(geofenceService.activeGeofences);
+});
+
+app.post('/api/geofences', (req, res) => {
+  const { id, name, type, center, radiusMeters } = req.body;
+  if (!id || !name || !type || !center || !radiusMeters) {
+    return res.status(400).json({ error: 'Faltan campos requeridos' });
+  }
+  geofenceService.addGeofence({ id, name, type, center, radiusMeters });
+  // Notificar a todos los dispositivos
+  io.emit('geofences:update', geofenceService.activeGeofences);
+  res.json({ success: true, geofence: { id, name, type, center, radiusMeters } });
+});
+
+app.delete('/api/geofences/:id', (req, res) => {
+  geofenceService.removeGeofence(req.params.id);
+  io.emit('geofences:update', geofenceService.activeGeofences);
+  res.json({ success: true });
+});
+
+// Equipos estáticos
+app.get('/api/equipment', (req, res) => {
+  res.json(Object.values(equipmentManager.equipment));
+});
+
+app.post('/api/equipment', (req, res) => {
+  const eq = req.body;
+  if (!eq.id || !eq.name || !eq.lat || !eq.lon) {
+    return res.status(400).json({ error: 'Faltan campos requeridos' });
+  }
+  equipmentManager.registerEquipment(eq);
+  res.json({ success: true });
+});
+
+app.patch('/api/equipment/:id/status', (req, res) => {
+  const { status } = req.body;
+  equipmentManager.updateStatus(req.params.id, status);
+  res.json({ success: true });
+});
+
+// Parada preventiva
 app.post('/api/fleet/stop', (req, res) => {
   const { reason } = req.body;
   preventiveStopService.activate(
@@ -72,52 +135,20 @@ app.post('/api/fleet/stop', (req, res) => {
   res.json({ success: true, status: preventiveStopService.getStatus() });
 });
 
-// Desactivar parada preventiva — solo supervisor
 app.post('/api/fleet/resume', (req, res) => {
   preventiveStopService.deactivate('supervisor');
   res.json({ success: true, status: preventiveStopService.getStatus() });
 });
 
-// Estado actual
 app.get('/api/fleet/stop/status', (req, res) => {
   res.json(preventiveStopService.getStatus());
 });
 
-// Servir tiles del MBTiles de Alcarazes
-app.get('/tiles/alcaraces/:z/:x/:y.png', (req, res) => {
-  const { z, x, y } = req.params;
-  const zoom = parseInt(z);
-  const tileX = parseInt(x);
-  // Convertir TMS a XYZ
-  const tileY = (2 ** zoom - 1) - parseInt(y);
-
-  try {
-    const db = new sqliteParser(
-      path.join(__dirname, '../../maps/alcaraces.mbtiles'),
-      { readonly: true }
-    );
-    const row = db.prepare(
-      'SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?'
-    ).get(zoom, tileX, tileY);
-    db.close();
-
-    if (row) {
-      res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      res.send(Buffer.from(row.tile_data));
-    } else {
-      res.status(404).send('Tile not found');
-    }
-  } catch (err) {
-    res.status(500).send('Error');
-  }
-});
-
-// Iniciar cliente WebSocket de Traccar
+// ── Socket.io ──────────────────────────────────────────────────
 const traccarClient = new TraccarWsClient({
-  url: process.env.TRACCAR_WS_URL,
-  email: process.env.TRACCAR_EMAIL,
-  password: process.env.TRACCAR_PASSWORD,
+  url:              process.env.TRACCAR_WS_URL,
+  email:            process.env.TRACCAR_EMAIL,
+  password:         process.env.TRACCAR_PASSWORD,
   io,
   geofenceService,
   signalLostService,
@@ -125,24 +156,9 @@ const traccarClient = new TraccarWsClient({
   equipmentManager
 });
 
-// Equipo estático de prueba — pala cerca de las tabletas
-equipmentManager.registerEquipment({
-  id: 'pala-01',
-  name: 'Pala 01',
-  type: 'pala',
-  lat: 19.2540,
-  lon: -103.7166,
-  swingRadius: 10,
-  safetyRadius: 5,
-  status: 'active_swing'
-});
-
 traccarClient.connect();
-
-// Iniciar monitoreo de señal
 signalLostService.startMonitoring();
 
-// Cuando un cliente se conecta
 io.on('connection', (socket) => {
   console.log(`✅ Cliente conectado: ${socket.id}`);
 
@@ -153,10 +169,12 @@ io.on('connection', (socket) => {
       positions: Object.values(currentFleet),
       timestamp: new Date().toISOString()
     });
-    console.log(`📡 Estado actual enviado: ${Object.keys(currentFleet).length} vehículos`);
   }
 
-  // Enviar alertas activas de geocerca
+  // Enviar geocercas activas
+  socket.emit('geofences:update', geofenceService.activeGeofences);
+
+  // Enviar alertas activas
   const activeAlerts = geofenceService.getActiveAlerts();
   Object.entries(activeAlerts).forEach(([deviceId, severity]) => {
     if (severity === 'danger') {
@@ -177,12 +195,28 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Enviar estado de parada preventiva
+  const stopStatus = preventiveStopService.getStatus();
+  if (stopStatus.isActive) {
+    socket.emit('fleet:preventive_stop', {
+      active: true,
+      reason: stopStatus.reason,
+      message: 'ALTO TOTAL — DETENGA EL VEHÍCULO INMEDIATAMENTE Y REPORTE A CENTRAL POR RADIO',
+      loop: true,
+      timestamp: new Date().toISOString()
+    });
+  }
+
   socket.on('disconnect', () => {
     console.log(`❌ Cliente desconectado: ${socket.id}`);
   });
 });
 
+// ── Servidor ───────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Backend GAGA-GPS corriendo en puerto ${PORT}`);
+  console.log(`🚀 Backend GAGA-GPS v1.0 corriendo en puerto ${PORT}`);
+  console.log(`   Operador:   http://localhost:${PORT}/operator`);
+  console.log(`   Supervisor: http://localhost:${PORT}/supervisor`);
+  console.log(`   Health:     http://localhost:${PORT}/health`);
 });

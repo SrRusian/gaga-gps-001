@@ -300,13 +300,38 @@
             },
           ],
         },
-        center: [-103.7166, 19.2539],
-        zoom: 17,
+        center: [-103.56464, 19.35339],
+        zoom: 16,
       });
 
       map.on("load", () => {
         mapInitialized = true;
-        console.log("Mapa inicializado");
+
+        // Capa de ortofoto Alcarazes
+        map.addSource("alcaraces", {
+          type: "raster",
+          tiles: ["http://localhost:3001/tiles/alcaraces/{z}/{x}/{y}.png"],
+          tileSize: 256,
+          minzoom: 14,
+          maxzoom: 18,
+          bounds: [-103.572389, 19.352392, -103.559898, 19.35939],
+        });
+
+        map.addLayer({
+          id: "alcaraces-layer",
+          type: "raster",
+          source: "alcaraces",
+          minzoom: 15, // solo mostrar en zoom 15+
+          maxzoom: 18,
+          paint: {
+            "raster-opacity": 0.85,
+            "raster-opacity-transition": {
+              duration: 300, // fade suave al entrar/salir
+            },
+          },
+        });
+
+        console.log("Mapa con ortofoto Alcarazes inicializado");
       });
 
       // ─── CONECTAR A SOCKET.IO ──────────────────────────────────
