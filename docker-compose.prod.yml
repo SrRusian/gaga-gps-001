@@ -1,0 +1,17 @@
+services:
+  gaga-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gaga-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.production
+    networks:
+      - traccar_default
+    ports:
+      - "3001:3001"
+
+networks:
+  traccar_default:
+    external: true
