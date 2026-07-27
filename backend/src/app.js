@@ -30,15 +30,15 @@ const collisionService     = new CollisionRiskService({ io });
 const equipmentManager     = new StaticEquipmentManager({ io });
 
 // ── UI estáticas ───────────────────────────────────────────────
-app.use('/operator',   express.static(path.join(__dirname, '../../ui-operator')));
-app.use('/supervisor', express.static(path.join(__dirname, '../../ui-supervisor')));
+app.use('/operator',   express.static(path.join(__dirname, '../ui-operator')));
+app.use('/supervisor', express.static(path.join(__dirname, '../ui-supervisor')));
 
 // ── Tiles MBTiles ──────────────────────────────────────────────
 let tilesDb = null;
 
 function getTilesDb() {
   if (tilesDb) return tilesDb;
-  const dbPath = path.join(__dirname, '../../maps/alcaraces.mbtiles');
+  const dbPath = path.join(__dirname, '../maps/alcaraces.mbtiles');
   tilesDb = new Database(dbPath, { readonly: true });
   console.log('✅ MBTiles cargado');
   return tilesDb;
