@@ -66,10 +66,58 @@ class TraccarWsClient {
     });
   }
 
+  async fetchInitialPositions() {
+    return new Promise((resolve, reject) => {
+      const traccarUrl = new URL(
+        this.url.replace('ws://', 'http://').replace('wss://', 'https://')
+      );
+      const options = {
+        hostname: traccarUrl.hostname,
+        port: traccarUrl.port || 8082,
+        path: '/api/positions',
+        method: 'GET',
+        headers: { Cookie: this.sessionCookie }
+      };
+      const req = require('http').request(options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const positions = JSON.parse(data);
+            positions.forEach(pos => {
+              this.fleetState[pos.deviceId] = pos;
+              console.log(`Posición inicial — Device: ${pos.deviceId} | Lat: ${pos.latitude} | Lon: ${pos.longitude}`);
+            });
+            // Distribuir al frontend
+            if (positions.length > 0) {
+              this.io.emit('fleet:update', {
+                positions,
+                timestamp: new Date().toISOString()
+              });
+            }
+            resolve(positions);
+          } catch (e) {
+            resolve([]);
+          }
+        });
+      });
+      req.on('error', () => resolve([]));
+      req.end();
+    });
+  }
+
+  startPolling() {
+    setInterval(async () => {
+      await this.fetchInitialPositions();
+    }, 2000);
+  }
+
   // Paso 2: Conectar al WebSocket con la cookie
   async connect() {
     try {
       await this.login();
+       await this.fetchInitialPositions();
+       this.startPolling();
 
       const wsUrl = `${this.url}/api/socket`;
       console.log(`Conectando a Traccar WebSocket: ${wsUrl}`);
