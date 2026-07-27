@@ -87,7 +87,12 @@ class TraccarWsClient {
             positions.forEach(pos => {
               this.fleetState[pos.deviceId] = pos;
               console.log(`Posición inicial — Device: ${pos.deviceId} | Lat: ${pos.latitude} | Lon: ${pos.longitude}`);
+            
+              if (this.signalLostService) {
+                this.signalLostService.recordPosition(pos.deviceId);
+              }
             });
+
             // Distribuir al frontend
             if (positions.length > 0) {
               this.io.emit('fleet:update', {
