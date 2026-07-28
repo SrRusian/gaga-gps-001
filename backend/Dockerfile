@@ -10,6 +10,7 @@ RUN npm install --omit=dev
 COPY backend/ ./
 COPY ui-operator/ ./ui-operator/
 COPY ui-supervisor/ ./ui-supervisor/
+COPY ui-admin/ ./ui-admin/
 COPY maps/ ./maps/
 
 EXPOSE 3001
