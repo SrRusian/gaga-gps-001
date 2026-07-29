@@ -42,20 +42,22 @@ class GeofenceRepository {
    *   - name, type ('warning'|'danger')
    *   - circle: centerLat, centerLon, radiusMeters
    *   - polygon: geometry (GeoJSON Polygon)
-   *   - polyline: geometry (GeoJSON LineString), corridorWidthMeters
+   *   - polyline: geometry (GeoJSON LineString), corridorWidthMeters,
+   *     corridorDangerMarginMeters (opcional — ver getCorridorSeverity)
    */
-  async create({ name, type, shapeType = 'circle', centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters }) {
+  async create({ name, type, shapeType = 'circle', centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters, corridorDangerMarginMeters }) {
     try {
       const { rows } = await query(
         `INSERT INTO geofences
-           (name, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           (name, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, corridor_danger_margin_meters)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          RETURNING *`,
         [
           name, type, shapeType,
           centerLat ?? null, centerLon ?? null, radiusMeters ?? null,
           geometry ? JSON.stringify(geometry) : null,
-          corridorWidthMeters ?? null
+          corridorWidthMeters ?? null,
+          corridorDangerMarginMeters ?? null
         ]
       );
       return rows[0];
@@ -65,18 +67,33 @@ class GeofenceRepository {
     }
   }
 
-  async update(id, { name, type, centerLat, centerLon, radiusMeters, active }) {
+  /**
+   * Edita una geocerca existente — no cambia su forma (shape_type),
+   * solo sus parámetros: nombre/tipo/estado siempre, y según la
+   * forma: radio y centro (círculo), geometría (polígono/ruta),
+   * ancho y margen de peligro (ruta).
+   */
+  async update(id, { name, type, active, centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters, corridorDangerMarginMeters }) {
     try {
       const { rows } = await query(
         `UPDATE geofences SET
            name = COALESCE($2, name),
            type = COALESCE($3, type),
-           center_lat = COALESCE($4, center_lat),
-           center_lon = COALESCE($5, center_lon),
-           radius_meters = COALESCE($6, radius_meters),
-           active = COALESCE($7, active)
+           active = COALESCE($4, active),
+           center_lat = COALESCE($5, center_lat),
+           center_lon = COALESCE($6, center_lon),
+           radius_meters = COALESCE($7, radius_meters),
+           geometry = COALESCE($8, geometry),
+           corridor_width_meters = COALESCE($9, corridor_width_meters),
+           corridor_danger_margin_meters = COALESCE($10, corridor_danger_margin_meters)
          WHERE id = $1 RETURNING *`,
-        [id, name, type, centerLat, centerLon, radiusMeters, active]
+        [
+          id, name, type, active,
+          centerLat ?? null, centerLon ?? null, radiusMeters ?? null,
+          geometry ? JSON.stringify(geometry) : null,
+          corridorWidthMeters ?? null,
+          corridorDangerMarginMeters ?? null
+        ]
       );
       return rows[0] || null;
     } catch (err) {
@@ -113,7 +130,12 @@ class GeofenceRepository {
       return { ...base, center: { lat: row.center_lat, lon: row.center_lon }, radiusMeters: row.radius_meters };
     }
     if (base.shapeType === 'polyline') {
-      return { ...base, geometry: row.geometry, corridorWidthMeters: row.corridor_width_meters };
+      return {
+        ...base,
+        geometry: row.geometry,
+        corridorWidthMeters: row.corridor_width_meters,
+        corridorDangerMarginMeters: row.corridor_danger_margin_meters
+      };
     }
     // polygon
     return { ...base, geometry: row.geometry };

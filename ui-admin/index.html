@@ -245,9 +245,11 @@
                 <input id="geo-lat" placeholder="Lat" readonly />
                 <input id="geo-lon" placeholder="Lon" readonly />
                 <input id="geo-radius" placeholder="Radio (m)" type="number" />
-                <input id="geo-corridor" placeholder="Ancho corredor (m)" type="number" style="display:none;" />
-                <button class="btn btn-sm" onclick="createGeofence()">Crear</button>
+                <input id="geo-corridor" placeholder="Ancho seguro (m)" type="number" style="display:none;" />
+                <input id="geo-corridor-margin" placeholder="Margen advertencia (m)" type="number" style="display:none;" />
+                <button class="btn btn-sm" onclick="createGeofence()" id="btn-save-geofence">Crear</button>
                 <button class="btn btn-sm btn-danger" onclick="cancelDrawing()" id="btn-cancel-draw" style="display:none;">Cancelar dibujo</button>
+                <button class="btn btn-sm" onclick="cancelEditGeofence()" id="btn-cancel-edit" style="display:none;width:auto;">Cancelar edición</button>
               </div>
               <div class="form-row">
                 <button class="btn btn-sm" onclick="exportGeofences('geojson')">⬇️ Exportar GeoJSON</button>
@@ -577,6 +579,7 @@
         currentShape = document.getElementById('geo-shape').value;
         document.getElementById('geo-radius').style.display = currentShape === 'circle' ? '' : 'none';
         document.getElementById('geo-corridor').style.display = currentShape === 'polyline' ? '' : 'none';
+        document.getElementById('geo-corridor-margin').style.display = currentShape === 'polyline' ? '' : 'none';
         document.getElementById('shape-hint').textContent =
           currentShape === 'circle' ? 'Clic en el mapa para fijar el centro.' :
           currentShape === 'polygon' ? 'Dibuje el polígono en el mapa (clic para cada vértice, doble clic para terminar).' :
@@ -596,24 +599,33 @@
       }
 
       /**
-       * Dibuja en el mapa las geocercas ya creadas — los círculos se
-       * aproximan visualmente como un polígono de muchos lados (solo
-       * para representación, el radio real sigue siendo la fuente de
-       * verdad en la base de datos).
+       * Dibuja en el mapa las geocercas ya creadas:
+       *  - círculo → polígono aproximado de 32 lados (solo visual)
+       *  - polígono → geometría real tal cual
+       *  - ruta/corredor → dos anillos de buffer en metros reales:
+       *    uno interior (zona segura, corridorWidthMeters) y uno
+       *    exterior (zona de advertencia, + corridorDangerMarginMeters)
+       *    — todo lo que quede fuera del exterior es zona de peligro.
        */
       function renderExistingGeofences(geofencesCache) {
         if (!map.isStyleLoaded()) { map.once('idle', () => renderExistingGeofences(geofencesCache)); return; }
 
-        const features = (geofencesCache || window.__lastGeofences || []).map(g => {
+        const features = [];
+        (geofencesCache || window.__lastGeofences || []).forEach(g => {
           const color = g.type === 'danger' ? '#ff4444' : '#ffcc00';
+
           if (g.shape_type === 'polygon') {
-            return { type: 'Feature', properties: { color }, geometry: g.geometry };
+            features.push({ type: 'Feature', properties: { color, kind: 'zone' }, geometry: g.geometry });
+          } else if (g.shape_type === 'polyline') {
+            const outerWidth = g.corridor_width_meters + (g.corridor_danger_margin_meters || 0);
+            if (g.corridor_danger_margin_meters) {
+              features.push({ type: 'Feature', properties: { color: '#ffcc00', kind: 'corridor-warning' }, geometry: lineToBufferPolygon(g.geometry, outerWidth) });
+            }
+            features.push({ type: 'Feature', properties: { color: '#00ff88', kind: 'corridor-safe' }, geometry: lineToBufferPolygon(g.geometry, g.corridor_width_meters) });
+          } else {
+            // círculo → polígono aproximado de 32 lados para visualizar
+            features.push({ type: 'Feature', properties: { color, kind: 'zone' }, geometry: circleToPolygon(g.center_lat, g.center_lon, g.radius_meters) });
           }
-          if (g.shape_type === 'polyline') {
-            return { type: 'Feature', properties: { color }, geometry: g.geometry };
-          }
-          // circle → polígono aproximado de 32 lados para visualizar
-          return { type: 'Feature', properties: { color }, geometry: circleToPolygon(g.center_lat, g.center_lon, g.radius_meters) };
         });
 
         const geojson = { type: 'FeatureCollection', features };
@@ -624,8 +636,7 @@
           map.addSource('geofences-preview', { type: 'geojson', data: geojson });
           map.addLayer({
             id: 'geofences-fill', type: 'fill', source: 'geofences-preview',
-            filter: ['==', ['geometry-type'], 'Polygon'],
-            paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.2 }
+            paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.25 }
           });
           map.addLayer({
             id: 'geofences-line', type: 'line', source: 'geofences-preview',
@@ -645,6 +656,38 @@
         return { type: 'Polygon', coordinates: [coords] };
       }
 
+      /**
+       * Genera un polígono "cinta" alrededor de una polilínea con un
+       * ancho real en metros a cada lado (halfWidthMeters), para que
+       * el corredor se vea con su tamaño real sin importar el zoom
+       * (a diferencia de line-width en píxeles, que no escala con
+       * metros reales del mundo).
+       */
+      function lineToBufferPolygon(lineGeometry, halfWidthMeters) {
+        const coords = lineGeometry.coordinates;
+        const left = [], right = [];
+
+        for (let i = 0; i < coords.length; i++) {
+          const [lon, lat] = coords[i];
+          const prev = coords[i - 1] || coords[i];
+          const next = coords[i + 1] || coords[i];
+          const latRad = lat * Math.PI / 180;
+          const mPerLat = 111320;
+          const mPerLon = 111320 * Math.cos(latRad);
+          const dx = (next[0] - prev[0]) * mPerLon;
+          const dy = (next[1] - prev[1]) * mPerLat;
+          const len = Math.sqrt(dx * dx + dy * dy) || 1;
+          const perpX = -dy / len, perpY = dx / len;
+          const offLon = (perpX * halfWidthMeters) / mPerLon;
+          const offLat = (perpY * halfWidthMeters) / mPerLat;
+          left.push([lon + offLon, lat + offLat]);
+          right.push([lon - offLon, lat - offLat]);
+        }
+
+        const ring = [...left, ...right.reverse(), left[0]];
+        return { type: 'Polygon', coordinates: [ring] };
+      }
+
       async function loadGeofences() {
         const geofences = await api('/api/geofences');
         window.__lastGeofences = geofences;
@@ -652,26 +695,76 @@
 
         document.getElementById('geofences-table').innerHTML = geofences.map(g => {
           const detail = g.shape_type === 'circle' ? `Radio: ${g.radius_meters}m`
-            : g.shape_type === 'polyline' ? `Corredor: ${g.corridor_width_meters}m`
+            : g.shape_type === 'polyline' ? `Seguro: ${g.corridor_width_meters}m${g.corridor_danger_margin_meters ? ' + ' + g.corridor_danger_margin_meters + 'm adv.' : ''}`
             : `${g.geometry?.coordinates?.[0]?.length || 0} vértices`;
           return `
           <tr>
             <td>${g.name}</td><td>${g.type}</td><td>${g.shape_type}</td><td>${detail}</td>
-            <td><button class="btn btn-sm btn-danger" onclick="deleteGeofence(${g.id})">Eliminar</button></td>
+            <td>
+              <button class="btn btn-sm" onclick="editGeofence(${g.id})">Editar</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteGeofence(${g.id})">Eliminar</button>
+            </td>
           </tr>`;
         }).join('');
+      }
+
+      let editingGeofenceId = null;
+
+      function editGeofence(id) {
+        const g = (window.__lastGeofences || []).find(x => x.id === id);
+        if (!g) return;
+
+        editingGeofenceId = id;
+        document.getElementById('geo-name').value = g.name;
+        document.getElementById('geo-type').value = g.type;
+        document.getElementById('geo-shape').value = g.shape_type;
+        document.getElementById('geo-shape').disabled = true; // no se cambia la forma al editar
+        onShapeChange();
+
+        draw.deleteAll();
+        if (g.shape_type === 'circle') {
+          selectedCenter = { lat: g.center_lat, lon: g.center_lon };
+          document.getElementById('geo-lat').value = g.center_lat.toFixed(6);
+          document.getElementById('geo-lon').value = g.center_lon.toFixed(6);
+          document.getElementById('geo-radius').value = g.radius_meters;
+          if (marker) marker.remove();
+          marker = new maplibregl.Marker().setLngLat([g.center_lon, g.center_lat]).addTo(map);
+          map.flyTo({ center: [g.center_lon, g.center_lat], zoom: 15 });
+        } else {
+          draw.add({ type: 'Feature', properties: {}, geometry: g.geometry });
+          if (g.shape_type === 'polyline') {
+            document.getElementById('geo-corridor').value = g.corridor_width_meters;
+            document.getElementById('geo-corridor-margin').value = g.corridor_danger_margin_meters || '';
+          }
+        }
+
+        document.getElementById('btn-save-geofence').textContent = 'Guardar cambios';
+        document.getElementById('btn-cancel-edit').style.display = '';
+      }
+
+      function cancelEditGeofence() {
+        editingGeofenceId = null;
+        document.getElementById('geo-shape').disabled = false;
+        document.getElementById('geo-name').value = '';
+        document.getElementById('geo-corridor-margin').value = '';
+        document.getElementById('btn-save-geofence').textContent = 'Crear';
+        document.getElementById('btn-cancel-edit').style.display = 'none';
+        draw.deleteAll();
       }
 
       async function createGeofence() {
         const name = document.getElementById('geo-name').value;
         const type = document.getElementById('geo-type').value;
+        const isEditing = !!editingGeofenceId;
+        const method = isEditing ? 'PATCH' : 'POST';
+        const url = isEditing ? `/api/geofences/${editingGeofenceId}` : '/api/geofences';
 
         try {
           if (currentShape === 'circle') {
             const radiusMeters = parseFloat(document.getElementById('geo-radius').value);
             if (!name || !selectedCenter || !radiusMeters) return alert('Complete nombre, centro (clic en mapa) y radio');
-            await api('/api/geofences', {
-              method: 'POST',
+            await api(url, {
+              method,
               body: JSON.stringify({ name, type, shapeType: 'circle', centerLat: selectedCenter.lat, centerLon: selectedCenter.lon, radiusMeters })
             });
           } else {
@@ -681,15 +774,17 @@
 
             if (currentShape === 'polygon') {
               if (!name) return alert('Complete el nombre');
-              await api('/api/geofences', { method: 'POST', body: JSON.stringify({ name, type, shapeType: 'polygon', geometry }) });
+              await api(url, { method, body: JSON.stringify({ name, type, shapeType: 'polygon', geometry }) });
             } else {
               const corridorWidthMeters = parseFloat(document.getElementById('geo-corridor').value);
-              if (!name || !corridorWidthMeters) return alert('Complete nombre y ancho del corredor');
-              await api('/api/geofences', { method: 'POST', body: JSON.stringify({ name, type, shapeType: 'polyline', geometry, corridorWidthMeters }) });
+              const corridorDangerMarginMeters = parseFloat(document.getElementById('geo-corridor-margin').value) || null;
+              if (!name || !corridorWidthMeters) return alert('Complete nombre y ancho seguro del corredor');
+              await api(url, { method, body: JSON.stringify({ name, type, shapeType: 'polyline', geometry, corridorWidthMeters, corridorDangerMarginMeters }) });
             }
           }
 
-          draw.deleteAll();
+          if (isEditing) cancelEditGeofence();
+          else draw.deleteAll();
           document.getElementById('geo-name').value = '';
           loadGeofences();
         } catch (err) {

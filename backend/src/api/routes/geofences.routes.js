@@ -31,7 +31,7 @@ function buildGeofencesRouter({ geofenceRepo, geofenceService, socketServer }) {
 
   router.post('/', async (req, res) => {
     try {
-      const { name, type, shapeType = 'circle', centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters } = req.body;
+      const { name, type, shapeType = 'circle', centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters, corridorDangerMarginMeters } = req.body;
 
       if (!name || !type) {
         return res.status(400).json({ error: 'name y type son requeridos' });
@@ -43,7 +43,7 @@ function buildGeofencesRouter({ geofenceRepo, geofenceService, socketServer }) {
       }
 
       const geofence = await geofenceRepo.create({
-        name, type, shapeType, centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters
+        name, type, shapeType, centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters, corridorDangerMarginMeters
       });
 
       // Reflejar en memoria para evaluación en tiempo real (GeofenceAlertService)
@@ -54,6 +54,31 @@ function buildGeofencesRouter({ geofenceRepo, geofenceService, socketServer }) {
     } catch (err) {
       console.error('❌ geofences.routes POST /:', err.message);
       res.status(500).json({ error: 'Error creando geocerca' });
+    }
+  });
+
+  router.patch('/:id', async (req, res) => {
+    try {
+      const { name, type, active, centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters, corridorDangerMarginMeters } = req.body;
+
+      const geofence = await geofenceRepo.update(req.params.id, {
+        name, type, active, centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters, corridorDangerMarginMeters
+      });
+      if (!geofence) return res.status(404).json({ error: 'Geocerca no encontrada' });
+
+      // Reflejar el cambio en memoria y notificar en vivo a
+      // Operador/Supervisor (misma mecánica que crear/eliminar)
+      if (geofence.active) {
+        geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(geofence));
+      } else {
+        geofenceService.removeGeofence(geofence.id);
+      }
+      socketServer.broadcast('geofences:update', geofenceService.activeGeofences);
+
+      res.json(geofence);
+    } catch (err) {
+      console.error('❌ geofences.routes PATCH /:id:', err.message);
+      res.status(500).json({ error: 'Error actualizando geocerca' });
     }
   });
 

@@ -537,6 +537,69 @@
         updateConnectionStatus(false);
       });
 
+      // ─── GEOCERCAS — renderizadas en vivo ──────────────────────
+      function circleToPolygon(lat, lon, radiusMeters, points = 32) {
+        const coords = [];
+        for (let i = 0; i <= points; i++) {
+          const angle = (i / points) * 2 * Math.PI;
+          const dLat = (radiusMeters / 111320) * Math.cos(angle);
+          const dLon = (radiusMeters / (111320 * Math.cos(lat * Math.PI / 180))) * Math.sin(angle);
+          coords.push([lon + dLon, lat + dLat]);
+        }
+        return { type: "Polygon", coordinates: [coords] };
+      }
+
+      function lineToBufferPolygon(lineGeometry, halfWidthMeters) {
+        const coords = lineGeometry.coordinates;
+        const left = [], right = [];
+        for (let i = 0; i < coords.length; i++) {
+          const [lon, lat] = coords[i];
+          const prev = coords[i - 1] || coords[i];
+          const next = coords[i + 1] || coords[i];
+          const latRad = lat * Math.PI / 180;
+          const mPerLat = 111320, mPerLon = 111320 * Math.cos(latRad);
+          const dx = (next[0] - prev[0]) * mPerLon, dy = (next[1] - prev[1]) * mPerLat;
+          const len = Math.sqrt(dx * dx + dy * dy) || 1;
+          const perpX = -dy / len, perpY = dx / len;
+          const offLon = (perpX * halfWidthMeters) / mPerLon, offLat = (perpY * halfWidthMeters) / mPerLat;
+          left.push([lon + offLon, lat + offLat]);
+          right.push([lon - offLon, lat - offLat]);
+        }
+        return { type: "Polygon", coordinates: [[...left, ...right.reverse(), left[0]]] };
+      }
+
+      function renderGeofences(geofences) {
+        if (!map.isStyleLoaded()) { map.once("idle", () => renderGeofences(geofences)); return; }
+
+        const features = [];
+        (geofences || []).forEach((g) => {
+          const shape = g.shapeType || "circle";
+          const color = g.type === "danger" ? "#ff4444" : "#ffcc00";
+          if (shape === "polygon") {
+            features.push({ type: "Feature", properties: { color }, geometry: g.geometry });
+          } else if (shape === "polyline") {
+            const margin = g.corridorDangerMarginMeters;
+            if (margin) {
+              features.push({ type: "Feature", properties: { color: "#ffcc00" }, geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters + margin) });
+            }
+            features.push({ type: "Feature", properties: { color: "#00ff88" }, geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters) });
+          } else {
+            features.push({ type: "Feature", properties: { color }, geometry: circleToPolygon(g.center.lat, g.center.lon, g.radiusMeters) });
+          }
+        });
+
+        const geojson = { type: "FeatureCollection", features };
+        if (map.getSource("geofences-preview")) {
+          map.getSource("geofences-preview").setData(geojson);
+        } else {
+          map.addSource("geofences-preview", { type: "geojson", data: geojson });
+          map.addLayer({ id: "geofences-fill", type: "fill", source: "geofences-preview", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.25 } });
+          map.addLayer({ id: "geofences-line", type: "line", source: "geofences-preview", paint: { "line-color": ["get", "color"], "line-width": 2 } });
+        }
+      }
+
+      socket.on("geofences:update", (geofences) => renderGeofences(geofences));
+
       // ─── RECIBIR POSICIONES DE LA FLOTA ───────────────────────
       socket.on("fleet:update", (data) => {
         data.positions.forEach((pos) => {

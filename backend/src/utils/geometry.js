@@ -140,10 +140,36 @@ function isInsideGeofence(lat, lon, geofence) {
   }
 }
 
+/**
+ * Severidad progresiva para rutas/corredores — a diferencia de
+ * círculo/polígono (dentro/fuera binario), una ruta autorizada
+ * necesita advertir ANTES de salirse por completo:
+ *   distancia <= corridorWidthMeters                      → null (dentro, sin alerta)
+ *   corridorWidthMeters < distancia <= +dangerMargin       → 'warning'
+ *   distancia > corridorWidthMeters + dangerMargin         → 'danger'
+ *
+ * Si no se configuró corridorDangerMarginMeters, se comporta como
+ * binario (warning = salió del corredor, sin escalar a danger).
+ *
+ * @returns {null | 'warning' | 'danger'}
+ */
+function getCorridorSeverity(lat, lon, geofence) {
+  const distance = distancePointToLineMeters(lat, lon, geofence.geometry);
+
+  if (distance <= geofence.corridorWidthMeters) return null;
+
+  const dangerMargin = geofence.corridorDangerMarginMeters;
+  if (dangerMargin && distance > geofence.corridorWidthMeters + dangerMargin) {
+    return 'danger';
+  }
+  return 'warning';
+}
+
 module.exports = {
   haversineDistance,
   isPointInPolygon,
   distancePointToSegmentMeters,
   distancePointToLineMeters,
-  isInsideGeofence
+  isInsideGeofence,
+  getCorridorSeverity
 };

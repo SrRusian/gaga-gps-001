@@ -17,7 +17,7 @@
  *               RF-ALR-04 (notificación a supervisor)
  */
 
-const { isInsideGeofence } = require('../../utils/geometry');
+const { isInsideGeofence, getCorridorSeverity } = require('../../utils/geometry');
 
 class GeofenceAlertService {
 
@@ -73,21 +73,26 @@ class GeofenceAlertService {
     let triggeredGeofence = null;
 
     // Evaluar contra cada geocerca activa — funciona igual para
-    // círculo, polígono o polilínea/corredor (ver geometry.js)
+    // círculo, polígono o polilínea/corredor (ver geometry.js).
+    // Para rutas (polyline), la severidad es progresiva según
+    // distancia al eje (dentro del corredor → sin alerta, cerca del
+    // borde → warning, fuera del margen → danger), no un tipo fijo.
     for (const geofence of this.activeGeofences) {
-      const inside = isInsideGeofence(latitude, longitude, geofence);
+      let severity = null;
 
-      if (inside) {
-        // Vehículo dentro de esta geocerca
-        // 'danger' tiene prioridad sobre 'warning'
-        if (geofence.type === 'danger') {
-          maxSeverity = 'danger';
-          triggeredGeofence = geofence;
-          break; // danger es máxima prioridad, no seguir evaluando
-        } else if (geofence.type === 'warning' && maxSeverity !== 'danger') {
-          maxSeverity = 'warning';
-          triggeredGeofence = geofence;
-        }
+      if (geofence.shapeType === 'polyline') {
+        severity = getCorridorSeverity(latitude, longitude, geofence);
+      } else if (isInsideGeofence(latitude, longitude, geofence)) {
+        severity = geofence.type === 'danger' ? 'danger' : 'warning';
+      }
+
+      if (severity === 'danger') {
+        maxSeverity = 'danger';
+        triggeredGeofence = geofence;
+        break; // danger es máxima prioridad, no seguir evaluando
+      } else if (severity === 'warning' && maxSeverity !== 'danger') {
+        maxSeverity = 'warning';
+        triggeredGeofence = geofence;
       }
     }
 
