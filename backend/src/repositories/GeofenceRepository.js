@@ -1,7 +1,10 @@
 /**
  * GeofenceRepository.js
  *
- * Responsabilidad: CRUD de geocercas en PostgreSQL.
+ * Responsabilidad: CRUD de geocercas en PostgreSQL — soporta tres
+ * formas: círculo (compatibilidad original), polígono y polilínea
+ * (ruta/corredor autorizado). Ver db/migrations/003_geofence_shapes.sql.
+ *
  * Sustituye la gestión en memoria — GeofenceAlertService sigue
  * evaluando en memoria, pero su lista se hidrata desde aquí.
  */
@@ -22,12 +25,38 @@ class GeofenceRepository {
     }
   }
 
-  async create({ name, type, centerLat, centerLon, radiusMeters }) {
+  async findById(id) {
+    try {
+      const { rows } = await query('SELECT * FROM geofences WHERE id = $1', [id]);
+      return rows[0] || null;
+    } catch (err) {
+      console.error('❌ GeofenceRepository.findById:', err.message);
+      throw err;
+    }
+  }
+
+  /**
+   * Crea una geocerca de cualquier forma.
+   * @param {Object} params
+   *   - shapeType: 'circle' | 'polygon' | 'polyline' (default 'circle')
+   *   - name, type ('warning'|'danger')
+   *   - circle: centerLat, centerLon, radiusMeters
+   *   - polygon: geometry (GeoJSON Polygon)
+   *   - polyline: geometry (GeoJSON LineString), corridorWidthMeters
+   */
+  async create({ name, type, shapeType = 'circle', centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters }) {
     try {
       const { rows } = await query(
-        `INSERT INTO geofences (name, type, center_lat, center_lon, radius_meters)
-         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [name, type, centerLat, centerLon, radiusMeters]
+        `INSERT INTO geofences
+           (name, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         RETURNING *`,
+        [
+          name, type, shapeType,
+          centerLat ?? null, centerLon ?? null, radiusMeters ?? null,
+          geometry ? JSON.stringify(geometry) : null,
+          corridorWidthMeters ?? null
+        ]
       );
       return rows[0];
     } catch (err) {
@@ -65,6 +94,31 @@ class GeofenceRepository {
       throw err;
     }
   }
+
+  /**
+   * Convierte una fila de PostgreSQL al formato en memoria que
+   * espera GeofenceAlertService.addGeofence() — un único lugar
+   * para esta conversión, usado tanto al hidratar al arrancar
+   * (app.js) como al crear una geocerca vía API (geofences.routes.js).
+   */
+  static toMemoryFormat(row) {
+    const base = {
+      id: row.id,
+      name: row.name,
+      type: row.type,
+      shapeType: row.shape_type || 'circle'
+    };
+
+    if (base.shapeType === 'circle') {
+      return { ...base, center: { lat: row.center_lat, lon: row.center_lon }, radiusMeters: row.radius_meters };
+    }
+    if (base.shapeType === 'polyline') {
+      return { ...base, geometry: row.geometry, corridorWidthMeters: row.corridor_width_meters };
+    }
+    // polygon
+    return { ...base, geometry: row.geometry };
+  }
 }
 
 module.exports = GeofenceRepository;
+

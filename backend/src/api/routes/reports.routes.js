@@ -7,8 +7,10 @@
  */
 
 const express = require('express');
+const GeofenceRepository = require('../../repositories/GeofenceRepository');
+const { isInsideGeofence } = require('../../utils/geometry');
 
-function buildReportsRouter({ positionRepo }) {
+function buildReportsRouter({ positionRepo, geofenceRepo }) {
   const router = express.Router();
 
   router.get('/history', async (req, res) => {
@@ -29,6 +31,42 @@ function buildReportsRouter({ positionRepo }) {
     } catch (err) {
       console.error('❌ reports.routes GET /history:', err.message);
       res.status(500).json({ error: 'Error obteniendo historial' });
+    }
+  });
+
+  /**
+   * Igual que /history, pero cada posición viene anotada con las
+   * geocercas en las que estaba en ese momento — usado por el
+   * visor de recorridos del panel Admin para colorear el trayecto
+   * según si el vehículo circulaba dentro de una zona/ruta
+   * autorizada o fuera de todas ellas.
+   */
+  router.get('/history-with-zones', async (req, res) => {
+    try {
+      const { deviceId, from, to, limit } = req.query;
+      if (!deviceId || !from || !to) {
+        return res.status(400).json({ error: 'deviceId, from y to son requeridos' });
+      }
+
+      const [history, geofenceRows] = await Promise.all([
+        positionRepo.findHistory({ deviceId, from: new Date(from), to: new Date(to), limit: limit ? parseInt(limit, 10) : undefined }),
+        geofenceRepo.findAllActive()
+      ]);
+
+      const geofences = geofenceRows.map(GeofenceRepository.toMemoryFormat);
+
+      const annotated = history.map(p => {
+        const zonesInside = geofences.filter(g => isInsideGeofence(p.latitude, p.longitude, g));
+        return {
+          ...p,
+          zones: zonesInside.map(g => ({ id: g.id, name: g.name, type: g.type }))
+        };
+      });
+
+      res.json(annotated);
+    } catch (err) {
+      console.error('❌ reports.routes GET /history-with-zones:', err.message);
+      res.status(500).json({ error: 'Error obteniendo historial con zonas' });
     }
   });
 

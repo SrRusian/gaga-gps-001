@@ -5,35 +5,52 @@
  * de una geocerca y emitir alertas al dispositivo
  * correspondiente y al panel de supervisor.
  *
+ * Soporta 3 formas de geocerca (círculo, polígono, polilínea/
+ * corredor) — la evaluación geométrica se delega a
+ * backend/src/utils/geometry.js. El comportamiento para geocercas
+ * circulares es idéntico al original (misma fórmula de Haversine,
+ * mismo resultado) — no se modificó esa lógica, solo se generalizó
+ * para aceptar también polígonos y rutas.
+ *
  * RF asociados: RF-ALR-02 (zona amarilla)
  *               RF-ALR-03 (zona roja)
  *               RF-ALR-04 (notificación a supervisor)
  */
 
+const { isInsideGeofence } = require('../../utils/geometry');
+
 class GeofenceAlertService {
 
-  constructor({ io }) {
+  constructor({ io, geofenceEventRepo } = {}) {
     this.io = io;
     // Geocercas activas en memoria
     // En producción vendrán de PostgreSQL
     this.activeGeofences = [];
     // Estado de alertas activas por dispositivo
     this.activeAlerts = {};
+    // Opcional — si se provee, persiste eventos de entrada/salida
+    // para auditoría e historial (ver geofence_events)
+    this.geofenceEventRepo = geofenceEventRepo || null;
   }
 
   /**
    * Agrega o actualiza una geocerca activa
-   * @param {Object} geofence - { id, name, type, center, radiusMeters }
+   * @param {Object} geofence - { id, name, type, shapeType, center, radiusMeters, geometry, corridorWidthMeters }
    * type: 'warning' (amarilla) o 'danger' (roja)
+   * shapeType: 'circle' (default) | 'polygon' | 'polyline'
    */
   addGeofence(geofence) {
-    const existing = this.activeGeofences.findIndex(g => g.id === geofence.id);
+    const normalized = { shapeType: 'circle', ...geofence };
+    const existing = this.activeGeofences.findIndex(g => g.id === normalized.id);
     if (existing >= 0) {
-      this.activeGeofences[existing] = geofence;
+      this.activeGeofences[existing] = normalized;
     } else {
-      this.activeGeofences.push(geofence);
+      this.activeGeofences.push(normalized);
     }
-    console.log(`Geocerca registrada: ${geofence.name} (${geofence.type}) — Radio: ${geofence.radiusMeters}m`);
+    const shapeInfo = normalized.shapeType === 'circle'
+      ? `Radio: ${normalized.radiusMeters}m`
+      : `Forma: ${normalized.shapeType}`;
+    console.log(`Geocerca registrada: ${normalized.name} (${normalized.type}) — ${shapeInfo}`);
   }
 
   /**
@@ -47,7 +64,7 @@ class GeofenceAlertService {
    * Evalúa la posición de un vehículo contra todas las geocercas activas
    * Se llama cada vez que llega una posición nueva de un vehículo
    *
-   * @param {Object} position - posición del vehículo desde Traccar
+   * @param {Object} position - posición del vehículo
    */
   evaluate(position) {
     const { deviceId, latitude, longitude } = position;
@@ -55,14 +72,12 @@ class GeofenceAlertService {
     let maxSeverity = null; // null | 'warning' | 'danger'
     let triggeredGeofence = null;
 
-    // Evaluar contra cada geocerca activa
+    // Evaluar contra cada geocerca activa — funciona igual para
+    // círculo, polígono o polilínea/corredor (ver geometry.js)
     for (const geofence of this.activeGeofences) {
-      const distance = this.calculateDistance(
-        latitude, longitude,
-        geofence.center.lat, geofence.center.lon
-      );
+      const inside = isInsideGeofence(latitude, longitude, geofence);
 
-      if (distance <= geofence.radiusMeters) {
+      if (inside) {
         // Vehículo dentro de esta geocerca
         // 'danger' tiene prioridad sobre 'warning'
         if (geofence.type === 'danger') {
@@ -86,7 +101,7 @@ class GeofenceAlertService {
 
     } else if (!maxSeverity && previousAlert) {
       // Vehículo salió de todas las geocercas
-      this.clearAlert(deviceId);
+      this.clearAlert(deviceId, previousAlert);
       this.activeAlerts[deviceId] = null;
     }
   }
@@ -125,12 +140,14 @@ class GeofenceAlertService {
       ...alertPayload,
       action: 'entered'
     });
+
+    this._persistEvent(deviceId, geofence.id, 'enter', severity);
   }
 
   /**
    * Cancela alertas activas cuando el vehículo sale de la geocerca
    */
-  clearAlert(deviceId) {
+  clearAlert(deviceId, previousSeverity) {
     console.log(`✅ Device ${deviceId} salió de la geocerca — cancelando alertas`);
 
     this.io.emit('alert:clear', {
@@ -143,28 +160,20 @@ class GeofenceAlertService {
       action: 'exited',
       timestamp: new Date().toISOString()
     });
+
+    this._persistEvent(deviceId, null, 'exit', previousSeverity);
   }
 
   /**
-   * Calcula distancia en metros entre dos coordenadas
-   * Fórmula de Haversine
-   *
-   * @returns {number} distancia en metros
+   * Persiste el evento de entrada/salida para auditoría/historial,
+   * sin bloquear el flujo en tiempo real (fire-and-forget) — un
+   * fallo al guardar el evento no debe afectar la alerta ya emitida.
    */
-  calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371000; // Radio de la Tierra en metros
-    const dLat = this.toRad(lat2 - lat1);
-    const dLon = this.toRad(lon2 - lon1);
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(this.toRad(lat1)) * Math.cos(this.toRad(lat2)) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  }
-
-  toRad(deg) {
-    return deg * (Math.PI / 180);
+  _persistEvent(deviceId, geofenceId, eventType, severity) {
+    if (!this.geofenceEventRepo) return;
+    this.geofenceEventRepo
+      .record({ deviceId, geofenceId, eventType, severity })
+      .catch(err => console.error('❌ GeofenceAlertService._persistEvent:', err.message));
   }
 
   /**

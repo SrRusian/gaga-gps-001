@@ -13,6 +13,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@tmcw/togeojson": "^7.1.2",
+    "@xmldom/xmldom": "^0.9.10",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.0.1",
     "dotenv": "^17.4.2",

@@ -10,6 +10,11 @@
       rel="stylesheet"
     />
     <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <link
+      href="https://unpkg.com/@mapbox/mapbox-gl-draw@1.4.3/dist/mapbox-gl-draw.css"
+      rel="stylesheet"
+    />
+    <script src="https://unpkg.com/@mapbox/mapbox-gl-draw@1.4.3/dist/mapbox-gl-draw.js"></script>
 
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -141,7 +146,7 @@
       .btn-sm { padding: 6px 10px; font-size: 12px; width: auto; }
       .btn-danger { background: #ff4444; color: #fff; }
 
-      #map { height: 400px; border-radius: 8px; margin-bottom: 16px; }
+      #map, #hist-map { height: 400px; border-radius: 8px; margin-bottom: 16px; }
 
       .metric { display: inline-block; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px 20px; margin-right: 12px; }
       .metric .value { font-size: 24px; color: #00ff88; font-weight: bold; }
@@ -220,20 +225,41 @@
           <!-- Geocercas -->
           <div class="section" id="section-geofences">
             <div class="card">
+              <div class="form-row" style="margin-bottom:8px;">
+                <button class="btn btn-sm" onclick="setMapStyle('osm')" id="btn-style-osm">🌐 Mapa con calles (OSM)</button>
+                <button class="btn btn-sm" onclick="setMapStyle('offline')" id="btn-style-offline">📴 Mapa offline (MBTiles)</button>
+              </div>
               <div id="map"></div>
-              <p style="font-size:12px;color:#8b949e;margin-bottom:8px;">Clic en el mapa para fijar el centro de la nueva geocerca.</p>
+              <div class="form-row" style="margin-top:8px;">
+                <label style="font-size:12px;color:#8b949e;">Forma:</label>
+                <select id="geo-shape" onchange="onShapeChange()">
+                  <option value="circle">Círculo</option>
+                  <option value="polygon">Polígono (zona autorizada)</option>
+                  <option value="polyline">Ruta / corredor autorizado</option>
+                </select>
+                <span id="shape-hint" style="font-size:12px;color:#8b949e;">Clic en el mapa para fijar el centro.</span>
+              </div>
               <div class="form-row">
                 <input id="geo-name" placeholder="Nombre" />
                 <select id="geo-type"><option value="warning">Advertencia (amarilla)</option><option value="danger">Peligro (roja)</option></select>
                 <input id="geo-lat" placeholder="Lat" readonly />
                 <input id="geo-lon" placeholder="Lon" readonly />
                 <input id="geo-radius" placeholder="Radio (m)" type="number" />
+                <input id="geo-corridor" placeholder="Ancho corredor (m)" type="number" style="display:none;" />
                 <button class="btn btn-sm" onclick="createGeofence()">Crear</button>
+                <button class="btn btn-sm btn-danger" onclick="cancelDrawing()" id="btn-cancel-draw" style="display:none;">Cancelar dibujo</button>
               </div>
+              <div class="form-row">
+                <button class="btn btn-sm" onclick="exportGeofences('geojson')">⬇️ Exportar GeoJSON</button>
+                <button class="btn btn-sm" onclick="exportGeofences('kml')">⬇️ Exportar KML</button>
+                <input type="file" id="geo-import-file" accept=".geojson,.json,.kml" style="display:none;" onchange="importGeofences(event)" />
+                <button class="btn btn-sm" onclick="document.getElementById('geo-import-file').click()">⬆️ Importar (GeoJSON/KML)</button>
+              </div>
+              <div id="import-feedback" style="font-size:12px;margin-top:6px;"></div>
             </div>
             <div class="card">
               <table>
-                <thead><tr><th>Nombre</th><th>Tipo</th><th>Radio (m)</th><th></th></tr></thead>
+                <thead><tr><th>Nombre</th><th>Tipo</th><th>Forma</th><th>Detalle</th><th></th></tr></thead>
                 <tbody id="geofences-table"></tbody>
               </table>
             </div>
@@ -270,10 +296,21 @@
                 <input id="hist-to" type="datetime-local" />
                 <button class="btn btn-sm" onclick="loadHistory()">Buscar</button>
               </div>
+              <div id="hist-map"></div>
+              <div class="form-row" style="margin-top:8px;align-items:center;">
+                <button class="btn btn-sm" style="width:auto;" onclick="togglePlayback()" id="btn-play">▶️ Reproducir</button>
+                <input id="hist-slider" type="range" min="0" max="0" value="0" style="flex:1;" oninput="onSliderChange(this.value)" />
+                <span id="hist-time-label" style="font-size:12px;color:#8b949e;min-width:150px;">-</span>
+              </div>
+              <div class="form-row" style="font-size:12px;color:#8b949e;">
+                <span>🟢 Dentro de zona autorizada</span>
+                <span>🔴 Fuera de toda zona autorizada</span>
+                <span id="hist-summary"></span>
+              </div>
             </div>
             <div class="card">
               <table>
-                <thead><tr><th>Fecha</th><th>Lat</th><th>Lon</th><th>Velocidad (km/h)</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Lat</th><th>Lon</th><th>Velocidad (km/h)</th><th>Zona</th></tr></thead>
                 <tbody id="history-table"></tbody>
               </table>
             </div>
@@ -333,7 +370,9 @@
       const API = '';
       let token = localStorage.getItem('gaga_admin_token') || null;
       let currentUser = JSON.parse(localStorage.getItem('gaga_admin_user') || 'null');
-      let map, marker, selectedCenter = null;
+      let map, marker, draw, selectedCenter = null;
+      let currentShape = 'circle';
+      let currentMapStyle = 'osm';
 
       function authHeaders() {
         return token ? { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
@@ -403,6 +442,7 @@
         if (section === 'devices') loadDevices();
         if (section === 'geofences') loadGeofences();
         if (section === 'equipment') loadEquipment();
+        if (section === 'history') initHistMap();
         if (section === 'users') loadUsers();
         if (section === 'system') loadHealth();
       }
@@ -460,48 +500,237 @@
       }
 
       // ── Geocercas ──────────────────────────────────────────
+
+      const OSM_STYLE = {
+        version: 8,
+        sources: {
+          osm: {
+            type: 'raster',
+            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+            tileSize: 256,
+            attribution: '© OpenStreetMap contributors'
+          }
+        },
+        layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
+      };
+
+      const OFFLINE_STYLE = {
+        version: 8,
+        sources: {
+          offline: {
+            type: 'raster',
+            tiles: ['/tiles/alcaraces/{z}/{x}/{y}.png'],
+            tileSize: 256
+          }
+        },
+        layers: [{ id: 'offline', type: 'raster', source: 'offline' }]
+      };
+
       function initMap() {
         if (map) return;
         map = new maplibregl.Map({
           container: 'map',
-          style: 'https://demotiles.maplibre.org/style.json',
-          center: [0, 0],
-          zoom: 2
+          style: OSM_STYLE,
+          center: [-99.1, 19.4],
+          zoom: 10
         });
+
+        draw = new MapboxDraw({
+          displayControlsDefault: false,
+          controls: {}
+        });
+        map.addControl(draw);
+
+        map.on('load', () => renderExistingGeofences());
+
         map.on('click', (e) => {
+          if (currentShape !== 'circle') return;
           selectedCenter = { lat: e.lngLat.lat, lon: e.lngLat.lng };
           document.getElementById('geo-lat').value = selectedCenter.lat.toFixed(6);
           document.getElementById('geo-lon').value = selectedCenter.lon.toFixed(6);
           if (marker) marker.remove();
           marker = new maplibregl.Marker().setLngLat(e.lngLat).addTo(map);
         });
+
+        map.on('draw.create', () => {
+          document.getElementById('btn-cancel-draw').style.display = 'none';
+        });
+      }
+
+      function setMapStyle(styleName) {
+        currentMapStyle = styleName;
+        document.getElementById('btn-style-osm').style.opacity = styleName === 'osm' ? '1' : '0.5';
+        document.getElementById('btn-style-offline').style.opacity = styleName === 'offline' ? '1' : '0.5';
+        if (!map) return;
+        map.setStyle(styleName === 'osm' ? OSM_STYLE : OFFLINE_STYLE);
+        map.once('styledata', () => renderExistingGeofences());
+      }
+
+      /**
+       * Cambia el modo de dibujo según la forma seleccionada —
+       * círculo usa el flujo original (clic + radio), polígono/ruta
+       * usan las herramientas de dibujo de Mapbox Draw.
+       */
+      function onShapeChange() {
+        currentShape = document.getElementById('geo-shape').value;
+        document.getElementById('geo-radius').style.display = currentShape === 'circle' ? '' : 'none';
+        document.getElementById('geo-corridor').style.display = currentShape === 'polyline' ? '' : 'none';
+        document.getElementById('shape-hint').textContent =
+          currentShape === 'circle' ? 'Clic en el mapa para fijar el centro.' :
+          currentShape === 'polygon' ? 'Dibuje el polígono en el mapa (clic para cada vértice, doble clic para terminar).' :
+          'Dibuje la ruta en el mapa (clic para cada punto, doble clic para terminar).';
+
+        draw.deleteAll();
+        document.getElementById('btn-cancel-draw').style.display = currentShape === 'circle' ? 'none' : '';
+
+        if (currentShape === 'polygon') draw.changeMode('draw_polygon');
+        else if (currentShape === 'polyline') draw.changeMode('draw_line_string');
+      }
+
+      function cancelDrawing() {
+        draw.deleteAll();
+        if (currentShape === 'polygon') draw.changeMode('draw_polygon');
+        else if (currentShape === 'polyline') draw.changeMode('draw_line_string');
+      }
+
+      /**
+       * Dibuja en el mapa las geocercas ya creadas — los círculos se
+       * aproximan visualmente como un polígono de muchos lados (solo
+       * para representación, el radio real sigue siendo la fuente de
+       * verdad en la base de datos).
+       */
+      function renderExistingGeofences(geofencesCache) {
+        if (!map.isStyleLoaded()) { map.once('idle', () => renderExistingGeofences(geofencesCache)); return; }
+
+        const features = (geofencesCache || window.__lastGeofences || []).map(g => {
+          const color = g.type === 'danger' ? '#ff4444' : '#ffcc00';
+          if (g.shape_type === 'polygon') {
+            return { type: 'Feature', properties: { color }, geometry: g.geometry };
+          }
+          if (g.shape_type === 'polyline') {
+            return { type: 'Feature', properties: { color }, geometry: g.geometry };
+          }
+          // circle → polígono aproximado de 32 lados para visualizar
+          return { type: 'Feature', properties: { color }, geometry: circleToPolygon(g.center_lat, g.center_lon, g.radius_meters) };
+        });
+
+        const geojson = { type: 'FeatureCollection', features };
+
+        if (map.getSource('geofences-preview')) {
+          map.getSource('geofences-preview').setData(geojson);
+        } else {
+          map.addSource('geofences-preview', { type: 'geojson', data: geojson });
+          map.addLayer({
+            id: 'geofences-fill', type: 'fill', source: 'geofences-preview',
+            filter: ['==', ['geometry-type'], 'Polygon'],
+            paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.2 }
+          });
+          map.addLayer({
+            id: 'geofences-line', type: 'line', source: 'geofences-preview',
+            paint: { 'line-color': ['get', 'color'], 'line-width': 2 }
+          });
+        }
+      }
+
+      function circleToPolygon(lat, lon, radiusMeters, points = 32) {
+        const coords = [];
+        for (let i = 0; i <= points; i++) {
+          const angle = (i / points) * 2 * Math.PI;
+          const dLat = (radiusMeters / 111320) * Math.cos(angle);
+          const dLon = (radiusMeters / (111320 * Math.cos(lat * Math.PI / 180))) * Math.sin(angle);
+          coords.push([lon + dLon, lat + dLat]);
+        }
+        return { type: 'Polygon', coordinates: [coords] };
       }
 
       async function loadGeofences() {
         const geofences = await api('/api/geofences');
-        document.getElementById('geofences-table').innerHTML = geofences.map(g => `
+        window.__lastGeofences = geofences;
+        if (map) renderExistingGeofences(geofences);
+
+        document.getElementById('geofences-table').innerHTML = geofences.map(g => {
+          const detail = g.shape_type === 'circle' ? `Radio: ${g.radius_meters}m`
+            : g.shape_type === 'polyline' ? `Corredor: ${g.corridor_width_meters}m`
+            : `${g.geometry?.coordinates?.[0]?.length || 0} vértices`;
+          return `
           <tr>
-            <td>${g.name}</td><td>${g.type}</td><td>${g.radius_meters}</td>
+            <td>${g.name}</td><td>${g.type}</td><td>${g.shape_type}</td><td>${detail}</td>
             <td><button class="btn btn-sm btn-danger" onclick="deleteGeofence(${g.id})">Eliminar</button></td>
-          </tr>`).join('');
+          </tr>`;
+        }).join('');
       }
 
       async function createGeofence() {
         const name = document.getElementById('geo-name').value;
         const type = document.getElementById('geo-type').value;
-        const radiusMeters = parseFloat(document.getElementById('geo-radius').value);
-        if (!name || !selectedCenter || !radiusMeters) return alert('Complete nombre, centro (clic en mapa) y radio');
-        await api('/api/geofences', {
-          method: 'POST',
-          body: JSON.stringify({ name, type, centerLat: selectedCenter.lat, centerLon: selectedCenter.lon, radiusMeters })
-        });
-        loadGeofences();
+
+        try {
+          if (currentShape === 'circle') {
+            const radiusMeters = parseFloat(document.getElementById('geo-radius').value);
+            if (!name || !selectedCenter || !radiusMeters) return alert('Complete nombre, centro (clic en mapa) y radio');
+            await api('/api/geofences', {
+              method: 'POST',
+              body: JSON.stringify({ name, type, shapeType: 'circle', centerLat: selectedCenter.lat, centerLon: selectedCenter.lon, radiusMeters })
+            });
+          } else {
+            const drawn = draw.getAll();
+            if (!drawn.features.length) return alert('Dibuje la forma en el mapa antes de guardar');
+            const geometry = drawn.features[0].geometry;
+
+            if (currentShape === 'polygon') {
+              if (!name) return alert('Complete el nombre');
+              await api('/api/geofences', { method: 'POST', body: JSON.stringify({ name, type, shapeType: 'polygon', geometry }) });
+            } else {
+              const corridorWidthMeters = parseFloat(document.getElementById('geo-corridor').value);
+              if (!name || !corridorWidthMeters) return alert('Complete nombre y ancho del corredor');
+              await api('/api/geofences', { method: 'POST', body: JSON.stringify({ name, type, shapeType: 'polyline', geometry, corridorWidthMeters }) });
+            }
+          }
+
+          draw.deleteAll();
+          document.getElementById('geo-name').value = '';
+          loadGeofences();
+        } catch (err) {
+          alert(err.message);
+        }
       }
 
       async function deleteGeofence(id) {
         if (!confirm('¿Eliminar geocerca?')) return;
         await api(`/api/geofences/${id}`, { method: 'DELETE' });
         loadGeofences();
+      }
+
+      // ── Import / Export ─────────────────────────────────────
+      async function exportGeofences(format) {
+        const res = await fetch(`/api/geofences/export.${format}`, { headers: authHeaders() });
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `geocercas.${format}`;
+        a.click();
+      }
+
+      async function importGeofences(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const feedback = document.getElementById('import-feedback');
+        feedback.textContent = 'Importando...';
+        try {
+          const text = await file.text();
+          const format = file.name.toLowerCase().endsWith('.kml') ? 'kml' : 'geojson';
+          const data = format === 'geojson' ? JSON.parse(text) : text;
+          const result = await api('/api/geofences/import', { method: 'POST', body: JSON.stringify({ format, data }) });
+          feedback.style.color = result.imported > 0 ? '#00ff88' : '#ff4444';
+          feedback.textContent = `Importadas: ${result.imported} — Omitidas: ${result.skipped}` +
+            (result.errors.length ? ` (${result.errors.join('; ')})` : '');
+          loadGeofences();
+        } catch (err) {
+          feedback.style.color = '#ff4444';
+          feedback.textContent = 'Error: ' + err.message;
+        } finally {
+          event.target.value = '';
+        }
       }
 
       // ── Equipo estático ────────────────────────────────────
@@ -535,16 +764,113 @@
         loadEquipment();
       }
 
-      // ── Historial ──────────────────────────────────────────
+      // ── Historial / visor de recorridos ─────────────────────
+      let histMap, histData = [], histMarker, playbackTimer = null;
+
+      function initHistMap() {
+        if (histMap) return;
+        histMap = new maplibregl.Map({
+          container: 'hist-map',
+          style: OSM_STYLE,
+          center: [-99.1, 19.4],
+          zoom: 10
+        });
+      }
+
       async function loadHistory() {
         const deviceId = document.getElementById('hist-device').value;
         const from = document.getElementById('hist-from').value;
         const to = document.getElementById('hist-to').value;
         if (!deviceId || !from || !to) return alert('Complete todos los campos');
-        const history = await api(`/api/reports/history?deviceId=${encodeURIComponent(deviceId)}&from=${new Date(from).toISOString()}&to=${new Date(to).toISOString()}`);
+
+        stopPlayback();
+        const history = await api(`/api/reports/history-with-zones?deviceId=${encodeURIComponent(deviceId)}&from=${new Date(from).toISOString()}&to=${new Date(to).toISOString()}`);
+        histData = history;
+
         document.getElementById('history-table').innerHTML = history.map(p => `
-          <tr><td>${new Date(p.fix_time).toLocaleString()}</td><td>${p.latitude}</td><td>${p.longitude}</td><td>${(p.speed * 3.6).toFixed(1)}</td></tr>
+          <tr>
+            <td>${new Date(p.fix_time).toLocaleString()}</td><td>${p.latitude}</td><td>${p.longitude}</td>
+            <td>${(p.speed * 3.6).toFixed(1)}</td>
+            <td>${p.zones.length ? '🟢 ' + p.zones.map(z => z.name).join(', ') : '🔴 fuera de zona'}</td>
+          </tr>
         `).join('');
+
+        const inZoneCount = history.filter(p => p.zones.length > 0).length;
+        document.getElementById('hist-summary').textContent =
+          history.length ? `${inZoneCount}/${history.length} puntos dentro de zona autorizada` : 'Sin datos en el rango seleccionado';
+
+        renderHistoryRoute(history);
+
+        const slider = document.getElementById('hist-slider');
+        slider.max = Math.max(0, history.length - 1);
+        slider.value = 0;
+        onSliderChange(0);
+      }
+
+      /**
+       * Dibuja el recorrido completo como una línea, coloreando cada
+       * segmento en verde (dentro de zona autorizada) o rojo (fuera
+       * de toda geocerca), usando los datos ya cruzados por el
+       * backend (GET /api/reports/history-with-zones).
+       */
+      function renderHistoryRoute(history) {
+        if (!histMap.isStyleLoaded()) { histMap.once('idle', () => renderHistoryRoute(history)); return; }
+        if (!history.length) return;
+
+        const segments = [];
+        for (let i = 0; i < history.length - 1; i++) {
+          const a = history[i], b = history[i + 1];
+          segments.push({
+            type: 'Feature',
+            properties: { color: a.zones.length > 0 ? '#00ff88' : '#ff4444' },
+            geometry: { type: 'LineString', coordinates: [[a.longitude, a.latitude], [b.longitude, b.latitude]] }
+          });
+        }
+
+        const geojson = { type: 'FeatureCollection', features: segments };
+
+        if (histMap.getSource('route')) {
+          histMap.getSource('route').setData(geojson);
+        } else {
+          histMap.addSource('route', { type: 'geojson', data: geojson });
+          histMap.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': ['get', 'color'], 'line-width': 4 } });
+        }
+
+        if (histMarker) histMarker.remove();
+        histMarker = new maplibregl.Marker({ color: '#00aaff' })
+          .setLngLat([history[0].longitude, history[0].latitude])
+          .addTo(histMap);
+
+        const lons = history.map(p => p.longitude), lats = history.map(p => p.latitude);
+        histMap.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], { padding: 40, maxZoom: 16 });
+      }
+
+      function onSliderChange(index) {
+        index = parseInt(index, 10);
+        const point = histData[index];
+        if (!point || !histMarker) return;
+        histMarker.setLngLat([point.longitude, point.latitude]);
+        document.getElementById('hist-time-label').textContent =
+          `${new Date(point.fix_time).toLocaleString()} — ${(point.speed * 3.6).toFixed(1)} km/h`;
+      }
+
+      function togglePlayback() {
+        if (playbackTimer) { stopPlayback(); return; }
+        if (!histData.length) return;
+
+        const slider = document.getElementById('hist-slider');
+        document.getElementById('btn-play').textContent = '⏸️ Pausar';
+        playbackTimer = setInterval(() => {
+          let next = parseInt(slider.value, 10) + 1;
+          if (next >= histData.length) { stopPlayback(); return; }
+          slider.value = next;
+          onSliderChange(next);
+        }, 300);
+      }
+
+      function stopPlayback() {
+        if (playbackTimer) { clearInterval(playbackTimer); playbackTimer = null; }
+        document.getElementById('btn-play').textContent = '▶️ Reproducir';
       }
 
       // ── Reportes ───────────────────────────────────────────

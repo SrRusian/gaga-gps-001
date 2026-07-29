@@ -137,16 +137,54 @@ gaga-gps-001/
 
 ## Modelo de datos
 
-Definido en `db/migrations/001_init.sql`, aplicado automáticamente
-la primera vez que se crea el volumen de PostgreSQL.
+Definido en `db/migrations/` (se aplica automáticamente, en orden,
+la primera vez que se crea el volumen de PostgreSQL).
 
 | Tabla | Propósito |
 |---|---|
 | `devices` | Dispositivos/tabletas — `unique_id` es el identificador que configuras en Traccar Client |
 | `positions` | Hypertable de TimescaleDB — una fila por cada posición GPS recibida, particionada por `fix_time` |
-| `geofences` | Geocercas circulares (centro + radio) — tipo `warning` (amarilla) o `danger` (roja) |
+| `geofences` | Geocercas — círculo, polígono o polilínea/corredor (ver [Geocercas avanzadas](#geocercas-avanzadas-círculo-polígono-ruta)) — tipo `warning` (amarilla) o `danger` (roja) |
+| `geofence_events` | Auditoría de entradas/salidas de geocercas (`003_geofence_shapes.sql`) |
 | `static_equipment` | Equipo estático (palas, excavadoras) con radio de giro y de seguridad |
 | `users` | Usuarios del panel admin — roles `operator`, `supervisor`, `admin` |
+
+## Geocercas avanzadas (círculo, polígono, ruta)
+
+Además del círculo original (centro + radio), el sistema soporta:
+
+- **Polígono** — zona autorizada de forma arbitraria, dibujada
+  directamente en el mapa del panel Admin.
+- **Polilínea / corredor** — ruta autorizada con un ancho definido
+  a cada lado (`corridorWidthMeters`); útil para marcar el camino
+  por el que debe circular la maquinaria.
+
+Todas se evalúan en tiempo real con la misma lógica de alertas
+(`GeofenceAlertService` + `backend/src/utils/geometry.js`, sin
+depender de PostGIS) y cada entrada/salida queda registrada en
+`geofence_events` para auditoría/reportes.
+
+**Panel Admin → Geocercas**:
+- Selector "Forma" para elegir círculo/polígono/ruta antes de dibujar.
+- Mapa con calles reales (OSM) o modo offline (MBTiles), intercambiable
+  con un botón — útil si el sitio no tiene conectividad.
+- Exportar/Importar en **GeoJSON** (estándar principal, nativo en
+  JS/QGIS/Leaflet/Mapbox) o **KML** (Google Earth, muy usado en
+  topografía/minería) — botones directos en el panel.
+
+## Visor de recorridos por día
+
+**Panel Admin → Historial** dibuja el recorrido completo de un
+vehículo en un rango de fechas como una línea sobre el mapa,
+coloreada según si el vehículo estaba dentro de una zona/ruta
+autorizada (verde) o fuera de todas (rojo) — usa
+`GET /api/reports/history-with-zones`, que cruza cada posición
+contra las geocercas activas con la misma lógica de
+`GeofenceAlertService`.
+
+Incluye reproducción animada (▶️/⏸️) con control deslizante para
+avanzar manualmente punto por punto, mostrando fecha/hora y
+velocidad de cada uno.
 
 ## Instalación (desarrollo)
 
@@ -262,14 +300,18 @@ obtenido en el login.
 | POST | `/api/devices` | JWT | Crear dispositivo |
 | PATCH | `/api/devices/:id` | JWT | Editar dispositivo |
 | DELETE | `/api/devices/:id?force=true` | JWT | Eliminar dispositivo (`force=true` purga también su historial de posiciones; sin ese flag, responde 409 si tiene historial) |
-| GET | `/api/geofences` | JWT | Listar geocercas activas |
-| POST | `/api/geofences` | JWT | Crear geocerca |
+| GET | `/api/geofences` | JWT | Listar geocercas activas (cualquier forma) |
+| POST | `/api/geofences` | JWT | Crear geocerca — `shapeType`: `circle` \| `polygon` \| `polyline` |
 | DELETE | `/api/geofences/:id` | JWT | Eliminar geocerca |
+| GET | `/api/geofences/export.geojson` | JWT | Exportar todas las geocercas activas en GeoJSON |
+| GET | `/api/geofences/export.kml` | JWT | Exportar todas las geocercas activas en KML |
+| POST | `/api/geofences/import` | JWT | Importar geocercas — body `{ format: 'geojson'\|'kml', data }` |
 | GET | `/api/equipment` | JWT | Listar equipo estático |
 | POST | `/api/equipment` | JWT | Crear equipo estático |
 | PATCH | `/api/equipment/:id/status` | JWT | Cambiar estado (`active_swing` / `active_pause` / `inactive`) |
 | DELETE | `/api/equipment/:id` | JWT | Eliminar equipo |
 | GET | `/api/reports/history` | JWT | Historial de posiciones (JSON) por dispositivo y rango de fechas |
+| GET | `/api/reports/history-with-zones` | JWT | Igual que `/history`, anotando en qué geocerca estaba cada posición (usado por el visor de recorridos) |
 | GET | `/api/reports/history/csv` | JWT | Exportar historial a CSV (velocidad ya en km/h) |
 | GET | `/api/users` | JWT (`admin`) | Listar usuarios |
 | POST | `/api/users` | JWT (`admin`) | Crear usuario |

@@ -21,6 +21,7 @@ const { env, db, redis } = require('./config');
 const DeviceRepository = require('./repositories/DeviceRepository');
 const PositionRepository = require('./repositories/PositionRepository');
 const GeofenceRepository = require('./repositories/GeofenceRepository');
+const GeofenceEventRepository = require('./repositories/GeofenceEventRepository');
 const EquipmentRepository = require('./repositories/EquipmentRepository');
 const UserRepository = require('./repositories/UserRepository');
 
@@ -69,13 +70,14 @@ app.use(requestLogger);
 const deviceRepo = new DeviceRepository();
 const positionRepo = new PositionRepository();
 const geofenceRepo = new GeofenceRepository();
+const geofenceEventRepo = new GeofenceEventRepository();
 const equipmentRepo = new EquipmentRepository();
 const userRepo = new UserRepository();
 
 const authMiddleware = buildAuthMiddleware({ userRepo });
 
 // ── Servicios de seguridad ──────────────────────────────────────
-const geofenceService = new GeofenceAlertService({ io });
+const geofenceService = new GeofenceAlertService({ io, geofenceEventRepo });
 const preventiveStopService = new PreventiveStopService({ io });
 const signalLostService = new SignalLostService({ io, preventiveStopService });
 const collisionService = new CollisionRiskService({ io });
@@ -118,7 +120,7 @@ app.use('/api/auth', authLimiter, buildAuthRouter({ userRepo }));
 app.use('/api/devices', authMiddleware, buildDevicesRouter({ deviceRepo }));
 app.use('/api/geofences', authMiddleware, buildGeofencesRouter({ geofenceRepo, geofenceService, socketServer }));
 app.use('/api/equipment', authMiddleware, buildEquipmentRouter({ equipmentRepo, equipmentManager, socketServer }));
-app.use('/api/reports', authMiddleware, buildReportsRouter({ positionRepo }));
+app.use('/api/reports', authMiddleware, buildReportsRouter({ positionRepo, geofenceRepo }));
 app.use('/api/users', authMiddleware, requireRole('admin'), buildUsersRouter({ userRepo }));
 
 // Estado de flota / parada preventiva — usado también por UIs no autenticadas
@@ -148,13 +150,7 @@ app.get('/health', async (req, res) => {
 async function loadPersistedState() {
   try {
     const geofences = await geofenceRepo.findAllActive();
-    geofences.forEach(g => geofenceService.addGeofence({
-      id: g.id,
-      name: g.name,
-      type: g.type,
-      center: { lat: g.center_lat, lon: g.center_lon },
-      radiusMeters: g.radius_meters
-    }));
+    geofences.forEach(g => geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(g)));
     console.log(`✅ ${geofences.length} geocerca(s) cargada(s) desde PostgreSQL`);
 
     const equipment = await equipmentRepo.findAll();
