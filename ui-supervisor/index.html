@@ -217,6 +217,11 @@
         font-weight: bold;
       }
 
+      .vehicle-type {
+        font-weight: normal;
+        color: #8b949e;
+      }
+
       .vehicle-status {
         font-size: 11px;
         padding: 2px 6px;
@@ -554,13 +559,13 @@
           item.onclick = () => showVehicleDetail(v.deviceId);
           item.innerHTML = `
           <div class="vehicle-header">
-            <span class="vehicle-name">Vehículo ${v.deviceId}</span>
+            <span class="vehicle-name">${v.deviceName || ('Vehículo ' + v.deviceId)}${v.deviceType ? ` <small class="vehicle-type">(${v.deviceType})</small>` : ''}</span>
             <span class="vehicle-status ${isOffline ? "offline" : ""}">
               ${isOffline ? "Sin señal" : "En línea"}
             </span>
           </div>
           <div class="vehicle-info">
-            ${v.speed ? Math.round(v.speed) : 0} km/h &nbsp;|&nbsp;
+            ${v.speed ? Math.round(v.speed * 3.6) : 0} km/h &nbsp;|&nbsp;
             ${v.latitude?.toFixed(5)}, ${v.longitude?.toFixed(5)}
           </div>
         `;
@@ -591,12 +596,12 @@
         const isOffline = elapsed > 45000;
 
         document.getElementById("detail-name").textContent =
-          `Vehículo ${deviceId}`;
+          v.deviceName ? `${v.deviceName}${v.deviceType ? ' (' + v.deviceType + ')' : ''}` : `Vehículo ${deviceId}`;
         document.getElementById("detail-status").textContent = isOffline
           ? "🔴 Sin señal"
           : "🟢 En línea";
         document.getElementById("detail-speed").textContent =
-          `${Math.round(v.speed || 0)} km/h`;
+          `${Math.round((v.speed || 0) * 3.6)} km/h`;
         document.getElementById("detail-lat").textContent =
           v.latitude?.toFixed(6);
         document.getElementById("detail-lon").textContent =

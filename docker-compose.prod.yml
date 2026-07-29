@@ -1,17 +1,63 @@
 services:
   gaga-backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: gaga-backend
     restart: unless-stopped
     env_file:
       - ./backend/.env.production
+    # DB_PASSWORD/REDIS_PASSWORD se sobreescriben aquí con las
+    # mismas variables que usan los servicios postgres/redis abajo
+    # (interpoladas desde el .env de docker compose en la raíz del
+    # proyecto), para que exista una única fuente de verdad y nunca
+    # puedan desincronizarse de lo que backend/.env.production diga.
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
-      - traccar_default
+      - gaga-net
     ports:
       - "3001:3001"
 
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    container_name: gaga-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gaga_gps
+      POSTGRES_USER: gaga_app
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - gaga-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gaga_app -d gaga_gps"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: gaga-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - gaga-net
+
 networks:
-  traccar_default:
-    external: true
+  gaga-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

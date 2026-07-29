@@ -1,16 +1,57 @@
+/**
+ * app.js
+ *
+ * Entry point del backend GAGA-GPS-001 — sistema propio de
+ * telemetría GPS (sin Traccar como intermediario).
+ *
+ * Las tabletas (Traccar Client) reportan directamente a GET /gps
+ * usando el protocolo OsmAnd. Este archivo solo ensambla config,
+ * repositorios, servicios y rutas — la lógica vive en cada módulo.
+ */
+
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
-const Database = require('better-sqlite3');
 
-const TraccarWsClient = require('./services/telemetry/TraccarWsClient');
+const { env, db, redis } = require('./config');
+
+// ── Repositorios ───────────────────────────────────────────────
+const DeviceRepository = require('./repositories/DeviceRepository');
+const PositionRepository = require('./repositories/PositionRepository');
+const GeofenceRepository = require('./repositories/GeofenceRepository');
+const EquipmentRepository = require('./repositories/EquipmentRepository');
+const UserRepository = require('./repositories/UserRepository');
+
+// ── Servicios de seguridad — NO se modifican, solo se integran ─
 const GeofenceAlertService = require('./services/alerts/GeofenceAlertService');
 const SignalLostService = require('./services/alerts/SignalLostService');
 const CollisionRiskService = require('./services/alerts/CollisionRiskService');
-const StaticEquipmentManager = require('./services/static_equipment/StaticEquipmentManager');
 const PreventiveStopService = require('./services/alerts/PreventiveStopService');
+const StaticEquipmentManager = require('./services/static_equipment/StaticEquipmentManager');
+
+// ── Servicios de telemetría propios (reemplazan TraccarWsClient) ─
+const FleetStateManager = require('./services/telemetry/FleetStateManager');
+const DeviceManager = require('./services/telemetry/DeviceManager');
+const PositionProcessor = require('./services/telemetry/PositionProcessor');
+const FleetSocketServer = require('./sockets/FleetSocketServer');
+
+// ── Middleware ──────────────────────────────────────────────────
+const { buildAuthMiddleware, requireRole } = require('./api/middleware/auth.middleware');
+const { telemetryLimiter, authLimiter } = require('./api/middleware/rateLimiter');
+const { requestLogger } = require('./api/middleware/logger');
+
+// ── Rutas ───────────────────────────────────────────────────────
+const buildTelemetryRouter = require('./api/routes/telemetry.routes');
+const buildAuthRouter = require('./api/routes/auth.routes');
+const buildDevicesRouter = require('./api/routes/devices.routes');
+const buildGeofencesRouter = require('./api/routes/geofences.routes');
+const buildEquipmentRouter = require('./api/routes/equipment.routes');
+const buildFleetRouter = require('./api/routes/fleet.routes');
+const buildMapsRouter = require('./api/routes/maps.routes');
+const buildReportsRouter = require('./api/routes/reports.routes');
+const buildUsersRouter = require('./api/routes/users.routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -21,202 +62,132 @@ const io = new Server(server, {
 });
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(requestLogger);
 
-// ── Servicios de seguridad ─────────────────────────────────────
-const geofenceService      = new GeofenceAlertService({ io });
+// ── Repositorios ────────────────────────────────────────────────
+const deviceRepo = new DeviceRepository();
+const positionRepo = new PositionRepository();
+const geofenceRepo = new GeofenceRepository();
+const equipmentRepo = new EquipmentRepository();
+const userRepo = new UserRepository();
+
+const authMiddleware = buildAuthMiddleware({ userRepo });
+
+// ── Servicios de seguridad ──────────────────────────────────────
+const geofenceService = new GeofenceAlertService({ io });
 const preventiveStopService = new PreventiveStopService({ io });
-const signalLostService    = new SignalLostService({ io, preventiveStopService });
-const collisionService     = new CollisionRiskService({ io });
-const equipmentManager     = new StaticEquipmentManager({ io });
+const signalLostService = new SignalLostService({ io, preventiveStopService });
+const collisionService = new CollisionRiskService({ io });
+const equipmentManager = new StaticEquipmentManager({ io });
 
-// ── UI estáticas ───────────────────────────────────────────────
-app.use('/operator',   express.static(path.join(__dirname, '../ui-operator')));
-app.use('/supervisor', express.static(path.join(__dirname, '../ui-supervisor')));
+// ── Telemetría propia ───────────────────────────────────────────
+const fleetState = new FleetStateManager(redis.redis);
+const deviceManager = new DeviceManager({ deviceRepo });
+const socketServer = new FleetSocketServer({ io, fleetState, geofenceService, preventiveStopService });
 
-// ── Tiles MBTiles ──────────────────────────────────────────────
-let tilesDb = null;
-
-function getTilesDb() {
-  if (tilesDb) return tilesDb;
-  const dbPath = path.join(__dirname, '../maps/alcaraces.mbtiles');
-  tilesDb = new Database(dbPath, { readonly: true });
-  console.log('✅ MBTiles cargado');
-  return tilesDb;
-}
-
-app.get('/tiles/alcaraces/:z/:x/:y.png', (req, res) => {
-  const zoom  = parseInt(req.params.z);
-  const tileX = parseInt(req.params.x);
-  const tileY = (2 ** zoom - 1) - parseInt(req.params.y);
-
-  try {
-    const db  = getTilesDb();
-    const row = db.prepare(
-      'SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?'
-    ).get(zoom, tileX, tileY);
-
-    if (row) {
-      res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.send(Buffer.from(row.tile_data));
-    } else {
-      res.status(204).send();
-    }
-  } catch (err) {
-    console.error('Error tile:', err.message);
-    res.status(500).send('Error');
-  }
-});
-
-// ── API REST ───────────────────────────────────────────────────
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    services: {
-      traccar: traccarClient?.ws?.readyState === 1 ? 'connected' : 'disconnected',
-      preventiveStop: preventiveStopService.getStatus()
-    }
-  });
-});
-
-// Geocercas
-app.get('/api/geofences', (req, res) => {
-  res.json(geofenceService.activeGeofences);
-});
-
-app.post('/api/geofences', (req, res) => {
-  const { id, name, type, center, radiusMeters } = req.body;
-  if (!id || !name || !type || !center || !radiusMeters) {
-    return res.status(400).json({ error: 'Faltan campos requeridos' });
-  }
-  geofenceService.addGeofence({ id, name, type, center, radiusMeters });
-  // Notificar a todos los dispositivos
-  io.emit('geofences:update', geofenceService.activeGeofences);
-  res.json({ success: true, geofence: { id, name, type, center, radiusMeters } });
-});
-
-app.delete('/api/geofences/:id', (req, res) => {
-  geofenceService.removeGeofence(req.params.id);
-  io.emit('geofences:update', geofenceService.activeGeofences);
-  res.json({ success: true });
-});
-
-// Equipos estáticos
-app.get('/api/equipment', (req, res) => {
-  res.json(Object.values(equipmentManager.equipment));
-});
-
-app.post('/api/equipment', (req, res) => {
-  const eq = req.body;
-  if (!eq.id || !eq.name || !eq.lat || !eq.lon) {
-    return res.status(400).json({ error: 'Faltan campos requeridos' });
-  }
-  equipmentManager.registerEquipment(eq);
-  res.json({ success: true });
-});
-
-app.patch('/api/equipment/:id/status', (req, res) => {
-  const { status } = req.body;
-  equipmentManager.updateStatus(req.params.id, status);
-  res.json({ success: true });
-});
-
-// Parada preventiva
-app.post('/api/fleet/stop', (req, res) => {
-  const { reason } = req.body;
-  preventiveStopService.activate(
-    reason || 'Activado manualmente por supervisor',
-    'supervisor'
-  );
-  res.json({ success: true, status: preventiveStopService.getStatus() });
-});
-
-app.post('/api/fleet/resume', (req, res) => {
-  preventiveStopService.deactivate('supervisor');
-  res.json({ success: true, status: preventiveStopService.getStatus() });
-});
-
-app.get('/api/fleet/stop/status', (req, res) => {
-  res.json(preventiveStopService.getStatus());
-});
-
-// ── Socket.io ──────────────────────────────────────────────────
-const traccarClient = new TraccarWsClient({
-  url:              process.env.TRACCAR_WS_URL,
-  email:            process.env.TRACCAR_EMAIL,
-  password:         process.env.TRACCAR_PASSWORD,
-  io,
+const positionProcessor = new PositionProcessor({
+  positionRepo,
+  fleetState,
+  socketServer,
+  deviceManager,
   geofenceService,
   signalLostService,
   collisionService,
   equipmentManager
 });
 
-traccarClient.connect();
-signalLostService.startMonitoring();
+// ── UI estáticas ─────────────────────────────────────────────────
+// __dirname = backend/src → subir dos niveles llega a la raíz del
+// repo, donde viven ui-operator/, ui-supervisor/ y ui-admin/ como
+// hermanos de backend/ (misma estructura en Docker, ver Dockerfile).
+app.use('/operator', express.static(path.join(__dirname, '../../ui-operator')));
+app.use('/supervisor', express.static(path.join(__dirname, '../../ui-supervisor')));
+app.use('/admin', express.static(path.join(__dirname, '../../ui-admin')));
 
-io.on('connection', (socket) => {
-  console.log(`✅ Cliente conectado: ${socket.id}`);
+// ── Receptor de telemetría — GET /gps (protocolo OsmAnd) ────────
+app.use(telemetryLimiter, buildTelemetryRouter({ positionProcessor }));
 
-  // Enviar estado actual de la flota
-  const currentFleet = traccarClient.getFleetState();
-  if (Object.keys(currentFleet).length > 0) {
-    socket.emit('fleet:update', {
-      positions: Object.values(currentFleet),
-      timestamp: new Date().toISOString()
-    });
-  }
+// ── Tiles MBTiles ────────────────────────────────────────────────
+app.use('/tiles', buildMapsRouter({ mapsDir: path.join(__dirname, '../../', env.mapsDir) }));
 
-  // Enviar geocercas activas
-  socket.emit('geofences:update', geofenceService.activeGeofences);
+// ── Autenticación ────────────────────────────────────────────────
+app.use('/api/auth', authLimiter, buildAuthRouter({ userRepo }));
 
-  // Enviar alertas activas
-  const activeAlerts = geofenceService.getActiveAlerts();
-  Object.entries(activeAlerts).forEach(([deviceId, severity]) => {
-    if (severity === 'danger') {
-      socket.emit('alert:critical', {
-        type: 'geofence_red',
-        deviceId: parseInt(deviceId),
-        message: 'PELIGRO — DETENER VEHÍCULO INMEDIATAMENTE',
-        loop: true,
-        timestamp: new Date().toISOString()
-      });
-    } else if (severity === 'warning') {
-      socket.emit('alert:warning', {
-        type: 'geofence_yellow',
-        deviceId: parseInt(deviceId),
-        message: 'PRECAUCIÓN — ZONA DE RIESGO — REDUCIR VELOCIDAD',
-        timestamp: new Date().toISOString()
-      });
+// ── API REST protegida (panel admin) ─────────────────────────────
+app.use('/api/devices', authMiddleware, buildDevicesRouter({ deviceRepo }));
+app.use('/api/geofences', authMiddleware, buildGeofencesRouter({ geofenceRepo, geofenceService, socketServer }));
+app.use('/api/equipment', authMiddleware, buildEquipmentRouter({ equipmentRepo, equipmentManager, socketServer }));
+app.use('/api/reports', authMiddleware, buildReportsRouter({ positionRepo }));
+app.use('/api/users', authMiddleware, requireRole('admin'), buildUsersRouter({ userRepo }));
+
+// Estado de flota / parada preventiva — usado también por UIs no autenticadas
+// (operador/supervisor en campo, mismas reglas que antes de la migración)
+app.use('/api/fleet', buildFleetRouter({ preventiveStopService, fleetState }));
+
+// ── Health check ───────────────────────────────────────────────
+app.get('/health', async (req, res) => {
+  const [pgOk, redisOk] = await Promise.all([db.checkConnection(), redis.checkConnection()]);
+  res.json({
+    status: pgOk && redisOk ? 'ok' : 'degraded',
+    timestamp: new Date().toISOString(),
+    services: {
+      postgres: pgOk ? 'connected' : 'disconnected',
+      redis: redisOk ? 'connected' : 'disconnected',
+      preventiveStop: preventiveStopService.getStatus()
     }
   });
+});
 
-  // Enviar estado de parada preventiva
-  const stopStatus = preventiveStopService.getStatus();
-  if (stopStatus.isActive) {
-    socket.emit('fleet:preventive_stop', {
-      active: true,
-      reason: stopStatus.reason,
-      message: 'ALTO TOTAL — DETENGA EL VEHÍCULO INMEDIATAMENTE Y REPORTE A CENTRAL POR RADIO',
-      loop: true,
-      timestamp: new Date().toISOString()
-    });
+/**
+ * Hidrata en memoria las geocercas y equipo estático desde
+ * PostgreSQL al arrancar, para que la evaluación en tiempo real
+ * (GeofenceAlertService / StaticEquipmentManager) funcione desde
+ * el primer segundo sin esperar a que se creen vía API.
+ */
+async function loadPersistedState() {
+  try {
+    const geofences = await geofenceRepo.findAllActive();
+    geofences.forEach(g => geofenceService.addGeofence({
+      id: g.id,
+      name: g.name,
+      type: g.type,
+      center: { lat: g.center_lat, lon: g.center_lon },
+      radiusMeters: g.radius_meters
+    }));
+    console.log(`✅ ${geofences.length} geocerca(s) cargada(s) desde PostgreSQL`);
+
+    const equipment = await equipmentRepo.findAll();
+    equipment.forEach(eq => equipmentManager.registerEquipment({
+      id: eq.id,
+      name: eq.name,
+      type: eq.type,
+      lat: eq.latitude,
+      lon: eq.longitude,
+      swingRadius: eq.swing_radius,
+      safetyRadius: eq.safety_radius,
+      status: eq.status
+    }));
+    console.log(`✅ ${equipment.length} equipo(s) estático(s) cargado(s) desde PostgreSQL`);
+  } catch (err) {
+    console.error('❌ Error cargando estado persistido:', err.message);
   }
+}
 
-  socket.on('disconnect', () => {
-    console.log(`❌ Cliente desconectado: ${socket.id}`);
+// ── Servidor ───────────────────────────────────────────────────
+const PORT = env.port;
+
+loadPersistedState().finally(() => {
+  signalLostService.startMonitoring();
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Backend GAGA-GPS v2.0 (sistema propio) corriendo en puerto ${PORT}`);
+    console.log(`   Telemetría: GET http://localhost:${PORT}/gps`);
+    console.log(`   Operador:   http://localhost:${PORT}/operator`);
+    console.log(`   Supervisor: http://localhost:${PORT}/supervisor`);
+    console.log(`   Admin:      http://localhost:${PORT}/admin`);
+    console.log(`   Health:     http://localhost:${PORT}/health`);
   });
 });
 
-// ── Servidor ───────────────────────────────────────────────────
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Backend GAGA-GPS v1.0 corriendo en puerto ${PORT}`);
-  console.log(`   Operador:   http://localhost:${PORT}/operator`);
-  console.log(`   Supervisor: http://localhost:${PORT}/supervisor`);
-  console.log(`   Health:     http://localhost:${PORT}/health`);
-});
+module.exports = { app, server, io };

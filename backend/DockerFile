@@ -4,14 +4,19 @@ RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
-COPY backend/package*.json ./
-RUN npm install --omit=dev
+# La estructura dentro del contenedor refleja la del repositorio
+# (backend/, ui-operator/, ui-supervisor/, ui-admin/, maps/ como
+# hermanos en la raíz) para que las rutas relativas de app.js
+# (path.join(__dirname, '../../ui-*')) funcionen igual en Docker
+# y al correr "node src/app.js" localmente.
+COPY backend/package*.json ./backend/
+RUN cd backend && npm install --omit=dev
 
-COPY backend/ ./
+COPY backend/ ./backend/
 COPY ui-operator/ ./ui-operator/
 COPY ui-supervisor/ ./ui-supervisor/
 COPY maps/ ./maps/
 
 EXPOSE 3001
 
-CMD ["node", "src/app.js"]
+CMD ["node", "backend/src/app.js"]

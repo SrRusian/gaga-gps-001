@@ -411,10 +411,10 @@
             .setLngLat(lngLat)
             .setPopup(
               new maplibregl.Popup({ offset: 25 })
-                .setHTML(`<b>Vehículo ${pos.deviceId}</b><br>
+                .setHTML(`<b>${pos.deviceName || ('Vehículo ' + pos.deviceId)}${pos.deviceType ? ' <small>(' + pos.deviceType + ')</small>' : ''}</b><br>
                       Lat: ${pos.latitude.toFixed(6)}<br>
                       Lon: ${pos.longitude.toFixed(6)}<br>
-                      Speed: ${pos.speed} km/h`),
+                      Speed: ${(pos.speed * 3.6).toFixed(1)} km/h`),
             )
             .addTo(map);
         }
@@ -423,7 +423,7 @@
       // ─── ACTUALIZAR MI INFORMACIÓN ─────────────────────────────
       function updateMyInfo(pos) {
         document.getElementById("my-speed").textContent =
-          `${Math.round(pos.speed || 0)} km/h`;
+          `${Math.round((pos.speed || 0) * 3.6)} km/h`;
         document.getElementById("my-lat").textContent = pos.latitude.toFixed(5);
         document.getElementById("my-lon").textContent =
           pos.longitude.toFixed(5);
