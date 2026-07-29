@@ -216,6 +216,81 @@
           opacity: 0.3;
         }
       }
+
+      /* Overlays de configuración de dispositivo y login de turno */
+      .full-overlay {
+        display: none;
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(10, 10, 20, 0.97);
+        z-index: 3000;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .full-overlay.active { display: flex; }
+
+      .overlay-card {
+        background: #16213e;
+        border: 1px solid #333;
+        border-radius: 10px;
+        padding: 28px;
+        width: 320px;
+        max-width: 90vw;
+      }
+
+      .overlay-card h2 {
+        color: #00ff88;
+        font-size: 18px;
+        margin-bottom: 8px;
+      }
+
+      .overlay-card p {
+        font-size: 13px;
+        color: #aaa;
+        margin-bottom: 16px;
+        line-height: 1.4;
+      }
+
+      .overlay-card input {
+        width: 100%;
+        padding: 12px;
+        margin-bottom: 10px;
+        background: #0d1117;
+        border: 1px solid #333;
+        border-radius: 6px;
+        color: #fff;
+        font-size: 15px;
+      }
+
+      .overlay-card button {
+        width: 100%;
+        padding: 12px;
+        background: #00ff88;
+        border: none;
+        border-radius: 6px;
+        color: #0d1117;
+        font-weight: bold;
+        font-size: 15px;
+        cursor: pointer;
+      }
+
+      .overlay-error {
+        color: #ff4444;
+        font-size: 13px;
+        margin-top: 8px;
+        min-height: 16px;
+      }
+
+      #btn-end-shift {
+        background: none;
+        border: 1px solid #ff4444;
+        color: #ff4444;
+        font-size: 11px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -226,7 +301,41 @@
         <div id="status-dot"></div>
         <span id="status-text">Desconectado</span>
       </div>
-      <div id="vehicle-count">0 vehículos</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span id="operator-name" style="font-size:12px;color:#aaa;"></span>
+        <button id="btn-end-shift" onclick="endShift()" style="display:none;">Finalizar turno</button>
+        <div id="vehicle-count">0 vehículos</div>
+      </div>
+    </div>
+
+    <!-- Configuración de dispositivo — solo la primera vez que se
+         instala la tableta en un vehículo (tarea de mantenimiento,
+         no del operador). Ver resolveDeviceId(). -->
+    <div id="device-setup-overlay" class="full-overlay">
+      <div class="overlay-card">
+        <h2>🔧 Configuración de dispositivo</h2>
+        <p>Esta tableta aún no tiene un identificador de vehículo asignado.
+           Ingresa el mismo "Device Identifier" configurado en Traccar Client
+           para esta máquina. Esto solo se hace una vez, al instalar la tableta.</p>
+        <input id="setup-device-id" placeholder="Ej. CAMION-01" autocapitalize="characters" />
+        <button onclick="saveDeviceSetup()">Guardar</button>
+        <div class="overlay-error" id="setup-error"></div>
+      </div>
+    </div>
+
+    <!-- Login de turno — identifica al operador, independiente del
+         vehículo (que ya está fijo por el overlay anterior). Permite
+         que la misma persona inicie turno en máquinas distintas y
+         que el sistema lleve el registro por separado. -->
+    <div id="operator-login-overlay" class="full-overlay">
+      <div class="overlay-card">
+        <h2>👤 Iniciar turno</h2>
+        <p>Ingresa tus credenciales para comenzar tu turno en este vehículo.</p>
+        <input id="login-email" type="email" placeholder="Email" autocomplete="username" />
+        <input id="login-password" type="password" placeholder="Contraseña" autocomplete="current-password" />
+        <button onclick="doOperatorLogin()">Iniciar turno</button>
+        <div class="overlay-error" id="login-error"></div>
+      </div>
     </div>
 
     <!-- Mapa principal -->
@@ -267,12 +376,89 @@
 
     <script>
       // ─── CONFIGURACIÓN ─────────────────────────────────────────
-      const BACKEND_URL =
-        window.location.hostname === "localhost"
-          ? "http://localhost:3001"
-          : "https://app.gaga-maquinaria.com";
-      const MY_DEVICE_ID = 1; // Cambiar según el dispositivo
-      const MY_VEHICLE_NAME = "Prueba Tableta 01";
+      // Same-origin — la UI siempre la sirve el mismo backend al que
+      // debe hablar, sin importar si se accede por localhost, IP LAN
+      // o dominio de producción (antes esto rompía en LAN).
+      const BACKEND_URL = "";
+
+      let MY_DEVICE_ID = null;   // resuelto por resolveDeviceId()
+      let MY_VEHICLE_NAME = "Vehículo";
+      let operatorToken = null;
+      let operatorSession = null; // { id, user_name, ... }
+
+      /**
+       * Identidad del vehículo — fija por configuración de kiosco,
+       * NO por login. Se lee de ?device= en la URL (configurado una
+       * sola vez por el técnico que instala la tableta, p. ej. como
+       * acceso directo/kiosco en la pantalla de inicio de Android) o,
+       * si falta, del valor guardado en un arranque anterior. Si no
+       * hay ninguno, se pide configurarlo una vez (ver
+       * device-setup-overlay) — nunca se asume un valor por defecto.
+       */
+      function resolveDeviceId() {
+        const params = new URLSearchParams(window.location.search);
+        const fromUrl = params.get("device");
+        if (fromUrl) {
+          localStorage.setItem("gaga_operator_device_id", fromUrl);
+          return fromUrl;
+        }
+        return localStorage.getItem("gaga_operator_device_id");
+      }
+
+      async function saveDeviceSetup() {
+        const value = document.getElementById("setup-device-id").value.trim();
+        const errorEl = document.getElementById("setup-error");
+        errorEl.style.color = "#ff4444";
+        errorEl.textContent = "";
+
+        if (!value) {
+          errorEl.textContent = "Ingresa el identificador del dispositivo";
+          return;
+        }
+
+        // Verificar contra el sistema ANTES de continuar — evita que
+        // un ID inventado o mal tecleado avance hasta el login/turno.
+        try {
+          errorEl.style.color = "#8b949e";
+          errorEl.textContent = "Verificando...";
+          const res = await fetch(`${BACKEND_URL}/api/devices/lookup/${encodeURIComponent(value)}`);
+          const data = await res.json();
+
+          if (!data.exists) {
+            errorEl.style.color = "#ff4444";
+            errorEl.textContent = `"${value}" no existe en el sistema — verifica que coincida exactamente con el Device Identifier configurado en Traccar Client, y que la tableta ya haya enviado al menos una posición GPS.`;
+            return;
+          }
+
+          if (data.activeSession) {
+            // No bloquea — es una tableta distinta a la que ya tiene
+            // turno abierto en ese vehículo, algo que normalmente no
+            // debería pasar (cada vehículo debe tener un solo
+            // identificador, usado por una sola tableta física).
+            const proceed = confirm(
+              `⚠️ "${value}" (${data.name}) ya tiene un turno activo con ${data.activeSession.userName} desde ${new Date(data.activeSession.startedAt).toLocaleString()}.\n\n` +
+              `Si esta es una tableta DISTINTA a la que normalmente usa ese vehículo, probablemente hay un identificador duplicado — verifica con el administrador antes de continuar.\n\n` +
+              `¿Continuar de todos modos?`
+            );
+            if (!proceed) {
+              errorEl.style.color = "#8b949e";
+              errorEl.textContent = "";
+              return;
+            }
+          }
+        } catch (err) {
+          errorEl.style.color = "#ff4444";
+          errorEl.textContent = "No se pudo verificar el dispositivo — revisa la conexión con el servidor";
+          return;
+        }
+
+        localStorage.setItem("gaga_operator_device_id", value);
+        // Refleja el valor en la URL para que, si esta pantalla se
+        // guarda como acceso directo/kiosco, quede ya configurado.
+        const url = new URL(window.location.href);
+        url.searchParams.set("device", value);
+        window.location.href = url.toString();
+      }
 
       // ─── ESTADO DE LA FLOTA ────────────────────────────────────
       const fleetState = {};
@@ -313,7 +499,7 @@
         // Capa de ortofoto Alcarazes
         map.addSource("alcaraces", {
           type: "raster",
-          tiles: ["http://localhost:3001/tiles/alcaraces/{z}/{x}/{y}.png"],
+          tiles: [`${window.location.origin}/tiles/alcaraces/{z}/{x}/{y}.png`],
           tileSize: 256,
           minzoom: 14,
           maxzoom: 18,
@@ -345,7 +531,6 @@
       socket.on("connect", () => {
         console.log("Conectado al backend GAGA-GPS");
         updateConnectionStatus(true);
-        document.getElementById("device-name").textContent = MY_VEHICLE_NAME;
       });
 
       socket.on("disconnect", () => {
@@ -428,6 +613,12 @@
         document.getElementById("my-lon").textContent =
           pos.longitude.toFixed(5);
         document.getElementById("my-status").textContent = "🟢 En línea";
+
+        if (pos.deviceName) {
+          MY_VEHICLE_NAME = pos.deviceName;
+          document.getElementById("device-name").textContent =
+            `${pos.deviceName}${pos.deviceType ? ' (' + pos.deviceType + ')' : ''}`;
+        }
       }
 
       // ─── CENTRAR EN MI POSICIÓN ────────────────────────────────
@@ -641,6 +832,149 @@
         document.getElementById("alert-message").className = "";
         document.getElementById("alert-message").textContent = "";
       }
+
+      // ─── TURNO DE OPERADOR ─────────────────────────────────────
+      // Identifica QUIÉN opera este vehículo — independiente de
+      // MY_DEVICE_ID (que ya está fijo por resolveDeviceId()). Un
+      // mismo operador puede iniciar turno en máquinas distintas en
+      // turnos distintos; el backend lleva el registro por separado
+      // en la tabla operator_sessions (ver /api/operator-sessions).
+      async function initOperatorAuth() {
+        if (!MY_DEVICE_ID) {
+          document.getElementById("device-setup-overlay").classList.add("active");
+          return;
+        }
+
+        document.getElementById("device-name").textContent = MY_DEVICE_ID;
+
+        operatorToken = localStorage.getItem("gaga_operator_token");
+        const storedSession = localStorage.getItem("gaga_operator_session");
+        const parsedSession = storedSession ? JSON.parse(storedSession) : null;
+
+        if (operatorToken && parsedSession) {
+          try {
+            const res = await fetch(`${BACKEND_URL}/api/operator-sessions/active?deviceId=${encodeURIComponent(MY_DEVICE_ID)}`);
+            const active = await res.json();
+            // La sesión activa en el backend (fuente de verdad) debe
+            // coincidir con la guardada localmente — si alguien más
+            // cerró el turno (o inició otro) desde el panel admin u
+            // otro dispositivo, se pide iniciar sesión de nuevo.
+            if (active && active.id === parsedSession.id) {
+              showOperatorBar(parsedSession);
+              return;
+            }
+          } catch (err) {
+            console.error("No se pudo verificar el turno activo:", err.message);
+          }
+          localStorage.removeItem("gaga_operator_token");
+          localStorage.removeItem("gaga_operator_session");
+          operatorToken = null;
+        }
+
+        document.getElementById("operator-login-overlay").classList.add("active");
+      }
+
+      function showOperatorBar(session) {
+        operatorSession = session;
+        document.getElementById("operator-login-overlay").classList.remove("active");
+        document.getElementById("operator-name").textContent = `👤 ${session.user_name}`;
+        document.getElementById("btn-end-shift").style.display = "";
+        startHeartbeat();
+      }
+
+      async function doOperatorLogin() {
+        const email = document.getElementById("login-email").value;
+        const password = document.getElementById("login-password").value;
+        const errorEl = document.getElementById("login-error");
+        errorEl.textContent = "";
+
+        try {
+          const loginRes = await fetch(`${BACKEND_URL}/api/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            // longLived: el turno debe persistir varios días sin
+            // forzar re-login (a diferencia del panel admin) — la
+            // expiración real por inactividad la maneja el heartbeat
+            // + el job de limpieza del backend, no el JWT en sí.
+            body: JSON.stringify({ email, password, longLived: true })
+          });
+          const loginData = await loginRes.json();
+          if (!loginRes.ok) throw new Error(loginData.error || "Credenciales inválidas");
+
+          operatorToken = loginData.token;
+
+          const sessionRes = await fetch(`${BACKEND_URL}/api/operator-sessions/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${operatorToken}` },
+            body: JSON.stringify({ deviceId: MY_DEVICE_ID })
+          });
+          const sessionData = await sessionRes.json();
+          if (!sessionRes.ok) throw new Error(sessionData.error || "No se pudo iniciar el turno");
+
+          const session = { id: sessionData.id, user_name: loginData.user.name };
+          localStorage.setItem("gaga_operator_token", operatorToken);
+          localStorage.setItem("gaga_operator_session", JSON.stringify(session));
+          showOperatorBar(session);
+        } catch (err) {
+          errorEl.textContent = err.message;
+        }
+      }
+
+      async function endShift() {
+        if (!operatorSession) return;
+        if (!confirm("¿Finalizar tu turno?")) return;
+
+        try {
+          await fetch(`${BACKEND_URL}/api/operator-sessions/${operatorSession.id}/end`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${operatorToken}` }
+          });
+        } catch (err) {
+          console.error("Error cerrando turno (se limpia localmente igual):", err.message);
+        }
+
+        localStorage.removeItem("gaga_operator_token");
+        localStorage.removeItem("gaga_operator_session");
+        operatorToken = null;
+        operatorSession = null;
+        document.getElementById("operator-name").textContent = "";
+        document.getElementById("btn-end-shift").style.display = "none";
+        document.getElementById("operator-login-overlay").classList.add("active");
+        stopHeartbeat();
+      }
+
+      // ─── HEARTBEAT DE TURNO ─────────────────────────────────────
+      // Mientras la pestaña siga abierta con un turno activo, se
+      // notifica actividad cada 5 minutos — esto es lo que permite
+      // que el turno persista indefinidamente durante uso normal
+      // (ver operatorSessionMaxIdleDays en el backend).
+      let heartbeatTimer = null;
+
+      function startHeartbeat() {
+        stopHeartbeat();
+        heartbeatTimer = setInterval(async () => {
+          if (!operatorSession || !operatorToken) return;
+          try {
+            await fetch(`${BACKEND_URL}/api/operator-sessions/${operatorSession.id}/heartbeat`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${operatorToken}` }
+            });
+          } catch (err) {
+            console.error("Error en heartbeat de turno:", err.message);
+          }
+        }, 5 * 60 * 1000);
+      }
+
+      function stopHeartbeat() {
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      }
+
+      // ─── ARRANQUE ──────────────────────────────────────────────
+      MY_DEVICE_ID = resolveDeviceId();
+      initOperatorAuth();
     </script>
   </body>
 </html>

@@ -9,12 +9,13 @@ const { pool, query } = require('../config/database');
 
 /**
  * Error específico para cuando se intenta eliminar un dispositivo
- * que aún tiene posiciones asociadas — permite a la capa de rutas
- * responder 409 con un mensaje claro en lugar de un 500 genérico.
+ * que aún tiene posiciones y/o turnos de operador asociados —
+ * permite a la capa de rutas responder 409 con un mensaje claro en
+ * lugar de un 500 genérico.
  */
 class DeviceHasPositionsError extends Error {
   constructor(uniqueId) {
-    super(`El dispositivo ${uniqueId} tiene posiciones registradas — no se puede eliminar sin forzar`);
+    super(`El dispositivo ${uniqueId} tiene posiciones y/o turnos de operador registrados — no se puede eliminar sin forzar`);
     this.code = 'DEVICE_HAS_POSITIONS';
   }
 }
@@ -125,20 +126,23 @@ class DeviceRepository {
   }
 
   /**
-   * Elimina un dispositivo. Por defecto, si tiene posiciones
-   * registradas (caso común — la telemetría persiste desde el
-   * primer reporte) se rechaza con DeviceHasPositionsError para
-   * preservar el historial de auditoría/seguridad.
+   * Elimina un dispositivo. Por defecto, si tiene posiciones y/o
+   * turnos de operador registrados (casos comunes — la telemetría
+   * persiste desde el primer reporte) se rechaza con
+   * DeviceHasPositionsError para preservar el historial de
+   * auditoría/seguridad.
    *
    * @param {boolean} force - si es true, purga también el historial
-   *   de posiciones del dispositivo antes de eliminarlo (acción
-   *   destructiva explícita, no es el comportamiento por defecto).
+   *   de posiciones y turnos de operador del dispositivo antes de
+   *   eliminarlo (acción destructiva explícita, no es el
+   *   comportamiento por defecto).
    */
   async delete(id, { force = false } = {}) {
     const client = force ? await pool.connect() : null;
     try {
       if (force) {
         await client.query('BEGIN');
+        await client.query('DELETE FROM operator_sessions WHERE device_id = (SELECT unique_id FROM devices WHERE id = $1)', [id]);
         await client.query('DELETE FROM positions WHERE device_id = (SELECT unique_id FROM devices WHERE id = $1)', [id]);
         await client.query('DELETE FROM devices WHERE id = $1', [id]);
         await client.query('COMMIT');

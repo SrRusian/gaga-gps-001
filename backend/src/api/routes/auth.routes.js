@@ -31,10 +31,16 @@ function buildAuthRouter({ userRepo }) {
         return res.status(401).json({ error: 'Credenciales inválidas' });
       }
 
+      // longLived: usado por la UI de operador (tableta fija en el
+      // vehículo) — se espera que el turno persista por varios días
+      // sin forzar re-login constante; el panel admin sigue usando
+      // la expiración corta (env.jwtExpiresIn) por defecto.
+      const expiresIn = req.body.longLived ? env.operatorJwtExpiresIn : env.jwtExpiresIn;
+
       const token = jwt.sign(
         { id: user.id, email: user.email, name: user.name, role: user.role },
         env.jwtSecret,
-        { expiresIn: env.jwtExpiresIn }
+        { expiresIn }
       );
 
       console.log(`✅ Login exitoso: ${user.email} (${user.role})`);

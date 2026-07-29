@@ -7,6 +7,7 @@
 
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const { UserHasSessionsError } = require('../../repositories/UserRepository');
 
 function buildUsersRouter({ userRepo }) {
   const router = express.Router();
@@ -63,9 +64,20 @@ function buildUsersRouter({ userRepo }) {
 
   router.delete('/:id', async (req, res) => {
     try {
-      await userRepo.delete(req.params.id);
+      // ?force=true purga también sus turnos de operador registrados
+      // — acción destructiva explícita, no es el comportamiento por
+      // defecto (se recomienda desactivar para conservar el historial).
+      const force = req.query.force === 'true';
+      await userRepo.delete(req.params.id, { force });
       res.json({ success: true });
     } catch (err) {
+      if (err instanceof UserHasSessionsError) {
+        return res.status(409).json({
+          error: 'El usuario tiene turnos de operador registrados — considere desactivarlo en vez de eliminarlo',
+          code: err.code,
+          hint: 'Reintente con ?force=true si desea eliminar también su historial de turnos'
+        });
+      }
       console.error('❌ users.routes DELETE /:id:', err.message);
       res.status(500).json({ error: 'Error eliminando usuario' });
     }

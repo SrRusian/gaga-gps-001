@@ -7,7 +7,21 @@
  * este repositorio solo persiste el valor recibido.
  */
 
-const { query } = require('../config/database');
+const { pool, query } = require('../config/database');
+
+/**
+ * Error específico para cuando se intenta eliminar un usuario que
+ * tiene turnos de operador (operator_sessions) registrados — igual
+ * que con DeviceHasPositionsError, evita perder el historial de
+ * horas trabajadas por accidente (útil para auditoría/nómina aunque
+ * el usuario ya no esté activo).
+ */
+class UserHasSessionsError extends Error {
+  constructor(email) {
+    super(`El usuario ${email} tiene turnos de operador registrados — considere desactivarlo en vez de eliminarlo, o elimine con force=true si de verdad desea perder ese historial`);
+    this.code = 'USER_HAS_SESSIONS';
+  }
+}
 
 class UserRepository {
 
@@ -85,15 +99,43 @@ class UserRepository {
     }
   }
 
-  async delete(id) {
+  /**
+   * Elimina un usuario. Por defecto, si tiene turnos de operador
+   * registrados (operator_sessions) se rechaza con
+   * UserHasSessionsError — se recomienda desactivar en vez de
+   * eliminar para conservar el historial de horas trabajadas.
+   *
+   * @param {boolean} force - si es true, purga también sus turnos
+   *   registrados antes de eliminar (acción destructiva explícita).
+   */
+  async delete(id, { force = false } = {}) {
+    const client = force ? await pool.connect() : null;
     try {
-      await query('DELETE FROM users WHERE id = $1', [id]);
+      if (force) {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM operator_sessions WHERE user_id = $1', [id]);
+        await client.query('DELETE FROM users WHERE id = $1', [id]);
+        await client.query('COMMIT');
+      } else {
+        await query('DELETE FROM users WHERE id = $1', [id]);
+      }
       return true;
     } catch (err) {
+      if (client) await client.query('ROLLBACK').catch(() => {});
+
+      // 23503 = foreign_key_violation en PostgreSQL
+      if (err.code === '23503') {
+        const user = await this.findById(id);
+        throw new UserHasSessionsError(user ? user.email : id);
+      }
+
       console.error('❌ UserRepository.delete:', err.message);
       throw err;
+    } finally {
+      if (client) client.release();
     }
   }
 }
 
 module.exports = UserRepository;
+module.exports.UserHasSessionsError = UserHasSessionsError;

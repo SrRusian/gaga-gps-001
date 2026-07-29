@@ -386,7 +386,9 @@
         }
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || `Error ${res.status}`);
+          const err = new Error(body.error || `Error ${res.status}`);
+          err.code = body.code; // p. ej. DEVICE_HAS_POSITIONS, USER_HAS_SESSIONS
+          throw err;
         }
         return res.headers.get('content-type')?.includes('json') ? res.json() : res.text();
       }
@@ -487,9 +489,9 @@
           await api(`/api/devices/${id}`, { method: 'DELETE' });
           loadDevices();
         } catch (err) {
-          // 409 → el dispositivo tiene historial de posiciones (ver DeviceHasPositionsError)
-          if (err.message.includes('posiciones registradas')) {
-            if (confirm(`${err.message}\n\n¿Eliminar también su historial de posiciones? Esta acción no se puede deshacer.`)) {
+          // 409 → el dispositivo tiene historial de posiciones/turnos (ver DeviceHasPositionsError)
+          if (err.code === 'DEVICE_HAS_POSITIONS') {
+            if (confirm(`${err.message}\n\n¿Eliminar también ese historial? Esta acción no se puede deshacer.`)) {
               await api(`/api/devices/${id}?force=true`, { method: 'DELETE' });
               loadDevices();
             }
@@ -895,11 +897,19 @@
           document.getElementById('users-table').innerHTML = users.map(u => `
             <tr>
               <td>${u.email}</td><td>${u.name}</td><td>${u.role}</td><td>${u.active ? 'Sí' : 'No'}</td>
-              <td><button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})">Eliminar</button></td>
+              <td>
+                <button class="btn btn-sm" onclick="toggleUserActive(${u.id}, ${u.active})">${u.active ? 'Desactivar' : 'Activar'}</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})">Eliminar</button>
+              </td>
             </tr>`).join('');
         } catch (err) {
           document.getElementById('users-table').innerHTML = `<tr><td colspan="5">${err.message}</td></tr>`;
         }
+      }
+
+      async function toggleUserActive(id, currentlyActive) {
+        await api(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify({ active: !currentlyActive }) });
+        loadUsers();
       }
 
       async function createUser() {
@@ -914,8 +924,20 @@
 
       async function deleteUser(id) {
         if (!confirm('¿Eliminar usuario?')) return;
-        await api(`/api/users/${id}`, { method: 'DELETE' });
-        loadUsers();
+        try {
+          await api(`/api/users/${id}`, { method: 'DELETE' });
+          loadUsers();
+        } catch (err) {
+          // 409 → el usuario tiene turnos de operador registrados (ver UserHasSessionsError)
+          if (err.code === 'USER_HAS_SESSIONS') {
+            if (confirm(`${err.message}\n\n¿Eliminar también su historial de turnos? Esta acción no se puede deshacer.\n\n(Sugerencia: puede usar el botón "Desactivar" en vez de eliminar, para conservar su historial.)`)) {
+              await api(`/api/users/${id}?force=true`, { method: 'DELETE' });
+              loadUsers();
+            }
+          } else {
+            alert(err.message);
+          }
+        }
       }
 
       // ── Sistema ────────────────────────────────────────────

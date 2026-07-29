@@ -24,6 +24,7 @@ const GeofenceRepository = require('./repositories/GeofenceRepository');
 const GeofenceEventRepository = require('./repositories/GeofenceEventRepository');
 const EquipmentRepository = require('./repositories/EquipmentRepository');
 const UserRepository = require('./repositories/UserRepository');
+const OperatorSessionRepository = require('./repositories/OperatorSessionRepository');
 
 // ── Servicios de seguridad — NO se modifican, solo se integran ─
 const GeofenceAlertService = require('./services/alerts/GeofenceAlertService');
@@ -53,6 +54,7 @@ const buildFleetRouter = require('./api/routes/fleet.routes');
 const buildMapsRouter = require('./api/routes/maps.routes');
 const buildReportsRouter = require('./api/routes/reports.routes');
 const buildUsersRouter = require('./api/routes/users.routes');
+const buildOperatorSessionsRouter = require('./api/routes/operator-sessions.routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -73,6 +75,7 @@ const geofenceRepo = new GeofenceRepository();
 const geofenceEventRepo = new GeofenceEventRepository();
 const equipmentRepo = new EquipmentRepository();
 const userRepo = new UserRepository();
+const operatorSessionRepo = new OperatorSessionRepository();
 
 const authMiddleware = buildAuthMiddleware({ userRepo });
 
@@ -117,11 +120,16 @@ app.use('/tiles', buildMapsRouter({ mapsDir: path.join(__dirname, '../../', env.
 app.use('/api/auth', authLimiter, buildAuthRouter({ userRepo }));
 
 // ── API REST protegida (panel admin) ─────────────────────────────
-app.use('/api/devices', authMiddleware, buildDevicesRouter({ deviceRepo }));
+app.use('/api/devices', buildDevicesRouter({ deviceRepo, operatorSessionRepo, authMiddleware }));
 app.use('/api/geofences', authMiddleware, buildGeofencesRouter({ geofenceRepo, geofenceService, socketServer }));
 app.use('/api/equipment', authMiddleware, buildEquipmentRouter({ equipmentRepo, equipmentManager, socketServer }));
 app.use('/api/reports', authMiddleware, buildReportsRouter({ positionRepo, geofenceRepo }));
 app.use('/api/users', authMiddleware, requireRole('admin'), buildUsersRouter({ userRepo }));
+
+// Turnos operador-vehículo — /active es pública (la consulta la UI
+// de operador antes de loguearse); /start, /:id/end y /report
+// requieren JWT (aplicado dentro del propio router, ver operator-sessions.routes.js)
+app.use('/api/operator-sessions', buildOperatorSessionsRouter({ operatorSessionRepo, authMiddleware, requireRole }));
 
 // Estado de flota / parada preventiva — usado también por UIs no autenticadas
 // (operador/supervisor en campo, mismas reglas que antes de la migración)
@@ -175,6 +183,18 @@ const PORT = env.port;
 
 loadPersistedState().finally(() => {
   signalLostService.startMonitoring();
+
+  // Cierra automáticamente turnos de operador sin actividad (sin
+  // heartbeat) por más de operatorSessionMaxIdleDays — protege
+  // contra tabletas perdidas/app cerrada sin cerrar turno. Corre al
+  // arrancar y luego cada 6 horas.
+  const closeStale = () => {
+    operatorSessionRepo.closeStaleSessions(env.operatorSessionMaxIdleDays).catch(err => {
+      console.error('❌ Error cerrando turnos inactivos:', err.message);
+    });
+  };
+  closeStale();
+  setInterval(closeStale, 6 * 60 * 60 * 1000);
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Backend GAGA-GPS v2.0 (sistema propio) corriendo en puerto ${PORT}`);

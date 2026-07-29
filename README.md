@@ -247,6 +247,8 @@ o `backend/.env.production` (prod) y completar.
 | `REDIS_PASSWORD` | Sí | Contraseña de Redis |
 | `JWT_SECRET` | **Obligatoria en producción** | Firma de tokens del panel admin. El backend **falla al arrancar** si `NODE_ENV=production` y falta |
 | `JWT_EXPIRES_IN` | No (default `8h`) | Vigencia del token de sesión del panel admin |
+| `OPERATOR_JWT_EXPIRES_IN` | No (default `30d`) | Vigencia del token de la UI de operador — ver [Turnos de operador](#turnos-de-operador-y-vinculación-de-dispositivo) |
+| `OPERATOR_SESSION_MAX_IDLE_DAYS` | No (default `7`) | Días sin heartbeat tras los cuales se cierra automáticamente un turno abandonado |
 | `TELEMETRY_SHARED_SECRET` | **Obligatoria en producción** | Clave compartida para `/gps` — mitiga que terceros inyecten posiciones falsas. El backend falla al arrancar en producción si falta. Ver detalle en [Seguridad del backend](#seguridad-del-backend) |
 | `PORT` | No (default `3001`) | Puerto HTTP del backend |
 | `NODE_ENV` | Sí | `development` o `production` — activa validaciones estrictas de seguridad en `production` |
@@ -293,8 +295,9 @@ obtenido en el login.
 |---|---|---|---|
 | GET/POST | `/gps` | Clave compartida opcional | Receptor de telemetría (protocolo OsmAnd) |
 | GET | `/tiles/alcaraces/:z/:x/:y.png` | No | Tiles de mapa offline (MBTiles) |
-| POST | `/api/auth/login` | No | Login — devuelve JWT |
+| POST | `/api/auth/login` | No | Login — devuelve JWT. Body opcional `longLived: true` para tokens de larga duración (ver Turnos de operador) |
 | POST | `/api/auth/logout` | No | Logout (invalidación es responsabilidad del cliente) |
+| GET | `/api/devices/lookup/:uniqueId` | No | Verifica si un dispositivo existe y si tiene turno activo — usado por la pantalla de configuración de ui-operator |
 | GET | `/api/devices` | JWT | Listar dispositivos |
 | GET | `/api/devices/:id` | JWT | Detalle de un dispositivo |
 | POST | `/api/devices` | JWT | Crear dispositivo |
@@ -318,6 +321,11 @@ obtenido en el login.
 | PATCH | `/api/users/:id` | JWT (`admin`) | Editar usuario (nombre, rol, activo) |
 | POST | `/api/users/:id/password` | JWT (`admin`) | Cambiar contraseña |
 | DELETE | `/api/users/:id` | JWT (`admin`) | Eliminar usuario |
+| GET | `/api/operator-sessions/active?deviceId=` | No | Turno activo (si lo hay) de un dispositivo |
+| POST | `/api/operator-sessions/start` | JWT | Inicia turno del usuario autenticado en un dispositivo (cierra automáticamente cualquier turno previo abierto de ese dispositivo) |
+| POST | `/api/operator-sessions/:id/end` | JWT | Cierra el turno explícitamente |
+| POST | `/api/operator-sessions/:id/heartbeat` | JWT | Marca actividad reciente — evita el cierre automático por inactividad |
+| GET | `/api/operator-sessions/report` | JWT (`admin`/`supervisor`) | Reporte de turnos por operador y/o dispositivo, con duración |
 | GET | `/api/fleet/state` | No | Estado actual de toda la flota (lectura desde Redis) |
 | POST | `/api/fleet/stop` | No | Activar parada preventiva colectiva |
 | POST | `/api/fleet/resume` | No | Desactivar parada preventiva (solo supervisor) |
@@ -419,6 +427,40 @@ Estimados de referencia (con compresión activa):
 | 1 vehículo | cada 1s | ~0.5 GB |
 | 10 vehículos | cada 1s | ~4-6 GB |
 | 50 vehículos | cada 1s | ~20-30 GB |
+
+## Turnos de operador y vinculación de dispositivo
+
+Separa dos identidades que no deben mezclarse — el mismo patrón que
+usan sistemas de flotillas profesionales (Samsara, Geotab):
+
+- **Identidad del vehículo/tableta** — fija por configuración de
+  kiosco, no por login. Se resuelve leyendo `?device=X` en la URL
+  de `ui-operator` (configurado una sola vez por el técnico que
+  instala la tableta, p. ej. como acceso directo/kiosco en Android),
+  con fallback a `localStorage`. Si no hay ninguno configurado, se
+  muestra una pantalla de configuración que **valida contra el
+  sistema** (`GET /api/devices/lookup/:uniqueId`) antes de continuar
+  — evita que un ID inventado o mal tecleado avance hasta el login,
+  y advierte (sin bloquear) si ese dispositivo ya tiene un turno
+  activo con otro operador, para detectar identificadores duplicados
+  entre tabletas.
+- **Identidad del operador** — turno de trabajo independiente,
+  registrado en `operator_sessions` (login con el mismo sistema de
+  usuarios/JWT del panel admin). Un mismo operador puede iniciar
+  turno en máquinas distintas en momentos distintos — el sistema
+  lleva el registro por separado, permitiendo reportar tanto
+  "¿quién operó este vehículo?" como "¿cuántas horas trabajó esta
+  persona, en qué máquinas?" (`GET /api/operator-sessions/report`).
+
+**Persistencia del turno**: el login del operador usa un JWT de
+larga duración (`OPERATOR_JWT_EXPIRES_IN`, 30 días por defecto) —
+distinto al del panel admin (`JWT_EXPIRES_IN`, 8h) — para no forzar
+re-login constante. Mientras la pestaña siga abierta, `ui-operator`
+envía un heartbeat cada 5 minutos (`POST /api/operator-sessions/:id/heartbeat`).
+Si un turno deja de recibir heartbeats por más de
+`OPERATOR_SESSION_MAX_IDLE_DAYS` (7 días por defecto — tableta
+perdida, app cerrada sin cerrar turno), el backend lo cierra
+automáticamente en segundo plano.
 
 ## Panel de administración
 

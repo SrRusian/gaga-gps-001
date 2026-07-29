@@ -15,6 +15,13 @@ const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-cambiar-en-produccion',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',
+  // Token de la UI de operador (tableta fija en el vehículo) — vive
+  // mucho más que el del panel admin porque no queremos forzar
+  // re-login constante en un turno de varios días; la expiración
+  // real por inactividad la maneja operatorSessionMaxIdleDays
+  // (ver OperatorSessionRepository.closeStaleSessions).
+  operatorJwtExpiresIn: process.env.OPERATOR_JWT_EXPIRES_IN || '30d',
+  operatorSessionMaxIdleDays: parseInt(process.env.OPERATOR_SESSION_MAX_IDLE_DAYS || '7', 10),
   mapsDir: process.env.MAPS_DIR || 'maps',
   // Clave compartida opcional para /gps — ver telemetry.routes.js.
   // Null = endpoint abierto (solo protegido por rate limit), útil

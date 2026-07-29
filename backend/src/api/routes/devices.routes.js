@@ -3,15 +3,43 @@
  *
  * CRUD completo de dispositivos (tabletas) en PostgreSQL.
  * Reemplaza la gestión de dispositivos del panel de Traccar.
+ *
+ * `/lookup/:uniqueId` es público (sin JWT) — lo consulta la
+ * pantalla de configuración de ui-operator para validar el
+ * dispositivo ANTES de pedir login, evitando que un ID inventado
+ * o mal tecleado avance hasta el flujo de turno.
  */
 
 const express = require('express');
 const { DeviceHasPositionsError } = require('../../repositories/DeviceRepository');
 
-function buildDevicesRouter({ deviceRepo }) {
+function buildDevicesRouter({ deviceRepo, operatorSessionRepo, authMiddleware }) {
   const router = express.Router();
 
-  router.get('/', async (req, res) => {
+  router.get('/lookup/:uniqueId', async (req, res) => {
+    try {
+      const device = await deviceRepo.findByUniqueId(req.params.uniqueId);
+      if (!device) return res.json({ exists: false });
+
+      const activeSession = operatorSessionRepo
+        ? await operatorSessionRepo.findActiveByDevice(req.params.uniqueId)
+        : null;
+
+      res.json({
+        exists: true,
+        name: device.name,
+        type: device.type,
+        activeSession: activeSession
+          ? { userName: activeSession.user_name, startedAt: activeSession.started_at }
+          : null
+      });
+    } catch (err) {
+      console.error('❌ devices.routes GET /lookup/:uniqueId:', err.message);
+      res.status(500).json({ error: 'Error verificando dispositivo' });
+    }
+  });
+
+  router.get('/', authMiddleware, async (req, res) => {
     try {
       const devices = await deviceRepo.findAll();
       res.json(devices);
@@ -21,7 +49,7 @@ function buildDevicesRouter({ deviceRepo }) {
     }
   });
 
-  router.get('/:id', async (req, res) => {
+  router.get('/:id', authMiddleware, async (req, res) => {
     try {
       const device = await deviceRepo.findById(req.params.id);
       if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
@@ -32,7 +60,7 @@ function buildDevicesRouter({ deviceRepo }) {
     }
   });
 
-  router.post('/', async (req, res) => {
+  router.post('/', authMiddleware, async (req, res) => {
     try {
       const { uniqueId, name, type, attributes } = req.body;
       if (!uniqueId || !name) {
@@ -46,7 +74,7 @@ function buildDevicesRouter({ deviceRepo }) {
     }
   });
 
-  router.patch('/:id', async (req, res) => {
+  router.patch('/:id', authMiddleware, async (req, res) => {
     try {
       const { name, type, attributes } = req.body;
       const device = await deviceRepo.update(req.params.id, { name, type, attributes });
@@ -58,7 +86,7 @@ function buildDevicesRouter({ deviceRepo }) {
     }
   });
 
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', authMiddleware, async (req, res) => {
     try {
       // ?force=true purga también el historial de posiciones —
       // acción destructiva explícita, no es el comportamiento
@@ -69,9 +97,9 @@ function buildDevicesRouter({ deviceRepo }) {
     } catch (err) {
       if (err instanceof DeviceHasPositionsError) {
         return res.status(409).json({
-          error: 'El dispositivo tiene posiciones registradas — no se puede eliminar sin purgar su historial',
+          error: 'El dispositivo tiene posiciones y/o turnos de operador registrados — no se puede eliminar sin purgar su historial',
           code: err.code,
-          hint: 'Reintente con ?force=true si desea eliminar también el historial de posiciones'
+          hint: 'Reintente con ?force=true si desea eliminar también ese historial'
         });
       }
       console.error('❌ devices.routes DELETE /:id:', err.message);
@@ -83,3 +111,4 @@ function buildDevicesRouter({ deviceRepo }) {
 }
 
 module.exports = buildDevicesRouter;
+
