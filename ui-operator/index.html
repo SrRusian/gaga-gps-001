@@ -544,8 +544,10 @@
 
           // Actualizar mi propia posición en la barra inferior
           if (pos.deviceId === MY_DEVICE_ID) {
+            const isFirstFix = !myPosition;
             myPosition = pos;
             updateMyInfo(pos);
+            if (isFirstFix) centerOnMyPosition(); // auto-centrar al recibir la primera posición
           }
         });
 

@@ -18,10 +18,13 @@ const { ipKeyGenerator } = require('express-rate-limit');
 // con ipKeyGenerator para IPv4/IPv6 según exige express-rate-limit v8.
 const telemetryLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 120,
+  max: 6000, // ~100/s sostenido — margen amplio para ráfagas de reconexión/backlog
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.query.id ? `device:${req.query.id}` : ipKeyGenerator(req.ip),
+  keyGenerator: (req) => {
+    const id = req.query.id || req.body?.id; // puede venir en query o en el body (form-urlencoded)
+    return id ? `device:${id}` : ipKeyGenerator(req.ip);
+  },
   message: 'Demasiadas solicitudes de telemetría — intente más tarde'
 });
 
