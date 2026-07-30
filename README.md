@@ -28,6 +28,7 @@ servidor, que ahora apunta directamente a este backend Node.js.
 9. [Referencia de la API](#referencia-de-la-api)
 10. [Eventos de Socket.io en tiempo real](#eventos-de-socketio-en-tiempo-real)
 11. [Módulos de seguridad (RF-ALR)](#módulos-de-seguridad-rf-alr)
+    - [Filtro de posiciones GPS (anti-teletransporte RTK/NTRIP)](#filtro-de-posiciones-gps-anti-teletransporte-rtkntrip)
 12. [Seguridad del backend](#seguridad-del-backend)
 13. [Retención y compresión de datos](#retención-y-compresión-de-datos)
 14. [Panel de administración](#panel-de-administración)
@@ -297,6 +298,12 @@ tocarlos.
 | `OPERATOR_JWT_EXPIRES_IN` | No (default `30d`) | Vigencia del token de la UI de operador — ver [Turnos de operador](#turnos-de-operador-y-vinculación-de-dispositivo) |
 | `OPERATOR_SESSION_MAX_IDLE_DAYS` | No (default `7`) | Días sin heartbeat tras los cuales se cierra automáticamente un turno abandonado |
 | `MAPS_DIR` | No (default `maps`) | Carpeta con los archivos `.mbtiles` servidos en `/tiles` |
+| `POSITION_FILTER_TOLERANCE_FACTOR` | No (default `1.8`) | Margen sobre la velocidad reciente del dispositivo antes de considerar un salto sospechoso — ver [Filtro de posiciones GPS](#filtro-de-posiciones-gps-anti-teletransporte-rtkntrip) |
+| `POSITION_FILTER_MIN_FLOOR_KMH` | No (default `25`) | Piso mínimo (km/h) del umbral adaptativo — headroom para arrancar desde parado |
+| `POSITION_FILTER_ABSOLUTE_CEILING_KMH` | No (default `120`) | Techo de seguridad (km/h) del umbral adaptativo |
+| `POSITION_FILTER_JITTER_RADIUS_M` | No (default `5`) | Radio (metros) de ruido GPS normal con el vehículo detenido |
+| `POSITION_FILTER_HISTORY_WINDOW` | No (default `8`) | Cuántas velocidades recientes se recuerdan por dispositivo |
+| `POSITION_FILTER_MAX_CONSECUTIVE_REJECTS` | No (default `3`) | Rechazos consecutivos antes de resincronizar (fail-open) |
 
 ## Configurar Traccar Client en las tabletas
 
@@ -414,6 +421,57 @@ ahora desde `PositionProcessor.js`):
 | `CollisionRiskService` | RF-ALR-10 | Anticolisión — distancia + trayectoria proyectada entre vehículos |
 | `PreventiveStopService` | RF-ALR-11 | Parada preventiva colectiva — solo el supervisor puede desactivarla |
 | `StaticEquipmentManager` | RF-ALR-12 | Guía de aproximación a equipo estático con radio de giro |
+
+### Filtro de posiciones GPS (anti-teletransporte RTK/NTRIP)
+
+Cuando el receptor RTK pierde momentáneamente la corrección
+(satélite o NTRIP, típicamente ~1 segundo), puede reportar un punto
+a decenas de metros de la ruta real y luego el siguiente fix vuelve
+a la posición correcta — un "teletransporte" visible en el mapa que,
+sin filtrar, también podría alimentar geocercas/colisión con datos
+falsos.
+
+`PositionFilterService.js` corre dentro de `PositionProcessor.js`,
+**antes** de tocar Redis, las alertas o el broadcast a las UIs, y
+compara cada posición nueva contra la última posición **aceptada**
+de ese mismo dispositivo (distancia Haversine / tiempo transcurrido
+= velocidad implícita). No depende de ningún dato de calidad de fix
+(RTK Fixed/Float, HDOP) porque el protocolo OsmAnd que usan las
+tabletas no lo expone.
+
+El umbral es **adaptativo por dispositivo**, no un límite fijo de
+"tipo de vehículo": se basa en la velocidad reciente del propio
+dispositivo (con piso y techo de seguridad configurables). Así,
+maquinaria pesada lenta rechaza cualquier salto de decenas de
+km/h con mucho margen, mientras que un vehículo ligero que ya
+circula rápido conserva margen para acelerar sin disparar falsos
+rechazos.
+
+Los puntos rechazados **se guardan igual** en `positions`, marcados
+`valid = false` con el motivo y los datos numéricos en `attributes`
+(`rejectReason`, `impliedSpeedKmh`, `allowedMaxKmh`,
+`distanceMeters`) — quedan disponibles para auditar y afinar el
+umbral, pero **nunca** aparecen en el mapa en vivo, el historial ni
+los reportes/CSV (`PositionRepository` filtra `valid = TRUE` en
+todas sus consultas de lectura).
+
+Si un dispositivo encadena varios rechazos seguidos
+(`POSITION_FILTER_MAX_CONSECUTIVE_REJECTS`, default 3), el filtro
+se resincroniza automáticamente en vez de dejarlo "congelado" fuera
+del mapa — asume que de verdad se movió o volvió a tener señal más
+lejos.
+
+Auditar rechazos directamente en PostgreSQL:
+```sql
+SELECT device_id, fix_time, attributes
+FROM positions
+WHERE valid = false
+ORDER BY fix_time DESC
+LIMIT 50;
+```
+
+Todas las variables de ajuste (`POSITION_FILTER_*`) son opcionales
+y tienen default — ver [Variables de entorno](#variables-de-entorno).
 
 ## Seguridad del backend
 
@@ -577,3 +635,12 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota (JSON por disposit
   expone hoy directamente en el puerto configurado.
 - **Geocercas** son únicamente circulares (centro + radio), no
   soportan polígonos arbitrarios.
+- **Filtro de posiciones GPS** — el umbral adaptativo (ver
+  [Filtro de posiciones GPS](#filtro-de-posiciones-gps-anti-teletransporte-rtkntrip))
+  protege muy bien el caso dominante (maquinaria lenta), pero para
+  un vehículo ligero que ya circula rápido el margen relativo es
+  más ancho, así que haría falta un salto proporcionalmente mayor
+  para dispararlo. Los rechazos quedan auditables
+  (`positions.valid = false`) para afinar
+  `POSITION_FILTER_TOLERANCE_FACTOR`/`POSITION_FILTER_ABSOLUTE_CEILING_KMH`
+  con datos reales, sin tocar código.

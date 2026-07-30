@@ -37,6 +37,7 @@ const StaticEquipmentManager = require('./services/static_equipment/StaticEquipm
 const FleetStateManager = require('./services/telemetry/FleetStateManager');
 const DeviceManager = require('./services/telemetry/DeviceManager');
 const PositionProcessor = require('./services/telemetry/PositionProcessor');
+const PositionFilterService = require('./services/telemetry/PositionFilterService');
 const FleetSocketServer = require('./sockets/FleetSocketServer');
 
 // ── Middleware ──────────────────────────────────────────────────
@@ -90,6 +91,7 @@ const equipmentManager = new StaticEquipmentManager({ io });
 const fleetState = new FleetStateManager(redis.redis);
 const deviceManager = new DeviceManager({ deviceRepo });
 const socketServer = new FleetSocketServer({ io, fleetState, geofenceService, preventiveStopService });
+const positionFilter = new PositionFilterService(env.positionFilter);
 
 const positionProcessor = new PositionProcessor({
   positionRepo,
@@ -99,7 +101,8 @@ const positionProcessor = new PositionProcessor({
   geofenceService,
   signalLostService,
   collisionService,
-  equipmentManager
+  equipmentManager,
+  positionFilter
 });
 
 // ── UI estáticas ─────────────────────────────────────────────────
@@ -120,7 +123,7 @@ app.use('/tiles', buildMapsRouter({ mapsDir: path.join(__dirname, '../../', env.
 app.use('/api/auth', authLimiter, buildAuthRouter({ userRepo }));
 
 // ── API REST protegida (panel admin) ─────────────────────────────
-app.use('/api/devices', buildDevicesRouter({ deviceRepo, operatorSessionRepo, authMiddleware }));
+app.use('/api/devices', buildDevicesRouter({ deviceRepo, operatorSessionRepo, authMiddleware, fleetState }));
 app.use('/api/geofences', authMiddleware, buildGeofencesRouter({ geofenceRepo, geofenceService, socketServer }));
 app.use('/api/equipment', authMiddleware, buildEquipmentRouter({ equipmentRepo, equipmentManager, socketServer }));
 app.use('/api/reports', authMiddleware, buildReportsRouter({ positionRepo, geofenceRepo }));

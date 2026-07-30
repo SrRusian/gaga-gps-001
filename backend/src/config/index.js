@@ -26,7 +26,29 @@ const env = {
   // Clave compartida opcional para /gps — ver telemetry.routes.js.
   // Null = endpoint abierto (solo protegido por rate limit), útil
   // en desarrollo; en producción es obligatoria (ver validateEnv).
-  telemetrySharedSecret: process.env.TELEMETRY_SHARED_SECRET || null
+  telemetrySharedSecret: process.env.TELEMETRY_SHARED_SECRET || null,
+
+  // Filtro anti-teletransporte (glitch RTK/NTRIP) — ver
+  // PositionFilterService.js. Umbral adaptativo por dispositivo,
+  // no un límite fijo de tipo de vehículo. Todos tienen default
+  // razonable — no requiere configuración para funcionar.
+  positionFilter: {
+    // Margen sobre la velocidad reciente del dispositivo antes de
+    // considerar un salto como sospechoso.
+    toleranceFactor: parseFloat(process.env.POSITION_FILTER_TOLERANCE_FACTOR || '1.8'),
+    // Piso mínimo (km/h) — headroom para arrancar desde parado.
+    minFloorKmh: parseFloat(process.env.POSITION_FILTER_MIN_FLOOR_KMH || '25'),
+    // Techo de seguridad (km/h) — ni el vehículo más rápido del
+    // sitio debería superarlo nunca.
+    absoluteCeilingKmh: parseFloat(process.env.POSITION_FILTER_ABSOLUTE_CEILING_KMH || '120'),
+    // Radio (metros) de ruido GPS normal con el vehículo detenido.
+    jitterRadiusMeters: parseFloat(process.env.POSITION_FILTER_JITTER_RADIUS_M || '5'),
+    // Cuántas velocidades recientes se recuerdan por dispositivo.
+    historyWindow: parseInt(process.env.POSITION_FILTER_HISTORY_WINDOW || '8', 10),
+    // Rechazos consecutivos antes de resincronizar (fail-open) —
+    // evita que un vehículo se quede "congelado" en el mapa.
+    maxConsecutiveRejects: parseInt(process.env.POSITION_FILTER_MAX_CONSECUTIVE_REJECTS || '3', 10)
+  }
 };
 
 /**

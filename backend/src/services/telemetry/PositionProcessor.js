@@ -9,10 +9,13 @@
  * cada vez que una tableta reporta su posición.
  *
  * Flujo:
- *   1. Persistir en PostgreSQL (PositionRepository)
- *   2. Actualizar estado en memoria/Redis (FleetStateManager)
- *   3. Ejecutar módulos de seguridad (sin modificar su lógica)
- *   4. Distribuir vía Socket.io (FleetSocketServer)
+ *   1. Filtrar saltos físicamente implausibles (PositionFilterService)
+ *      — glitch RTK/NTRIP; si se rechaza, se persiste como inválida
+ *      y el flujo termina ahí
+ *   2. Persistir en PostgreSQL (PositionRepository)
+ *   3. Actualizar estado en memoria/Redis (FleetStateManager)
+ *   4. Ejecutar módulos de seguridad (sin modificar su lógica)
+ *   5. Distribuir vía Socket.io (FleetSocketServer)
  *
  * RF asociados: RF-TEL-01, RF-TEL-02
  */
@@ -27,7 +30,8 @@ class PositionProcessor {
     geofenceService,
     signalLostService,
     collisionService,
-    equipmentManager
+    equipmentManager,
+    positionFilter
   }) {
     this.positionRepo = positionRepo;
     this.fleetState = fleetState;
@@ -39,6 +43,11 @@ class PositionProcessor {
     this.signalLostService = signalLostService;
     this.collisionService = collisionService;
     this.equipmentManager = equipmentManager;
+
+    // Descarta "teletransportes" por glitch RTK/NTRIP antes de que
+    // el punto llegue a Redis/alertas/mapa — opcional, si no se
+    // inyecta el comportamiento es idéntico al de antes.
+    this.positionFilter = positionFilter;
   }
 
   /**
@@ -48,7 +57,10 @@ class PositionProcessor {
    */
   async process(position) {
     try {
-      // 1. Auto-registrar dispositivo y marcarlo online
+      // 1. Auto-registrar dispositivo y marcarlo online — corre
+      // siempre, incluso si el fix resulta descartado más abajo:
+      // el dispositivo sigue comunicándose, solo el dato de
+      // posición es el que no es confiable.
       if (this.deviceManager) {
         const device = await this.deviceManager.ensureRegistered(position.deviceId);
         await this.deviceManager.markOnline(position.deviceId, position.fixTime);
@@ -64,6 +76,39 @@ class PositionProcessor {
         }
       }
 
+      if (this.signalLostService) {
+        this.signalLostService.recordPosition(position.deviceId);
+      }
+
+      // 1.5 Filtro anti-teletransporte (glitch RTK/NTRIP) — compara
+      // contra la última posición ACEPTADA del dispositivo. Si el
+      // salto es físicamente implausible, se persiste marcado como
+      // inválido (auditable) pero no toca Redis/alertas/mapa.
+      if (this.positionFilter) {
+        const verdict = this.positionFilter.evaluate(position);
+
+        if (!verdict.accepted) {
+          position.valid = false;
+          position.attributes = {
+            ...(position.attributes || {}),
+            rejectReason: verdict.reason,
+            impliedSpeedKmh: verdict.impliedSpeedKmh,
+            allowedMaxKmh: verdict.allowedMaxKmh,
+            distanceMeters: verdict.distanceMeters
+          };
+
+          await this.positionRepo.save(position);
+
+          console.warn(`⚠️  Posición descartada (${verdict.reason}) — Device: ${position.deviceId} | salto: ${verdict.distanceMeters?.toFixed(1)}m | vel. implícita: ${verdict.impliedSpeedKmh?.toFixed(1)}km/h (máx. permitido ${verdict.allowedMaxKmh?.toFixed(1)}km/h)`);
+
+          return position;
+        }
+
+        if (verdict.resynced) {
+          console.warn(`⚠️  Device ${position.deviceId} resincronizado tras varios saltos consecutivos — vel. implícita ${verdict.impliedSpeedKmh?.toFixed(1)}km/h`);
+        }
+      }
+
       // 2. Persistir en PostgreSQL/TimescaleDB
       await this.positionRepo.save(position);
 
@@ -73,10 +118,6 @@ class PositionProcessor {
       // 4. Ejecutar módulos de seguridad — NO se modifican, solo se invocan
       if (this.geofenceService) {
         this.geofenceService.evaluate(position);
-      }
-
-      if (this.signalLostService) {
-        this.signalLostService.recordPosition(position.deviceId);
       }
 
       if (this.collisionService) {

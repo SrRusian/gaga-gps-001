@@ -13,7 +13,7 @@
 const express = require('express');
 const { DeviceHasPositionsError } = require('../../repositories/DeviceRepository');
 
-function buildDevicesRouter({ deviceRepo, operatorSessionRepo, authMiddleware }) {
+function buildDevicesRouter({ deviceRepo, operatorSessionRepo, authMiddleware, fleetState }) {
   const router = express.Router();
 
   router.get('/lookup/:uniqueId', async (req, res) => {
@@ -88,11 +88,26 @@ function buildDevicesRouter({ deviceRepo, operatorSessionRepo, authMiddleware })
 
   router.delete('/:id', authMiddleware, async (req, res) => {
     try {
+      // Se resuelve el unique_id ANTES de borrar — es la clave que
+      // usa Redis (última posición conocida), distinta al id
+      // numérico de PostgreSQL usado en la URL.
+      const device = await deviceRepo.findById(req.params.id);
+
       // ?force=true purga también el historial de posiciones —
       // acción destructiva explícita, no es el comportamiento
       // por defecto (se preserva el historial para auditoría).
       const force = req.query.force === 'true';
       await deviceRepo.delete(req.params.id, { force });
+
+      // Un dispositivo eliminado de PostgreSQL no debe seguir
+      // "vivo" en el mapa — Redis solo cachea la última posición
+      // conocida y nunca expira sola, así que hay que limpiarla
+      // explícitamente para no dejar dispositivos fantasma que ya
+      // no existen en la base de datos.
+      if (fleetState && device) {
+        await fleetState.remove(device.unique_id);
+      }
+
       res.json({ success: true });
     } catch (err) {
       if (err instanceof DeviceHasPositionsError) {

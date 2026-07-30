@@ -51,7 +51,7 @@ class PositionRepository {
   async findLatestByDevice(deviceId) {
     try {
       const { rows } = await query(
-        `SELECT * FROM positions WHERE device_id = $1
+        `SELECT * FROM positions WHERE device_id = $1 AND valid = TRUE
          ORDER BY fix_time DESC LIMIT 1`,
         [deviceId]
       );
@@ -71,6 +71,7 @@ class PositionRepository {
       const { rows } = await query(
         `SELECT DISTINCT ON (device_id) *
          FROM positions
+         WHERE valid = TRUE
          ORDER BY device_id, fix_time DESC`
       );
       return rows;
@@ -81,13 +82,15 @@ class PositionRepository {
   }
 
   /**
-   * Historial de posiciones para reportes / replay (RF panel admin)
+   * Historial de posiciones para reportes / replay (RF panel admin).
+   * Excluye posiciones descartadas por PositionFilterService
+   * (valid=false) — nunca deben verse en mapa, historial ni CSV.
    */
   async findHistory({ deviceId, from, to, limit = 5000 }) {
     try {
       const { rows } = await query(
         `SELECT * FROM positions
-         WHERE device_id = $1 AND fix_time BETWEEN $2 AND $3
+         WHERE device_id = $1 AND fix_time BETWEEN $2 AND $3 AND valid = TRUE
          ORDER BY fix_time ASC
          LIMIT $4`,
         [deviceId, from, to, limit]
