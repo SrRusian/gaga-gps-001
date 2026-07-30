@@ -1,0 +1,14 @@
+.git
+.gitignore
+**/node_modules
+.env
+backend/.env
+backend/.env.production
+*.log
+TEST-FILES
+README.md
+
+# Mapas .mbtiles — se montan como volumen, no se hornean en la imagen
+maps/*.mbtiles
+
+

@@ -8,6 +8,33 @@ volumes:
 
 services:
 
+  gaga-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: gaga-backend
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: gaga_gps
+      DB_USER: gaga_app
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    volumes:
+      - ./maps:/app/maps
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gaga-net
+    ports:
+      - "3001:3001"
+
   postgres:
     image: timescale/timescaledb-ha:pg16
     container_name: gaga-postgres
@@ -15,7 +42,7 @@ services:
     environment:
       POSTGRES_DB: gaga_gps
       POSTGRES_USER: gaga_app
-      POSTGRES_PASSWORD: gaga_dev_pass
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/migrations:/docker-entrypoint-initdb.d
@@ -34,10 +61,17 @@ services:
     image: redis:7-alpine
     container_name: gaga-redis
     restart: unless-stopped
-    command: redis-server --requirepass gaga_redis_pass
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     networks:
       - gaga-net
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

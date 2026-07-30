@@ -22,7 +22,7 @@ servidor, que ahora apunta directamente a este backend Node.js.
 3. [Stack tecnológico](#stack-tecnológico)
 4. [Estructura del proyecto](#estructura-del-proyecto)
 5. [Modelo de datos](#modelo-de-datos)
-6. [Instalación (desarrollo)](#instalación-desarrollo)
+6. [Instalación y despliegue](#instalación-y-despliegue)
 7. [Variables de entorno](#variables-de-entorno)
 8. [Configurar Traccar Client en las tabletas](#configurar-traccar-client-en-las-tabletas)
 9. [Referencia de la API](#referencia-de-la-api)
@@ -32,9 +32,8 @@ servidor, que ahora apunta directamente a este backend Node.js.
 13. [Retención y compresión de datos](#retención-y-compresión-de-datos)
 14. [Panel de administración](#panel-de-administración)
 15. [Acceso directo a PostgreSQL y Redis](#acceso-directo-a-postgresql-y-redis)
-16. [Despliegue en producción](#despliegue-en-producción)
-17. [Solución de problemas comunes](#solución-de-problemas-comunes)
-18. [Limitaciones conocidas / trabajo futuro](#limitaciones-conocidas--trabajo-futuro)
+16. [Solución de problemas comunes](#solución-de-problemas-comunes)
+17. [Limitaciones conocidas / trabajo futuro](#limitaciones-conocidas--trabajo-futuro)
 
 ---
 
@@ -91,7 +90,7 @@ momento en que llega la petición HTTP.
 | Caché / estado en vivo | Redis 7 | Última posición conocida de cada dispositivo (no guarda histórico) |
 | Autenticación | JWT (jsonwebtoken) + bcryptjs | Login del panel admin, con revalidación de usuario activo en cada request |
 | Mapas | MapLibre GL + MBTiles (better-sqlite3) | Renderizado de mapas offline en las tabletas |
-| Contenerización | Docker + Docker Compose | Infraestructura de PostgreSQL/Redis (dev) y stack completo (prod) |
+| Contenerización | Docker + Docker Compose | Stack completo (backend + UIs + PostgreSQL + Redis) con un solo `docker-compose.yml`, mismo para desarrollo y producción |
 | Cliente GPS | Traccar Client (app de terceros, sin modificar) | Corre en las tabletas, protocolo OsmAnd |
 
 ## Estructura del proyecto
@@ -130,8 +129,9 @@ gaga-gps-001/
 ├── maps/                           # archivos .mbtiles generados (no versionados)
 ├── TEST-FILES/                     # imágenes de muestra para el pipeline de mapas (no versionado)
 │
-├── docker-compose.yml              # PostgreSQL + Redis para desarrollo local
-├── docker-compose.prod.yml         # stack completo para producción (incluye backend)
+├── docker-compose.yml              # stack completo (backend + UIs + Postgres + Redis) — dev y producción
+├── .dockerignore                   # contexto de build = raíz del repo (ver backend/Dockerfile)
+├── .env.example                    # única plantilla de variables — copiar a .env y editar
 └── README.md
 ```
 
@@ -186,32 +186,35 @@ Incluye reproducción animada (▶️/⏸️) con control deslizante para
 avanzar manualmente punto por punto, mostrando fecha/hora y
 velocidad de cada uno.
 
-## Instalación (desarrollo)
+## Instalación y despliegue
 
-**Requisitos**: Docker Desktop, Node.js 22 LTS.
+Un único flujo, con **un solo comando**, para desarrollo local o
+para producción en un servidor — no hay archivos ni pasos
+distintos entre entornos. Todo el sistema (backend + las 3 UIs +
+PostgreSQL + Redis) corre en contenedores Docker orquestados por
+[docker-compose.yml](docker-compose.yml).
+
+**Requisitos**: Docker Desktop (o Docker Engine + Compose plugin en Linux).
 
 ```bash
 # 1. Clonar el repositorio
 git clone https://github.com/SrRusian/gaga-gps-001.git
 cd gaga-gps-001
 
-# 2. Configurar variables de entorno
-cp backend/.env-example backend/.env
-# Editar backend/.env — ver sección "Variables de entorno" abajo
+# 2. Configurar variables de entorno (único archivo, ver sección
+#    "Variables de entorno" abajo)
+cp .env.example .env
+# Editar .env — como mínimo cambia DB_PASSWORD, REDIS_PASSWORD,
+# JWT_SECRET y TELEMETRY_SHARED_SECRET
 
-# 3. Levantar PostgreSQL + Redis (crea un volumen nuevo y vacío,
-#    las migraciones de db/migrations/ se aplican automáticamente)
-docker compose up -d
+# 3. Levantar TODO el stack (build de la imagen del backend +
+#    Postgres + Redis; las migraciones de db/migrations/ se aplican
+#    automáticamente la primera vez que se crea el volumen)
+docker compose up -d --build
 
-# 4. Instalar dependencias del backend
-cd backend
-npm install
-
-# 5. Iniciar el backend
-npm start
-
-# 6. Crear tu primer usuario admin
-npm run seed:admin -- admin@tuempresa.com TuPasswordSegura "Nombre Admin"
+# 4. Crear tu primer usuario admin (dentro del contenedor)
+docker compose exec gaga-backend \
+  npm run seed:admin -- admin@tuempresa.com TuPasswordSegura "Nombre Admin"
 ```
 
 Con esto ya puedes iniciar sesión en `/admin` con esas credenciales.
@@ -219,6 +222,46 @@ Puedes crear más usuarios (operadores, supervisores, otros admins)
 desde el propio panel una vez logueado — el script `seed:admin` solo
 es necesario para el primer usuario, ya que el panel requiere estar
 autenticado para crear nuevos usuarios.
+
+Para actualizar tras un cambio de código:
+```bash
+git pull
+docker compose up -d --build
+```
+
+Notas:
+- `NODE_ENV=production` (default en `.env.example`) activa
+  validaciones estrictas — el backend **no arranca** si faltan
+  `JWT_SECRET` o `TELEMETRY_SHARED_SECRET`. Usa `NODE_ENV=development`
+  en `.env` si estás iterando localmente y quieres omitir esa
+  validación.
+- `gaga-backend` depende de que `postgres` y `redis` pasen su
+  healthcheck antes de arrancar, y expone su propio healthcheck en
+  `/health` (visible en `docker compose ps`).
+- El volumen `./maps:/app/maps` persiste los `.mbtiles` fuera del
+  contenedor — colócalos ahí manualmente si tu operación usa mapas
+  offline (`cp /ruta/a/tus/*.mbtiles maps/`).
+- El diseño original contempla un reverse proxy HTTPS (Caddy) frente
+  al backend para exponerlo con dominio propio en producción — **no
+  está incluido todavía** en `docker-compose.yml` (ver limitaciones
+  al final del documento).
+
+### Alternativa: correr el backend sin Docker (avanzado)
+
+Para iteración rápida con hot-reload durante desarrollo activo del
+código, puedes correr el backend directo con `node`, apuntando a un
+Postgres/Redis que sigues levantando con Docker:
+
+```bash
+docker compose up -d postgres redis   # solo las dependencias
+cp backend/.env-example backend/.env  # plantilla separada, ver el archivo
+cd backend
+npm install
+npm start
+npm run seed:admin -- admin@tuempresa.com TuPasswordSegura "Nombre Admin"
+```
+
+Este flujo es opcional y no forma parte del despliegue estándar.
 
 ### URLs del sistema
 
@@ -232,26 +275,27 @@ autenticado para crear nuevos usuarios.
 
 ## Variables de entorno
 
-Definidas en `backend/.env-example` — copiar a `backend/.env` (dev)
-o `backend/.env.production` (prod) y completar.
+Todas definidas en un único archivo — [.env.example](.env.example)
+(raíz) — copiar a `.env` y completar. Es el mismo archivo para
+desarrollo con Docker y para producción; lo único que cambia según
+el entorno es el valor de `NODE_ENV`.
+
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `REDIS_HOST` y
+`REDIS_PORT` **no** están en `.env`: son fijos dentro de la red
+Docker (`docker-compose.yml` los define directamente como
+`postgres`/`redis`, los nombres de los servicios) y no hace falta
+tocarlos.
 
 | Variable | Obligatoria | Descripción |
 |---|---|---|
-| `DB_HOST` | Sí | Host de PostgreSQL (`localhost` en dev fuera de Docker, `postgres` dentro del stack Docker) |
-| `DB_PORT` | Sí | Puerto de PostgreSQL (`5432`) |
-| `DB_NAME` | Sí | Nombre de la base de datos (`gaga_gps`) |
-| `DB_USER` | Sí | Usuario de PostgreSQL |
 | `DB_PASSWORD` | Sí | Contraseña de PostgreSQL |
-| `REDIS_HOST` | Sí | Host de Redis |
-| `REDIS_PORT` | Sí | Puerto de Redis (`6379`) |
 | `REDIS_PASSWORD` | Sí | Contraseña de Redis |
+| `NODE_ENV` | Sí | `development` o `production` — activa validaciones estrictas de seguridad en `production` |
 | `JWT_SECRET` | **Obligatoria en producción** | Firma de tokens del panel admin. El backend **falla al arrancar** si `NODE_ENV=production` y falta |
+| `TELEMETRY_SHARED_SECRET` | **Obligatoria en producción** | Clave compartida para `/gps` — mitiga que terceros inyecten posiciones falsas. El backend falla al arrancar en producción si falta. Ver detalle en [Seguridad del backend](#seguridad-del-backend) |
 | `JWT_EXPIRES_IN` | No (default `8h`) | Vigencia del token de sesión del panel admin |
 | `OPERATOR_JWT_EXPIRES_IN` | No (default `30d`) | Vigencia del token de la UI de operador — ver [Turnos de operador](#turnos-de-operador-y-vinculación-de-dispositivo) |
 | `OPERATOR_SESSION_MAX_IDLE_DAYS` | No (default `7`) | Días sin heartbeat tras los cuales se cierra automáticamente un turno abandonado |
-| `TELEMETRY_SHARED_SECRET` | **Obligatoria en producción** | Clave compartida para `/gps` — mitiga que terceros inyecten posiciones falsas. El backend falla al arrancar en producción si falta. Ver detalle en [Seguridad del backend](#seguridad-del-backend) |
-| `PORT` | No (default `3001`) | Puerto HTTP del backend |
-| `NODE_ENV` | Sí | `development` o `production` — activa validaciones estrictas de seguridad en `production` |
 | `MAPS_DIR` | No (default `maps`) | Carpeta con los archivos `.mbtiles` servidos en `/tiles` |
 
 ## Configurar Traccar Client en las tabletas
@@ -464,7 +508,7 @@ automáticamente en segundo plano.
 
 ## Panel de administración
 
-Accesible en `/admin` tras iniciar sesión (ver [Instalación](#instalación-desarrollo)
+Accesible en `/admin` tras iniciar sesión (ver [Instalación y despliegue](#instalación-y-despliegue)
 para crear el primer usuario). Secciones:
 
 - **Dashboard** — métricas globales de la flota.
@@ -500,44 +544,21 @@ docker exec -it gaga-redis redis-cli -a <REDIS_PASSWORD>
 HGETALL gaga:fleet:state     # estado actual de toda la flota (JSON por dispositivo)
 ```
 
-## Despliegue en producción
-
-`docker-compose.prod.yml` levanta el stack completo (backend +
-PostgreSQL + Redis) en contenedores:
-
-```bash
-cp backend/.env-example backend/.env.production
-# Editar backend/.env.production con valores reales de producción
-
-# DB_PASSWORD y REDIS_PASSWORD deben coincidir con las variables de
-# entorno del shell/.env usadas por docker compose para interpolar
-# los servicios postgres/redis (evita que backend y BD queden
-# desincronizados en sus credenciales)
-export DB_PASSWORD=...
-export REDIS_PASSWORD=...
-
-docker compose -f docker-compose.prod.yml up -d --build
-```
-
-Notas importantes:
-- `NODE_ENV=production` activa validaciones estrictas — el backend
-  **no arranca** si faltan `JWT_SECRET` o `TELEMETRY_SHARED_SECRET`.
-- El diseño original contempla un reverse proxy HTTPS (Caddy) frente
-  al backend para exponerlo con dominio propio — **no está incluido
-  todavía** en `docker-compose.prod.yml` (ver limitaciones abajo).
-
 ## Solución de problemas comunes
 
 | Síntoma | Causa probable | Solución |
 |---|---|---|
-| `NOAUTH Authentication required` (Redis) | Falta `REDIS_PASSWORD` en `.env` | Debe coincidir con `--requirepass` de `docker-compose.yml` |
+| `NOAUTH Authentication required` (Redis) | Falta `REDIS_PASSWORD` en `.env` | Debe coincidir con lo que arrancó el contenedor `gaga-redis` (`docker compose up -d --build` para aplicar cambios de `.env`) |
 | `Cannot GET /admin`, `/operator`, `/supervisor` | Backend corriendo fuera de la estructura esperada | Verificar que `ui-admin/`, `ui-operator/`, `ui-supervisor/` sean hermanos de `backend/` en la raíz del repo |
 | `404` en Traccar Client al mandar posición | La tableta usa `POST` en vez de `GET` | Ya soportado — verificar que el backend esté actualizado (`router.post('/gps', ...)` en `telemetry.routes.js`) |
 | `400` "Faltan parámetros requeridos" pese a que la tableta manda datos | Traccar Client envía los parámetros en el body (`form-urlencoded`), no en la URL | Ya soportado — requiere `express.urlencoded()` en `app.js` |
 | `DELETE /api/devices/:id` responde 409 | El dispositivo tiene historial de posiciones (caso normal) | Usar `?force=true` si de verdad quieres purgar también el historial |
 | Vehículo aparece en el mapa con nombre igual a su ID técnico | El dispositivo se auto-registró (nunca se le puso un nombre amigable) | Editar el nombre desde el panel Admin → Dispositivos |
-| El backend arranca pero dice `degraded` en `/health` | PostgreSQL o Redis no están accesibles con las credenciales del `.env` | Revisar `DB_HOST`/`REDIS_HOST` — si el backend corre fuera de Docker, deben ser `localhost`, no `postgres`/`redis` |
-| El backend falla al arrancar en producción con "Configuración insegura" | Falta `JWT_SECRET` o `TELEMETRY_SHARED_SECRET` en `.env.production` | Completar ambas variables — son obligatorias en `NODE_ENV=production` |
+| El backend arranca pero dice `degraded` en `/health` | PostgreSQL o Redis no están accesibles con las credenciales del `.env` | Revisar `docker compose logs gaga-backend`; si corres el backend fuera de Docker (flujo avanzado), `DB_HOST`/`REDIS_HOST` deben ser `localhost` en `backend/.env` |
+| El backend falla al arrancar con "Configuración insegura" | Falta `JWT_SECRET` o `TELEMETRY_SHARED_SECRET` en `.env` y `NODE_ENV=production` | Completar ambas variables en `.env` — son obligatorias en `NODE_ENV=production` |
+| `docker compose up -d --build` falla compilando `better-sqlite3` | Faltan herramientas de build en la imagen | Ya cubierto — `backend/Dockerfile` instala `python3 make g++` en la etapa de dependencias |
+| `gaga-backend` se queda "unhealthy"/reiniciando en bucle | Postgres/Redis aún no listos, o credenciales no coinciden | Revisar `docker compose logs gaga-backend`; confirmar que `.env` tiene las contraseñas correctas y coincide con el contenedor ya arrancado |
+| Los `.mbtiles` no aparecen en `/tiles` tras el deploy | No se colocaron en `maps/` en el host, o el volumen no está montado | Copiar los archivos a `./maps/` en el servidor — se montan como volumen (`./maps:/app/maps`), no van dentro de la imagen |
 
 ## Limitaciones conocidas / trabajo futuro
 
@@ -552,7 +573,7 @@ Notas importantes:
   manualmente en `maps/`.
 - **Exportación a PDF** de reportes no está implementada — solo CSV.
 - **Reverse proxy HTTPS (Caddy)** contemplado en el diseño original
-  no está incluido en `docker-compose.prod.yml` — el backend se
+  no está incluido en `docker-compose.yml` — el backend se
   expone hoy directamente en el puerto configurado.
 - **Geocercas** son únicamente circulares (centro + radio), no
   soportan polígonos arbitrarios.
