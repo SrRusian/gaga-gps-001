@@ -3,4 +3,7 @@ node_modules/
 .env.production
 *.log
 maps/*.mbtiles
+maps/sources/
+maps/tmp/
+maps/tmp-uploads/
 TEST-FILES/

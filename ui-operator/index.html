@@ -124,6 +124,34 @@
         color: #ffffff;
       }
 
+      /* Selector de modo de mapa — Calles / Satelital / Mixto */
+      #map-mode-selector {
+        position: fixed;
+        top: 58px;
+        right: 10px;
+        z-index: 1000;
+        display: flex;
+        background: rgba(0, 0, 0, 0.85);
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid #333;
+      }
+
+      .map-mode-btn {
+        background: none;
+        border: none;
+        color: #888;
+        font-size: 11px;
+        padding: 8px 10px;
+        cursor: pointer;
+      }
+
+      .map-mode-btn.active {
+        background: #00ff88;
+        color: #000;
+        font-weight: bold;
+      }
+
       /* Botón centrar en mi posición */
       #btn-center {
         position: fixed;
@@ -340,6 +368,13 @@
     <!-- Mapa principal -->
     <div id="map"></div>
 
+    <!-- Selector de modo de mapa -->
+    <div id="map-mode-selector">
+      <button class="map-mode-btn" data-mode="streets" onclick="setMapMode('streets')">🗺️ Calles</button>
+      <button class="map-mode-btn" data-mode="satellite" onclick="setMapMode('satellite')">🛰️ Satelital</button>
+      <button class="map-mode-btn" data-mode="hybrid" onclick="setMapMode('hybrid')">🔀 Mixto</button>
+    </div>
+
     <!-- Botón centrar -->
     <button
       id="btn-center"
@@ -492,34 +527,94 @@
         zoom: 16,
       });
 
+      // ─── CAPAS SATELITALES DINÁMICAS (mapas importados en Admin) ─
+      // Reemplaza la capa "alcaraces" fija de antes — ahora puede
+      // haber varios mapas activos a la vez, apilados por fecha de
+      // creación (el más nuevo al final = arriba), y el conjunto se
+      // actualiza en vivo por socket cuando el admin activa/desactiva
+      // alguno, sin recargar la página.
+      let activeSatelliteIds = [];
+      let mapMode = localStorage.getItem("gaga_operator_map_mode") || "hybrid";
+
+      function syncSatelliteLayers(maps) {
+        // Reconstrucción completa — con el puñado de mapas que
+        // maneja un sitio como este, es más simple y robusto que un
+        // diff incremental, y garantiza el orden (viejo→nuevo).
+        activeSatelliteIds.forEach((id) => {
+          if (map.getLayer(`sat-${id}`)) map.removeLayer(`sat-${id}`);
+          if (map.getSource(`sat-${id}`)) map.removeSource(`sat-${id}`);
+        });
+        activeSatelliteIds = [];
+
+        maps.forEach((m) => {
+          const sourceId = `sat-${m.id}`;
+          map.addSource(sourceId, {
+            type: "raster",
+            tiles: [`${window.location.origin}${m.tileUrlTemplate}`],
+            tileSize: 256,
+            minzoom: m.minZoom ?? 0,
+            maxzoom: m.maxZoom ?? 19,
+            ...(m.bounds
+              ? { bounds: [m.bounds.minLon, m.bounds.minLat, m.bounds.maxLon, m.bounds.maxLat] }
+              : {}),
+          });
+
+          // Sin minzoom/maxzoom en la CAPA (a diferencia de antes) —
+          // así nunca desaparece al hacer zoom extremo: es la fuente
+          // la que le indica a MapLibre cómo sobre/sub-muestrear más
+          // allá del rango real de tiles generados.
+          map.addLayer({
+            id: sourceId,
+            type: "raster",
+            source: sourceId,
+            paint: { "raster-opacity-transition": { duration: 300 } },
+          });
+
+          activeSatelliteIds.push(m.id);
+        });
+
+        applyMapMode();
+      }
+
+      function setMapMode(mode) {
+        mapMode = mode;
+        localStorage.setItem("gaga_operator_map_mode", mode);
+        applyMapMode();
+      }
+
+      function applyMapMode() {
+        document.querySelectorAll(".map-mode-btn").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.mode === mapMode);
+        });
+
+        if (!mapInitialized) return;
+
+        const showOsm = mapMode === "streets" || mapMode === "hybrid";
+        const showSat = mapMode === "satellite" || mapMode === "hybrid";
+        const satOpacity = mapMode === "hybrid" ? 0.9 : 1;
+        const osmOpacity = mapMode === "hybrid" ? 0.35 : 1;
+
+        map.setLayoutProperty("osm-layer", "visibility", showOsm ? "visible" : "none");
+        map.setPaintProperty("osm-layer", "raster-opacity", osmOpacity);
+
+        activeSatelliteIds.forEach((id) => {
+          const layerId = `sat-${id}`;
+          if (!map.getLayer(layerId)) return;
+          map.setLayoutProperty(layerId, "visibility", showSat ? "visible" : "none");
+          map.setPaintProperty(layerId, "raster-opacity", satOpacity);
+        });
+      }
+
       map.on("load", () => {
         mapInitialized = true;
+        applyMapMode();
 
-        // Capa de ortofoto Alcarazes
-        map.addSource("alcaraces", {
-          type: "raster",
-          tiles: [`${window.location.origin}/tiles/alcaraces/{z}/{x}/{y}.png`],
-          tileSize: 256,
-          minzoom: 14,
-          maxzoom: 18,
-          bounds: [-103.572389, 19.352392, -103.559898, 19.35939],
-        });
+        fetch(`${window.location.origin}/tiles/active-maps.json`)
+          .then((res) => res.json())
+          .then((maps) => syncSatelliteLayers(maps))
+          .catch((err) => console.error("Error cargando mapas activos:", err));
 
-        map.addLayer({
-          id: "alcaraces-layer",
-          type: "raster",
-          source: "alcaraces",
-          minzoom: 15, // solo mostrar en zoom 15+
-          maxzoom: 18,
-          paint: {
-            "raster-opacity": 0.85,
-            "raster-opacity-transition": {
-              duration: 300, // fade suave al entrar/salir
-            },
-          },
-        });
-
-        console.log("Mapa con ortofoto Alcarazes inicializado");
+        console.log("Mapa inicializado");
       });
 
       // ─── CONECTAR A SOCKET.IO ──────────────────────────────────
@@ -535,6 +630,11 @@
       socket.on("disconnect", () => {
         console.log("Desconectado del backend");
         updateConnectionStatus(false);
+      });
+
+      // Mapas satelitales activados/desactivados en vivo desde Admin
+      socket.on("maps:active_update", ({ maps }) => {
+        if (mapInitialized) syncSatelliteLayers(maps);
       });
 
       // ─── GEOCERCAS — renderizadas en vivo ──────────────────────

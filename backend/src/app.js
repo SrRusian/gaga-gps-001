@@ -1,9 +1,4 @@
 /**
- * app.js
- *
- * Entry point del backend GAGA-GPS-001 — sistema propio de
- * telemetría GPS (sin Traccar como intermediario).
- *
  * Las tabletas (Traccar Client) reportan directamente a GET /gps
  * usando el protocolo OsmAnd. Este archivo solo ensambla config,
  * repositorios, servicios y rutas — la lógica vive en cada módulo.
@@ -25,6 +20,7 @@ const GeofenceEventRepository = require('./repositories/GeofenceEventRepository'
 const EquipmentRepository = require('./repositories/EquipmentRepository');
 const UserRepository = require('./repositories/UserRepository');
 const OperatorSessionRepository = require('./repositories/OperatorSessionRepository');
+const MapRepository = require('./repositories/MapRepository');
 
 // ── Servicios de seguridad — NO se modifican, solo se integran ─
 const GeofenceAlertService = require('./services/alerts/GeofenceAlertService');
@@ -53,9 +49,11 @@ const buildGeofencesRouter = require('./api/routes/geofences.routes');
 const buildEquipmentRouter = require('./api/routes/equipment.routes');
 const buildFleetRouter = require('./api/routes/fleet.routes');
 const buildMapsRouter = require('./api/routes/maps.routes');
+const buildMapsAdminRouter = require('./api/routes/maps-admin.routes');
 const buildReportsRouter = require('./api/routes/reports.routes');
 const buildUsersRouter = require('./api/routes/users.routes');
 const buildOperatorSessionsRouter = require('./api/routes/operator-sessions.routes');
+const MapPipelineService = require('./services/maps/MapPipelineService');
 
 const app = express();
 const server = http.createServer(app);
@@ -77,6 +75,7 @@ const geofenceEventRepo = new GeofenceEventRepository();
 const equipmentRepo = new EquipmentRepository();
 const userRepo = new UserRepository();
 const operatorSessionRepo = new OperatorSessionRepository();
+const mapRepo = new MapRepository();
 
 const authMiddleware = buildAuthMiddleware({ userRepo });
 
@@ -90,7 +89,7 @@ const equipmentManager = new StaticEquipmentManager({ io });
 // ── Telemetría propia ───────────────────────────────────────────
 const fleetState = new FleetStateManager(redis.redis);
 const deviceManager = new DeviceManager({ deviceRepo });
-const socketServer = new FleetSocketServer({ io, fleetState, geofenceService, preventiveStopService });
+const socketServer = new FleetSocketServer({ io, fleetState, geofenceService, preventiveStopService, mapRepo });
 const positionFilter = new PositionFilterService(env.positionFilter);
 
 const positionProcessor = new PositionProcessor({
@@ -106,9 +105,6 @@ const positionProcessor = new PositionProcessor({
 });
 
 // ── UI estáticas ─────────────────────────────────────────────────
-// __dirname = backend/src → subir dos niveles llega a la raíz del
-// repo, donde viven ui-operator/, ui-supervisor/ y ui-admin/ como
-// hermanos de backend/ (misma estructura en Docker, ver Dockerfile).
 app.use('/operator', express.static(path.join(__dirname, '../../ui-operator')));
 app.use('/supervisor', express.static(path.join(__dirname, '../../ui-supervisor')));
 app.use('/admin', express.static(path.join(__dirname, '../../ui-admin')));
@@ -116,8 +112,19 @@ app.use('/admin', express.static(path.join(__dirname, '../../ui-admin')));
 // ── Receptor de telemetría — GET /gps (protocolo OsmAnd) ────────
 app.use(telemetryLimiter, buildTelemetryRouter({ positionProcessor }));
 
-// ── Tiles MBTiles ────────────────────────────────────────────────
-app.use('/tiles', buildMapsRouter({ mapsDir: path.join(__dirname, '../../', env.mapsDir) }));
+// ── Tiles MBTiles / importador de mapas satelitales ───────────────
+const resolvedMapsDir = path.join(__dirname, '../../', env.mapsDir);
+const mapsRouter = buildMapsRouter({ mapsDir: resolvedMapsDir, mapRepo });
+const mapPipelineService = new MapPipelineService({ mapsDir: resolvedMapsDir, mapRepo });
+
+app.use('/tiles', mapsRouter);
+app.use('/api/maps', authMiddleware, requireRole('admin'), buildMapsAdminRouter({
+  mapRepo,
+  mapPipelineService,
+  mapsDir: resolvedMapsDir,
+  invalidateTilesCache: mapsRouter.invalidateCache,
+  socketServer
+}));
 
 // ── Autenticación ────────────────────────────────────────────────
 app.use('/api/auth', authLimiter, buildAuthRouter({ userRepo }));
@@ -129,13 +136,8 @@ app.use('/api/equipment', authMiddleware, buildEquipmentRouter({ equipmentRepo, 
 app.use('/api/reports', authMiddleware, buildReportsRouter({ positionRepo, geofenceRepo }));
 app.use('/api/users', authMiddleware, requireRole('admin'), buildUsersRouter({ userRepo }));
 
-// Turnos operador-vehículo — /active es pública (la consulta la UI
-// de operador antes de loguearse); /start, /:id/end y /report
-// requieren JWT (aplicado dentro del propio router, ver operator-sessions.routes.js)
 app.use('/api/operator-sessions', buildOperatorSessionsRouter({ operatorSessionRepo, authMiddleware, requireRole }));
 
-// Estado de flota / parada preventiva — usado también por UIs no autenticadas
-// (operador/supervisor en campo, mismas reglas que antes de la migración)
 app.use('/api/fleet', buildFleetRouter({ preventiveStopService, fleetState }));
 
 // ── Health check ───────────────────────────────────────────────
@@ -152,12 +154,6 @@ app.get('/health', async (req, res) => {
   });
 });
 
-/**
- * Hidrata en memoria las geocercas y equipo estático desde
- * PostgreSQL al arrancar, para que la evaluación en tiempo real
- * (GeofenceAlertService / StaticEquipmentManager) funcione desde
- * el primer segundo sin esperar a que se creen vía API.
- */
 async function loadPersistedState() {
   try {
     const geofences = await geofenceRepo.findAllActive();
@@ -187,10 +183,6 @@ const PORT = env.port;
 loadPersistedState().finally(() => {
   signalLostService.startMonitoring();
 
-  // Cierra automáticamente turnos de operador sin actividad (sin
-  // heartbeat) por más de operatorSessionMaxIdleDays — protege
-  // contra tabletas perdidas/app cerrada sin cerrar turno. Corre al
-  // arrancar y luego cada 6 horas.
   const closeStale = () => {
     operatorSessionRepo.closeStaleSessions(env.operatorSessionMaxIdleDays).catch(err => {
       console.error('❌ Error cerrando turnos inactivos:', err.message);

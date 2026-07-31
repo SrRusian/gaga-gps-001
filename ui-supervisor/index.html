@@ -296,6 +296,34 @@
         position: relative;
       }
 
+      /* Selector de modo de mapa — Calles / Satelital / Mixto */
+      #map-mode-selector {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        z-index: 10;
+        display: flex;
+        background: rgba(13, 17, 23, 0.9);
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid #30363d;
+      }
+
+      .map-mode-btn {
+        background: none;
+        border: none;
+        color: #8b949e;
+        font-size: 11px;
+        padding: 8px 10px;
+        cursor: pointer;
+      }
+
+      .map-mode-btn.active {
+        background: #00ff88;
+        color: #0d1117;
+        font-weight: bold;
+      }
+
       /* ── Panel de detalle de vehículo ── */
       #vehicle-detail {
         display: none;
@@ -413,6 +441,13 @@
 
       <!-- Mapa -->
       <div id="map">
+        <!-- Selector de modo de mapa -->
+        <div id="map-mode-selector">
+          <button class="map-mode-btn" data-mode="streets" onclick="setMapMode('streets')">🗺️ Calles</button>
+          <button class="map-mode-btn" data-mode="satellite" onclick="setMapMode('satellite')">🛰️ Satelital</button>
+          <button class="map-mode-btn" data-mode="hybrid" onclick="setMapMode('hybrid')">🔀 Mixto</button>
+        </div>
+
         <!-- Panel detalle vehículo -->
         <div id="vehicle-detail">
           <div id="detail-title">
@@ -481,6 +516,91 @@
         zoom: 16,
       });
 
+      // ── Capas satelitales dinámicas (mapas importados en Admin) ──
+      // Varios mapas pueden estar activos a la vez, apilados por
+      // fecha de creación (el más nuevo al final = arriba); el
+      // conjunto se actualiza en vivo por socket cuando el admin
+      // activa/desactiva alguno, sin recargar la página.
+      let activeSatelliteIds = [];
+      let mapMode = localStorage.getItem("gaga_supervisor_map_mode") || "hybrid";
+      let mapInitialized = false;
+
+      function syncSatelliteLayers(maps) {
+        activeSatelliteIds.forEach((id) => {
+          if (map.getLayer(`sat-${id}`)) map.removeLayer(`sat-${id}`);
+          if (map.getSource(`sat-${id}`)) map.removeSource(`sat-${id}`);
+        });
+        activeSatelliteIds = [];
+
+        maps.forEach((m) => {
+          const sourceId = `sat-${m.id}`;
+          map.addSource(sourceId, {
+            type: "raster",
+            tiles: [`${BACKEND_URL}${m.tileUrlTemplate}`],
+            tileSize: 256,
+            minzoom: m.minZoom ?? 0,
+            maxzoom: m.maxZoom ?? 19,
+            ...(m.bounds
+              ? { bounds: [m.bounds.minLon, m.bounds.minLat, m.bounds.maxLon, m.bounds.maxLat] }
+              : {}),
+          });
+
+          // Sin minzoom/maxzoom en la CAPA — así nunca desaparece al
+          // hacer zoom extremo, es la fuente la que le indica a
+          // MapLibre cómo sobre/sub-muestrear más allá del rango
+          // real de tiles generados.
+          map.addLayer({
+            id: sourceId,
+            type: "raster",
+            source: sourceId,
+            paint: { "raster-opacity-transition": { duration: 300 } },
+          });
+
+          activeSatelliteIds.push(m.id);
+        });
+
+        applyMapMode();
+      }
+
+      function setMapMode(mode) {
+        mapMode = mode;
+        localStorage.setItem("gaga_supervisor_map_mode", mode);
+        applyMapMode();
+      }
+
+      function applyMapMode() {
+        document.querySelectorAll(".map-mode-btn").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.mode === mapMode);
+        });
+
+        if (!mapInitialized) return;
+
+        const showOsm = mapMode === "streets" || mapMode === "hybrid";
+        const showSat = mapMode === "satellite" || mapMode === "hybrid";
+        const satOpacity = mapMode === "hybrid" ? 0.9 : 1;
+        const osmOpacity = mapMode === "hybrid" ? 0.35 : 1;
+
+        map.setLayoutProperty("osm", "visibility", showOsm ? "visible" : "none");
+        map.setPaintProperty("osm", "raster-opacity", osmOpacity);
+
+        activeSatelliteIds.forEach((id) => {
+          const layerId = `sat-${id}`;
+          if (!map.getLayer(layerId)) return;
+          map.setLayoutProperty(layerId, "visibility", showSat ? "visible" : "none");
+          map.setPaintProperty(layerId, "raster-opacity", satOpacity);
+        });
+      }
+
+      map.on("load", () => {
+        mapInitialized = true;
+        applyMapMode();
+
+        fetch(`${BACKEND_URL}/tiles/active-maps.json`)
+          .then((res) => res.json())
+          .then((maps) => syncSatelliteLayers(maps))
+          .catch((err) => console.error("Error cargando mapas activos:", err));
+      });
+
       // ── Socket.io ──────────────────────────────────────────
       const socket = io(BACKEND_URL, {
         transports: ["websocket", "polling"],
@@ -494,6 +614,11 @@
       socket.on("disconnect", () => {
         document.getElementById("connection-dot").classList.remove("connected");
         document.getElementById("connection-text").textContent = "Desconectado";
+      });
+
+      // Mapas satelitales activados/desactivados en vivo desde Admin
+      socket.on("maps:active_update", ({ maps }) => {
+        if (mapInitialized) syncSatelliteLayers(maps);
       });
 
       // ── Geocercas — renderizadas en vivo (círculo/polígono/ruta) ──

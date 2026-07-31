@@ -1,13 +1,3 @@
-# syntax=docker/dockerfile:1
-#
-# Dockerfile del backend GAGA-GPS — pensado para construirse con el
-# CONTEXTO EN LA RAÍZ DEL REPO (no en backend/), porque el propio
-# backend sirve las 3 UIs estáticas (ui-admin/, ui-operator/,
-# ui-supervisor/) como hermanas de backend/ vía express.static
-# (ver backend/src/app.js). Por eso no hay Dockerfiles separados
-# para el frontend: no son apps con su propio build/servidor, son
-# HTML servidos tal cual por este mismo proceso Node.
-#
 # Build (desde la raíz del repo):
 #   docker build -f backend/Dockerfile -t gaga-backend .
 # O simplemente:
@@ -29,6 +19,11 @@ FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
+# GDAL — convierte imágenes georreferenciadas (TIF+TFW/JPG+JPW) a MBTiles para el importador de mapas satelitales
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gdal-bin python3-gdal \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=deps /app/backend/node_modules ./backend/node_modules
 
 # Código del backend
@@ -41,8 +36,8 @@ COPY ui-admin ./ui-admin
 COPY ui-operator ./ui-operator
 COPY ui-supervisor ./ui-supervisor
 
-# Carpeta de mapas (.mbtiles).
-RUN mkdir -p /app/maps \
+# Carpeta de mapas (.mbtiles) y de archivos fuente subidos (TIF/TFW).
+RUN mkdir -p /app/maps/sources /app/maps/tmp \
     && chown -R node:node /app
 
 USER node

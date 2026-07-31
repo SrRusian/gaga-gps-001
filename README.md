@@ -23,6 +23,8 @@ servidor, que ahora apunta directamente a este backend Node.js.
 4. [Estructura del proyecto](#estructura-del-proyecto)
 5. [Modelo de datos](#modelo-de-datos)
 6. [Instalación y despliegue](#instalación-y-despliegue)
+    - [Persistencia de datos](#persistencia-de-datos--instalación-limpia-vs-actualización-vs-borrado-total)
+    - [Importador de mapas satelitales](#importador-de-mapas-satelitales-tiftfw--mbtiles)
 7. [Variables de entorno](#variables-de-entorno)
 8. [Configurar Traccar Client en las tabletas](#configurar-traccar-client-en-las-tabletas)
 9. [Referencia de la API](#referencia-de-la-api)
@@ -149,6 +151,7 @@ la primera vez que se crea el volumen de PostgreSQL).
 | `geofence_events` | Auditoría de entradas/salidas de geocercas (`003_geofence_shapes.sql`) |
 | `static_equipment` | Equipo estático (palas, excavadoras) con radio de giro y de seguridad |
 | `users` | Usuarios del panel admin — roles `operator`, `supervisor`, `admin` |
+| `maps` | Mapas satelitales/drone importados (TIF/TFW → MBTiles) — metadata del pipeline, no el archivo en sí (ver [Importador de mapas satelitales](#importador-de-mapas-satelitales-tiftfw--mbtiles)) |
 
 ## Geocercas avanzadas (círculo, polígono, ruta)
 
@@ -186,6 +189,63 @@ contra las geocercas activas con la misma lógica de
 Incluye reproducción animada (▶️/⏸️) con control deslizante para
 avanzar manualmente punto por punto, mostrando fecha/hora y
 velocidad de cada uno.
+
+## Importador de mapas satelitales (TIF/TFW → MBTiles)
+
+**Panel Admin → Mapas** permite importar imágenes satelitales o de
+dron georreferenciadas (par `.tif`+`.tfw` o `.jpg`+`.jpw`) y
+convertirlas al formato offline (`.mbtiles`) que ven Operador y
+Supervisor en tiempo real.
+
+- **Subida** — nombre + imagen + world file + sistema de coordenadas
+  (CRS) de origen. Un world file **nunca** incluye el CRS, solo
+  tamaño de píxel y origen en las unidades que sea — el sistema
+  intenta detectarlo automáticamente leyendo la imagen
+  (`gdalsrsinfo`); si no lo encuentra, usa el que elijas en el
+  formulario (UTM zona 13N preseleccionado, coincide con los
+  levantamientos reales del sitio — ajústalo si tu insumo viene de
+  otra zona/proyección). **Nunca se asume el CRS en silencio** — un
+  CRS incorrecto ubica el mapa en el lugar o a la escala equivocada
+  sin ningún error visible.
+- **Procesamiento** — corre en segundo plano con GDAL
+  (`gdal_translate` + `gdal2tiles.py`, instalado en la imagen Docker
+  del backend) de forma asíncrona (`child_process.execFile`, no
+  bloqueante) — nunca congela la recepción de telemetría GPS en
+  tiempo real mientras procesa una ortofoto grande. Puede tardar
+  varios minutos; el panel hace polling cada 3s mientras el estado
+  sea `processing`.
+- **Varios mapas activos a la vez** — a diferencia de la primera
+  versión, no hay límite de uno solo: puedes subir, por ejemplo, 3
+  levantamientos de la misma zona en días distintos y activarlos
+  todos — se apilan como capas independientes, **la más nueva
+  (`created_at`) siempre arriba**. Cada mapa se sirve por su propio
+  id (`/tiles/maps/:id/{z}/{x}/{y}.png}`), no hay un único archivo
+  fijo como antes.
+- **Tiempo real** — activar/desactivar un mapa en Admin se refleja
+  al instante en Operador y Supervisor sin recargar la página
+  (evento de Socket.io `maps:active_update`, con hidratación
+  automática al conectar — ver `FleetSocketServer.js`).
+- **Nunca desaparece con el zoom** — el rango de zoom real generado
+  por GDAL (`min_zoom`/`max_zoom`) se guarda y se declara en la
+  *fuente* de MapLibre, no en la capa — así, más allá del zoom nativo
+  de los tiles, MapLibre reutiliza automáticamente el tile de mayor
+  resolución disponible (sobre/sub-muestreo) en vez de dejar la capa
+  en blanco.
+- **Selector de 3 modos** en Operador y Supervisor — 🗺️ Calles (solo
+  OSM), 🛰️ Satelital (solo las capas importadas) y 🔀 Mixto (ambas
+  superpuestas, calles a baja opacidad como referencia). La
+  preferencia se guarda en `localStorage` de cada panel.
+- **Eliminar** — borra el registro, su `.mbtiles` y los archivos
+  fuente subidos. No se puede eliminar un mapa mientras esté activo
+  (desactívalo primero).
+- Los archivos fuente originales se conservan en
+  `maps/sources/<id>/` (no se suben a git — ver `.gitignore`) por si
+  hace falta reprocesar; si el resultado quedó mal georreferenciado,
+  la manera de corregirlo es volver a importar con el CRS correcto,
+  no editar el mapa ya generado.
+- Solo un mapa a la vez puede estar en `processing` de forma
+  práctica — no hay cola de trabajos; para una operación de este
+  tamaño no hizo falta construir una.
 
 ## Instalación y despliegue
 
@@ -229,6 +289,38 @@ Para actualizar tras un cambio de código:
 git pull
 docker compose up -d --build
 ```
+
+### Persistencia de datos — instalación limpia vs. actualización vs. borrado total
+
+- **`docker compose up -d --build`** (el comando de siempre, primera vez
+  o actualización) **nunca borra datos** — PostgreSQL y Redis viven en
+  volúmenes con nombre (`postgres_data`, `redis_data`) que Compose
+  reutiliza automáticamente si ya existen. Reconstruir la imagen del
+  backend solo reemplaza el código; los contenedores de base de datos
+  ni se tocan si no cambiaron.
+- El nombre de esos volúmenes está fijado explícitamente
+  (`name: gaga-gps-001` al inicio de `docker-compose.yml`) — **no**
+  depende del nombre de la carpeta donde clonaste el repo. Antes de
+  este fix sí dependía, y era la causa típica de "cloné el repo de
+  nuevo y perdí todos mis datos": si el repo se clona a una carpeta
+  con otro nombre, Docker Compose generaba volúmenes nuevos y vacíos
+  en vez de reusar los existentes — los datos viejos no se borraban,
+  quedaban huérfanos bajo el volumen anterior, invisibles a menos que
+  supieras buscarlos con `docker volume ls`.
+- Las migraciones de `db/migrations/` **solo se aplican una vez**, la
+  primera vez que se crea el volumen de PostgreSQL (comportamiento
+  estándar de la imagen oficial) — si agregas una migración nueva
+  después de que el equipo ya tiene datos, hay que aplicarla a mano
+  (`docker exec -i gaga-postgres psql -U gaga_app -d gaga_gps < db/migrations/00X_nueva.sql`),
+  no se re-ejecuta sola al hacer `--build`.
+- **Borrado total intencional** (para empezar de cero de verdad —
+  ej. quieres una base de datos limpia para pruebas): comando
+  explícito, no accidental:
+  ```bash
+  docker compose down -v
+  ```
+  El `-v` es lo que borra los volúmenes — sin él, `docker compose down`
+  (o simplemente apagar y prender Docker Desktop) conserva todo.
 
 Notas:
 - `NODE_ENV=production` (default en `.env.example`) activa
@@ -304,6 +396,7 @@ tocarlos.
 | `POSITION_FILTER_JITTER_RADIUS_M` | No (default `5`) | Radio (metros) de ruido GPS normal con el vehículo detenido |
 | `POSITION_FILTER_HISTORY_WINDOW` | No (default `8`) | Cuántas velocidades recientes se recuerdan por dispositivo |
 | `POSITION_FILTER_MAX_CONSECUTIVE_REJECTS` | No (default `3`) | Rechazos consecutivos antes de resincronizar (fail-open) |
+| `MAX_MAP_UPLOAD_MB` | No (default `500`) | Tamaño máximo por archivo al importar un mapa satelital/drone |
 
 ## Configurar Traccar Client en las tabletas
 
@@ -345,7 +438,14 @@ obtenido en el login.
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
 | GET/POST | `/gps` | Clave compartida opcional | Receptor de telemetría (protocolo OsmAnd) |
-| GET | `/tiles/alcaraces/:z/:x/:y.png` | No | Tiles de mapa offline (MBTiles) |
+| GET | `/tiles/maps/:mapId/:z/:x/:y.png` | No | Tiles offline (MBTiles) de un mapa específico |
+| GET | `/tiles/active-maps.json` | No | Lista de mapas activos+listos, del más viejo al más nuevo — la usan Operador/Supervisor al cargar |
+| GET | `/api/maps` | JWT (`admin`) | Listar mapas importados con su estado |
+| POST | `/api/maps` | JWT (`admin`) | Importar mapa — multipart `name`, `image`, `worldFile`, `sourceCrs` |
+| PATCH | `/api/maps/:id` | JWT (`admin`) | Renombrar un mapa |
+| POST | `/api/maps/:id/activate` | JWT (`admin`) | Activa este mapa como capa visible (varios pueden estar activos a la vez) |
+| POST | `/api/maps/:id/deactivate` | JWT (`admin`) | Desactiva este mapa |
+| DELETE | `/api/maps/:id` | JWT (`admin`) | Eliminar un mapa (rechaza si está activo) |
 | POST | `/api/auth/login` | No | Login — devuelve JWT. Body opcional `longLived: true` para tokens de larga duración (ver Turnos de operador) |
 | POST | `/api/auth/logout` | No | Logout (invalidación es responsabilidad del cliente) |
 | GET | `/api/devices/lookup/:uniqueId` | No | Verifica si un dispositivo existe y si tiene turno activo — usado por la pantalla de configuración de ui-operator |
@@ -407,6 +507,7 @@ El servidor emite (y las UIs escuchan) estos eventos:
 | `equipment:approach_outer` / `equipment:approach_inner` / `equipment:minimum_limit` / `equipment:distance_update` / `equipment:approach_clear` | StaticEquipmentManager | Guía de aproximación a equipo estático |
 | `equipment:status_update` | StaticEquipmentManager | Cambio de estado de un equipo (`active_swing`/`active_pause`/`inactive`) |
 | `equipment:vehicle_approaching` | StaticEquipmentManager | Notificación al operador del equipo estático |
+| `maps:active_update` | maps-admin.routes / FleetSocketServer | Conjunto de mapas satelitales activos cambió — Operador/Supervisor reconstruyen sus capas sin recargar |
 
 ## Módulos de seguridad (RF-ALR)
 
@@ -573,6 +674,8 @@ para crear el primer usuario). Secciones:
 - **Dispositivos** — alta/edición/baja de tabletas.
 - **Geocercas** — crear/eliminar geocercas haciendo clic en el mapa.
 - **Equipo estático** — registrar palas/excavadoras con radio de giro.
+- **Mapas** — importar/administrar/activar/eliminar mapas satelitales
+  o de dron (TIF/TFW → MBTiles) — ver [Importador de mapas satelitales](#importador-de-mapas-satelitales-tiftfw--mbtiles).
 - **Historial** — consulta de posiciones pasadas por dispositivo y rango de fechas.
 - **Reportes** — exportación a CSV.
 - **Usuarios** — gestión de cuentas y roles (solo accesible por `admin`).
@@ -617,6 +720,7 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota (JSON por disposit
 | `docker compose up -d --build` falla compilando `better-sqlite3` | Faltan herramientas de build en la imagen | Ya cubierto — `backend/Dockerfile` instala `python3 make g++` en la etapa de dependencias |
 | `gaga-backend` se queda "unhealthy"/reiniciando en bucle | Postgres/Redis aún no listos, o credenciales no coinciden | Revisar `docker compose logs gaga-backend`; confirmar que `.env` tiene las contraseñas correctas y coincide con el contenedor ya arrancado |
 | Los `.mbtiles` no aparecen en `/tiles` tras el deploy | No se colocaron en `maps/` en el host, o el volumen no está montado | Copiar los archivos a `./maps/` en el servidor — se montan como volumen (`./maps:/app/maps`), no van dentro de la imagen |
+| Clonaste el repo de nuevo y aparece como instalación limpia (sin dispositivos/usuarios que ya tenías) | El proyecto de Docker Compose se resolvió con otro nombre (por defecto viene del nombre de la carpeta) y creó volúmenes nuevos y vacíos — ver [Persistencia de datos](#persistencia-de-datos--instalación-limpia-vs-actualización-vs-borrado-total) | Los datos viejos probablemente siguen en un volumen huérfano — revisa `docker volume ls`, busca `<carpeta-vieja>_postgres_data`. `docker-compose.yml` ya fija `name: gaga-gps-001` para que esto no vuelva a pasar sin importar el nombre de la carpeta |
 
 ## Limitaciones conocidas / trabajo futuro
 
@@ -625,10 +729,11 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota (JSON por disposit
   la fórmula de Haversine en JavaScript sobre columnas
   `DOUBLE PRECISION` planas. Queda disponible para el futuro si se
   requieren geocercas poligonales (`ST_Contains`, tipos `geography`).
-- **`MapPipelineService.js`** (pipeline de imagen georreferenciada →
-  MBTiles) existe como servicio pero **no está expuesto por ninguna
-  ruta de la API todavía** — hoy los `.mbtiles` se generan/colocan
-  manualmente en `maps/`.
+- **Importador de mapas** — el modo "Mixto" es una superposición de
+  opacidad (satelital sobre calles), no un estilo híbrido con
+  etiquetas vectoriales — no hay ninguna fuente de ese tipo disponible
+  offline en este proyecto. Tampoco hay cola de procesamiento — una
+  importación a la vez.
 - **Exportación a PDF** de reportes no está implementada — solo CSV.
 - **Reverse proxy HTTPS (Caddy)** contemplado en el diseño original
   no está incluido en `docker-compose.yml` — el backend se

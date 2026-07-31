@@ -23,6 +23,9 @@ const env = {
   operatorJwtExpiresIn: process.env.OPERATOR_JWT_EXPIRES_IN || '30d',
   operatorSessionMaxIdleDays: parseInt(process.env.OPERATOR_SESSION_MAX_IDLE_DAYS || '7', 10),
   mapsDir: process.env.MAPS_DIR || 'maps',
+  // Tamaño máximo (MB) de cada archivo al importar un mapa
+  // satelital/drone (TIF/JPG o TFW/JPW) — ver maps-admin.routes.js.
+  maxMapUploadMb: parseInt(process.env.MAX_MAP_UPLOAD_MB || '500', 10),
   // Clave compartida opcional para /gps — ver telemetry.routes.js.
   // Null = endpoint abierto (solo protegido por rate limit), útil
   // en desarrollo; en producción es obligatoria (ver validateEnv).

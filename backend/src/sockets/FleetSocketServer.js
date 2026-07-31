@@ -3,18 +3,21 @@
  *
  * Responsabilidad: Encapsular Socket.io — maneja conexiones
  * entrantes, hidrata a cada cliente nuevo con el estado actual
- * (flota, geocercas, alertas activas, parada preventiva) y
- * expone broadcast() para que otros servicios distribuyan
- * eventos sin acoplarse directamente a `io`.
+ * (flota, geocercas, alertas activas, parada preventiva, capas de
+ * mapas satelitales activas) y expone broadcast() para que otros
+ * servicios distribuyan eventos sin acoplarse directamente a `io`.
  */
+
+const { toPublicShape } = require('../api/routes/maps.routes');
 
 class FleetSocketServer {
 
-  constructor({ io, fleetState, geofenceService, preventiveStopService }) {
+  constructor({ io, fleetState, geofenceService, preventiveStopService, mapRepo }) {
     this.io = io;
     this.fleetState = fleetState;
     this.geofenceService = geofenceService;
     this.preventiveStopService = preventiveStopService;
+    this.mapRepo = mapRepo;
 
     this._registerConnectionHandler();
   }
@@ -72,6 +75,16 @@ class FleetSocketServer {
             loop: true,
             timestamp: new Date().toISOString()
           });
+        }
+      }
+
+      // Capas de mapas satelitales activas
+      if (this.mapRepo) {
+        try {
+          const maps = await this.mapRepo.findActiveReady();
+          socket.emit('maps:active_update', { maps: maps.map(toPublicShape) });
+        } catch (err) {
+          console.error('❌ FleetSocketServer — error hidratando mapas activos:', err.message);
         }
       }
 
