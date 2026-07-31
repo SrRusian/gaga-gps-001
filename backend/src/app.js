@@ -8,6 +8,7 @@ require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const path = require('path');
+const bcrypt = require('bcryptjs');
 const { Server } = require('socket.io');
 
 const { env, db, redis } = require('./config');
@@ -154,8 +155,37 @@ app.get('/health', async (req, res) => {
   });
 });
 
+/**
+ * Crea el usuario admin@gaga.com (o el que se configure vía
+ * DEFAULT_ADMIN_EMAIL) con la contraseña por defecto SOLO si la
+ * tabla `users` está completamente vacía — o sea, la primera vez
+ * que se levanta el volumen de PostgreSQL. Evita el paso manual de
+ * `npm run seed:admin` en una instalación nueva; el script sigue
+ * disponible para crear usuarios adicionales o resetear la
+ * contraseña más adelante.
+ */
+async function ensureDefaultAdmin() {
+  const existing = await userRepo.findAll();
+  if (existing.length > 0) return;
+
+  const passwordHash = await bcrypt.hash(env.defaultAdminPassword, 10);
+  await userRepo.create({
+    email: env.defaultAdminEmail,
+    passwordHash,
+    name: 'Administrador',
+    role: 'admin'
+  });
+
+  console.warn('⚠️  ══════════════════════════════════════════════════════════');
+  console.warn(`⚠️  Usuario admin creado automáticamente (primera vez): ${env.defaultAdminEmail} / ${env.defaultAdminPassword}`);
+  console.warn('⚠️  Inicia sesión en /admin y CAMBIA esta contraseña de inmediato.');
+  console.warn('⚠️  ══════════════════════════════════════════════════════════');
+}
+
 async function loadPersistedState() {
   try {
+    await ensureDefaultAdmin();
+
     const geofences = await geofenceRepo.findAllActive();
     geofences.forEach(g => geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(g)));
     console.log(`✅ ${geofences.length} geocerca(s) cargada(s) desde PostgreSQL`);

@@ -272,17 +272,32 @@ cp .env.example .env
 #    Postgres + Redis; las migraciones de db/migrations/ se aplican
 #    automáticamente la primera vez que se crea el volumen)
 docker compose up -d --build
+```
 
-# 4. Crear tu primer usuario admin (dentro del contenedor)
+**No hace falta un paso 4** — si la tabla de usuarios está
+completamente vacía (primera vez que se crea el volumen de
+PostgreSQL), el backend crea automáticamente un usuario admin al
+arrancar: **`admin@gaga.com` / `admin`** (o los valores que hayas
+puesto en `DEFAULT_ADMIN_EMAIL`/`DEFAULT_ADMIN_PASSWORD` en tu `.env`
+— ver [Variables de entorno](#variables-de-entorno)). Queda anotado
+bien visible en `docker compose logs gaga-backend`.
+
+> ⚠️ **Cambia esa contraseña de inmediato** — entra a `/admin` con
+> esas credenciales y actualízala desde **Usuarios** (o define
+> `DEFAULT_ADMIN_PASSWORD` en tu `.env` *antes* del primer arranque
+> si prefieres no usar nunca la de por defecto). Este mecanismo solo
+> se activa una vez, con la tabla vacía — no vuelve a crear el
+> usuario si ya existe alguno, ni siquiera si borras justo ese.
+
+Puedes crear más usuarios (operadores, supervisores, otros admins)
+desde el propio panel una vez logueado. El script manual sigue
+disponible si prefieres crear el primer admin tú mismo con tus
+propias credenciales en vez de usar el automático, o para resetear
+una contraseña sin pasar por el panel:
+```bash
 docker compose exec gaga-backend \
   npm run seed:admin -- admin@tuempresa.com TuPasswordSegura "Nombre Admin"
 ```
-
-Con esto ya puedes iniciar sesión en `/admin` con esas credenciales.
-Puedes crear más usuarios (operadores, supervisores, otros admins)
-desde el propio panel una vez logueado — el script `seed:admin` solo
-es necesario para el primer usuario, ya que el panel requiere estar
-autenticado para crear nuevos usuarios.
 
 Para actualizar tras un cambio de código:
 ```bash
@@ -351,8 +366,13 @@ cp backend/.env-example backend/.env  # plantilla separada, ver el archivo
 cd backend
 npm install
 npm start
-npm run seed:admin -- admin@tuempresa.com TuPasswordSegura "Nombre Admin"
 ```
+
+`npm start` corre el mismo `app.js` que el contenedor — con la base
+de datos vacía, crea el admin por defecto igual que en Docker (ver
+arriba). El script manual (`npm run seed:admin -- ...`) sigue
+disponible si prefieres definir tú las credenciales del primer
+usuario desde el arranque.
 
 Este flujo es opcional y no forma parte del despliegue estándar.
 
@@ -397,6 +417,8 @@ tocarlos.
 | `POSITION_FILTER_HISTORY_WINDOW` | No (default `8`) | Cuántas velocidades recientes se recuerdan por dispositivo |
 | `POSITION_FILTER_MAX_CONSECUTIVE_REJECTS` | No (default `3`) | Rechazos consecutivos antes de resincronizar (fail-open) |
 | `MAX_MAP_UPLOAD_MB` | No (default `500`) | Tamaño máximo por archivo al importar un mapa satelital/drone |
+| `DEFAULT_ADMIN_EMAIL` | No (default `admin@gaga.com`) | Email del admin creado automáticamente si la tabla de usuarios está vacía al arrancar |
+| `DEFAULT_ADMIN_PASSWORD` | No (default `admin`) | Contraseña de ese admin — **cámbiala** desde el panel tras el primer login, o define esta variable antes del primer arranque |
 
 ## Configurar Traccar Client en las tabletas
 

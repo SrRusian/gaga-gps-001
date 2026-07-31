@@ -31,6 +31,14 @@ const env = {
   // en desarrollo; en producción es obligatoria (ver validateEnv).
   telemetrySharedSecret: process.env.TELEMETRY_SHARED_SECRET || null,
 
+  // Usuario admin creado automáticamente al arrancar SOLO si la
+  // tabla `users` está completamente vacía (primera vez que se crea
+  // el volumen de PostgreSQL) — ver ensureDefaultAdmin() en app.js.
+  // Cambiar la contraseña por defecto es responsabilidad del que
+  // despliega; queda advertido en consola y en el README.
+  defaultAdminEmail: process.env.DEFAULT_ADMIN_EMAIL || 'admin@gaga.com',
+  defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || 'admin',
+
   // Filtro anti-teletransporte (glitch RTK/NTRIP) — ver
   // PositionFilterService.js. Umbral adaptativo por dispositivo,
   // no un límite fijo de tipo de vehículo. Todos tienen default
