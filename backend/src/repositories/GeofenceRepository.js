@@ -25,6 +25,23 @@ class GeofenceRepository {
     }
   }
 
+  /**
+   * Subconjunto de geocercas por id — usado por la exportación
+   * selectiva de GeoJSON/KML (ver geofences.routes.js).
+   */
+  async findByIds(ids) {
+    try {
+      const { rows } = await query(
+        'SELECT * FROM geofences WHERE active = TRUE AND id = ANY($1) ORDER BY id ASC',
+        [ids]
+      );
+      return rows;
+    } catch (err) {
+      console.error('❌ GeofenceRepository.findByIds:', err.message);
+      throw err;
+    }
+  }
+
   async findById(id) {
     try {
       const { rows } = await query('SELECT * FROM geofences WHERE id = $1', [id]);

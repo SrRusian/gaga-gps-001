@@ -95,10 +95,22 @@ function buildGeofencesRouter({ geofenceRepo, geofenceService, socketServer }) {
   });
 
   // ── Exportación en formatos estándar ────────────────────────────
+  // Ambas rutas aceptan ?ids=1,2,3 opcional para exportar solo un
+  // subconjunto — sin el parámetro (o vacío), exportan todas las
+  // geocercas activas, igual que antes (compatible con enlaces ya
+  // existentes que usen la ruta directa sin selección).
+  function resolveGeofences(req) {
+    const ids = (req.query.ids || '')
+      .split(',')
+      .map(s => parseInt(s, 10))
+      .filter(Number.isInteger);
+    return ids.length > 0 ? geofenceRepo.findByIds(ids) : geofenceRepo.findAllActive();
+  }
+
   // GeoJSON — formato principal, nativo en JS/QGIS/Leaflet/Mapbox
   router.get('/export.geojson', async (req, res) => {
     try {
-      const geofences = await geofenceRepo.findAllActive();
+      const geofences = await resolveGeofences(req);
       res.setHeader('Content-Type', 'application/geo+json');
       res.setHeader('Content-Disposition', 'attachment; filename="geocercas.geojson"');
       res.json(geofencesToGeoJSON(geofences));
@@ -111,7 +123,7 @@ function buildGeofencesRouter({ geofenceRepo, geofenceService, socketServer }) {
   // KML — formato usado en topografía/minería y Google Earth
   router.get('/export.kml', async (req, res) => {
     try {
-      const geofences = await geofenceRepo.findAllActive();
+      const geofences = await resolveGeofences(req);
       res.setHeader('Content-Type', 'application/vnd.google-earth.kml+xml');
       res.setHeader('Content-Disposition', 'attachment; filename="geocercas.kml"');
       res.send(geofencesToKml(geofences));

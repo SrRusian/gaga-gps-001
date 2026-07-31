@@ -226,9 +226,68 @@
 
       #map,
       #hist-map {
-        height: 400px;
         border-radius: 8px;
         margin-bottom: 16px;
+      }
+
+      #map {
+        height: calc(100vh - 320px);
+        min-height: 480px;
+        position: relative;
+      }
+
+      #hist-map {
+        height: 400px;
+      }
+
+      #geo-map-mode-selector {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        z-index: 10;
+        display: flex;
+        background: rgba(13, 17, 23, 0.9);
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid #30363d;
+      }
+
+      .map-mode-btn {
+        background: none;
+        border: none;
+        color: #8b949e;
+        font-size: 11px;
+        padding: 8px 10px;
+        cursor: pointer;
+      }
+
+      .map-mode-btn.active {
+        background: #00ff88;
+        color: #0d1117;
+        font-weight: bold;
+      }
+
+      .map-mode-btn:disabled {
+        color: #444;
+        cursor: not-allowed;
+      }
+
+      #geo-no-maps-banner {
+        display: none;
+        background: #1a1400;
+        border: 1px solid #ffaa00;
+        color: #ffcc44;
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 12px;
+        margin-bottom: 8px;
+        align-items: center;
+        gap: 8px;
+        justify-content: space-between;
+      }
+
+      #geo-no-maps-banner.visible {
+        display: flex;
       }
 
       .metric {
@@ -361,23 +420,50 @@
           <!-- Geocercas -->
           <div class="section" id="section-geofences">
             <div class="card">
-              <div class="form-row" style="margin-bottom: 8px">
+              <div id="geo-no-maps-banner">
+                <span
+                  >⚠️ No hay ningún mapa satelital importado todavía — los modos
+                  Satelital/Mixto no mostrarán nada.</span
+                >
                 <button
                   class="btn btn-sm"
-                  onclick="setMapStyle('osm')"
-                  id="btn-style-osm"
+                  style="width: auto"
+                  onclick="
+                    document
+                      .querySelector('#nav button[data-section=maps]')
+                      .click()
+                  "
                 >
-                  🌐 Mapa con calles (OSM)
-                </button>
-                <button
-                  class="btn btn-sm"
-                  onclick="setMapStyle('offline')"
-                  id="btn-style-offline"
-                >
-                  📴 Mapa offline (MBTiles)
+                  Ir a Mapas
                 </button>
               </div>
-              <div id="map"></div>
+              <div id="map">
+                <div id="geo-map-mode-selector">
+                  <button
+                    class="map-mode-btn"
+                    data-mode="streets"
+                    onclick="setGeoMapMode('streets')"
+                  >
+                    🗺️ Calles
+                  </button>
+                  <button
+                    class="map-mode-btn"
+                    data-mode="satellite"
+                    onclick="setGeoMapMode('satellite')"
+                    id="geo-mode-satellite"
+                  >
+                    🛰️ Satelital
+                  </button>
+                  <button
+                    class="map-mode-btn"
+                    data-mode="hybrid"
+                    onclick="setGeoMapMode('hybrid')"
+                    id="geo-mode-hybrid"
+                  >
+                    🔀 Mixto
+                  </button>
+                </div>
+              </div>
               <div class="form-row" style="margin-top: 8px">
                 <label style="font-size: 12px; color: #8b949e">Forma:</label>
                 <select id="geo-shape" onchange="onShapeChange()">
@@ -464,6 +550,14 @@
               <table>
                 <thead>
                   <tr>
+                    <th style="width: 24px">
+                      <input
+                        type="checkbox"
+                        id="geo-select-all"
+                        onchange="toggleAllGeoExportChecks(this.checked)"
+                        title="Seleccionar todas"
+                      />
+                    </th>
                     <th>Nombre</th>
                     <th>Tipo</th>
                     <th>Forma</th>
@@ -738,7 +832,8 @@
         draw,
         selectedCenter = null;
       let currentShape = "circle";
-      let currentMapStyle = "osm";
+      let geoMapMode = localStorage.getItem("gaga_admin_map_mode") || "streets";
+      let geoActiveSatelliteIds = [];
 
       function authHeaders() {
         return token
@@ -905,9 +1000,7 @@
         }
       }
 
-      // ── Geocercas ──────────────────────────────────────────
-
-      const OSM_STYLE = {
+      const BASE_STYLE = {
         version: 8,
         sources: {
           osm: {
@@ -917,26 +1010,14 @@
             attribution: "© OpenStreetMap contributors",
           },
         },
-        layers: [{ id: "osm", type: "raster", source: "osm" }],
-      };
-
-      const OFFLINE_STYLE = {
-        version: 8,
-        sources: {
-          offline: {
-            type: "raster",
-            tiles: ["/tiles/alcaraces/{z}/{x}/{y}.png"],
-            tileSize: 256,
-          },
-        },
-        layers: [{ id: "offline", type: "raster", source: "offline" }],
+        layers: [{ id: "osm-layer", type: "raster", source: "osm" }],
       };
 
       function initMap() {
         if (map) return;
         map = new maplibregl.Map({
           container: "map",
-          style: OSM_STYLE,
+          style: BASE_STYLE,
           center: [-103.7247, 19.2433],
           zoom: 10,
         });
@@ -947,7 +1028,11 @@
         });
         map.addControl(draw);
 
-        map.on("load", () => renderExistingGeofences());
+        map.on("load", () => {
+          renderExistingGeofences();
+          applyGeoMapMode();
+          loadActiveSatelliteMaps();
+        });
 
         map.on("click", (e) => {
           if (currentShape !== "circle") return;
@@ -965,15 +1050,102 @@
         });
       }
 
-      function setMapStyle(styleName) {
-        currentMapStyle = styleName;
-        document.getElementById("btn-style-osm").style.opacity =
-          styleName === "osm" ? "1" : "0.5";
-        document.getElementById("btn-style-offline").style.opacity =
-          styleName === "offline" ? "1" : "0.5";
-        if (!map) return;
-        map.setStyle(styleName === "osm" ? OSM_STYLE : OFFLINE_STYLE);
-        map.once("styledata", () => renderExistingGeofences());
+      // ── Capas satelitales dinámicas (mapas importados en Mapas) ──
+      async function loadActiveSatelliteMaps() {
+        try {
+          const maps = await (await fetch("/tiles/active-maps.json")).json();
+          syncGeoSatelliteLayers(maps);
+        } catch (err) {
+          console.error("Error cargando mapas activos:", err);
+          syncGeoSatelliteLayers([]);
+        }
+      }
+
+      function syncGeoSatelliteLayers(maps) {
+        geoActiveSatelliteIds.forEach((id) => {
+          if (map.getLayer(`geo-sat-${id}`)) map.removeLayer(`geo-sat-${id}`);
+          if (map.getSource(`geo-sat-${id}`)) map.removeSource(`geo-sat-${id}`);
+        });
+        geoActiveSatelliteIds = [];
+
+        const beforeId = map.getLayer("geofences-fill")
+          ? "geofences-fill"
+          : undefined;
+
+        maps.forEach((m) => {
+          const sourceId = `geo-sat-${m.id}`;
+          map.addSource(sourceId, {
+            type: "raster",
+            tiles: [`${window.location.origin}${m.tileUrlTemplate}`],
+            tileSize: 256,
+            minzoom: m.minZoom ?? 0,
+            maxzoom: m.maxZoom ?? 19,
+            ...(m.bounds
+              ? {
+                  bounds: [
+                    m.bounds.minLon,
+                    m.bounds.minLat,
+                    m.bounds.maxLon,
+                    m.bounds.maxLat,
+                  ],
+                }
+              : {}),
+          });
+          map.addLayer(
+            { id: sourceId, type: "raster", source: sourceId },
+            beforeId,
+          );
+          geoActiveSatelliteIds.push(m.id);
+        });
+
+        const hasMaps = maps.length > 0;
+        document
+          .getElementById("geo-no-maps-banner")
+          .classList.toggle("visible", !hasMaps);
+        document.getElementById("geo-mode-satellite").disabled = !hasMaps;
+        document.getElementById("geo-mode-hybrid").disabled = !hasMaps;
+        if (!hasMaps && geoMapMode !== "streets") setGeoMapMode("streets");
+
+        applyGeoMapMode();
+      }
+
+      function setGeoMapMode(mode) {
+        geoMapMode = mode;
+        localStorage.setItem("gaga_admin_map_mode", mode);
+        applyGeoMapMode();
+      }
+
+      function applyGeoMapMode() {
+        document
+          .querySelectorAll("#geo-map-mode-selector .map-mode-btn")
+          .forEach((btn) => {
+            btn.classList.toggle("active", btn.dataset.mode === geoMapMode);
+          });
+
+        if (!map || !map.getLayer("osm-layer")) return;
+
+        const showOsm = geoMapMode === "streets" || geoMapMode === "hybrid";
+        const showSat = geoMapMode === "satellite" || geoMapMode === "hybrid";
+        const satOpacity = geoMapMode === "hybrid" ? 0.9 : 1;
+        const osmOpacity = geoMapMode === "hybrid" ? 0.35 : 1;
+
+        map.setLayoutProperty(
+          "osm-layer",
+          "visibility",
+          showOsm ? "visible" : "none",
+        );
+        map.setPaintProperty("osm-layer", "raster-opacity", osmOpacity);
+
+        geoActiveSatelliteIds.forEach((id) => {
+          const layerId = `geo-sat-${id}`;
+          if (!map.getLayer(layerId)) return;
+          map.setLayoutProperty(
+            layerId,
+            "visibility",
+            showSat ? "visible" : "none",
+          );
+          map.setPaintProperty(layerId, "raster-opacity", satOpacity);
+        });
       }
 
       function onShapeChange() {
@@ -1042,7 +1214,6 @@
               ),
             });
           } else {
-            // círculo → polígono aproximado de 32 lados para visualizar
             features.push({
               type: "Feature",
               properties: { color, kind: "zone" },
@@ -1122,8 +1293,12 @@
       async function loadGeofences() {
         const geofences = await api("/api/geofences");
         window.__lastGeofences = geofences;
-        if (map) renderExistingGeofences(geofences);
+        if (map) {
+          renderExistingGeofences(geofences);
+          loadActiveSatelliteMaps();
+        }
 
+        document.getElementById("geo-select-all").checked = false;
         document.getElementById("geofences-table").innerHTML = geofences
           .map((g) => {
             const detail =
@@ -1134,6 +1309,7 @@
                   : `${g.geometry?.coordinates?.[0]?.length || 0} vértices`;
             return `
           <tr>
+            <td><input type="checkbox" class="geo-export-check" value="${g.id}" /></td>
             <td>${g.name}</td><td>${g.type}</td><td>${g.shape_type}</td><td>${detail}</td>
             <td>
               <button class="btn btn-sm" onclick="editGeofence(${g.id})">Editar</button>
@@ -1142,6 +1318,18 @@
           </tr>`;
           })
           .join("");
+      }
+
+      function toggleAllGeoExportChecks(checked) {
+        document
+          .querySelectorAll(".geo-export-check")
+          .forEach((cb) => (cb.checked = checked));
+      }
+
+      function getSelectedGeoIds() {
+        return [...document.querySelectorAll(".geo-export-check:checked")].map(
+          (cb) => cb.value,
+        );
       }
 
       let editingGeofenceId = null;
@@ -1278,9 +1466,19 @@
 
       // ── Import / Export ─────────────────────────────────────
       async function exportGeofences(format) {
-        const res = await fetch(`/api/geofences/export.${format}`, {
-          headers: authHeaders(),
-        });
+        const ids = getSelectedGeoIds();
+        if (ids.length === 0) {
+          alert(
+            'Selecciona al menos una geocerca para exportar (marca su casilla, o usa "seleccionar todas" junto a Nombre).',
+          );
+          return;
+        }
+        const res = await fetch(
+          `/api/geofences/export.${format}?ids=${ids.join(",")}`,
+          {
+            headers: authHeaders(),
+          },
+        );
         const blob = await res.blob();
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -1467,7 +1665,11 @@
       }
 
       async function deactivateMap(id) {
-        if (!confirm("¿Desactivar este mapa? Dejará de verse en Operador/Supervisor."))
+        if (
+          !confirm(
+            "¿Desactivar este mapa? Dejará de verse en Operador/Supervisor.",
+          )
+        )
           return;
         await api(`/api/maps/${id}/deactivate`, { method: "POST" });
         loadMaps();
