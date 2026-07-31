@@ -443,9 +443,27 @@
       <div id="map">
         <!-- Selector de modo de mapa -->
         <div id="map-mode-selector">
-          <button class="map-mode-btn" data-mode="streets" onclick="setMapMode('streets')">🗺️ Calles</button>
-          <button class="map-mode-btn" data-mode="satellite" onclick="setMapMode('satellite')">🛰️ Satelital</button>
-          <button class="map-mode-btn" data-mode="hybrid" onclick="setMapMode('hybrid')">🔀 Mixto</button>
+          <button
+            class="map-mode-btn"
+            data-mode="streets"
+            onclick="setMapMode('streets')"
+          >
+            🗺️ Calles
+          </button>
+          <button
+            class="map-mode-btn"
+            data-mode="satellite"
+            onclick="setMapMode('satellite')"
+          >
+            🛰️ Satelital
+          </button>
+          <button
+            class="map-mode-btn"
+            data-mode="hybrid"
+            onclick="setMapMode('hybrid')"
+          >
+            🔀 Mixto
+          </button>
         </div>
 
         <!-- Panel detalle vehículo -->
@@ -522,7 +540,8 @@
       // conjunto se actualiza en vivo por socket cuando el admin
       // activa/desactiva alguno, sin recargar la página.
       let activeSatelliteIds = [];
-      let mapMode = localStorage.getItem("gaga_supervisor_map_mode") || "hybrid";
+      let mapMode =
+        localStorage.getItem("gaga_supervisor_map_mode") || "hybrid";
       let mapInitialized = false;
 
       function syncSatelliteLayers(maps) {
@@ -541,7 +560,14 @@
             minzoom: m.minZoom ?? 0,
             maxzoom: m.maxZoom ?? 19,
             ...(m.bounds
-              ? { bounds: [m.bounds.minLon, m.bounds.minLat, m.bounds.maxLon, m.bounds.maxLat] }
+              ? {
+                  bounds: [
+                    m.bounds.minLon,
+                    m.bounds.minLat,
+                    m.bounds.maxLon,
+                    m.bounds.maxLat,
+                  ],
+                }
               : {}),
           });
 
@@ -580,13 +606,21 @@
         const satOpacity = mapMode === "hybrid" ? 0.9 : 1;
         const osmOpacity = mapMode === "hybrid" ? 0.35 : 1;
 
-        map.setLayoutProperty("osm", "visibility", showOsm ? "visible" : "none");
+        map.setLayoutProperty(
+          "osm",
+          "visibility",
+          showOsm ? "visible" : "none",
+        );
         map.setPaintProperty("osm", "raster-opacity", osmOpacity);
 
         activeSatelliteIds.forEach((id) => {
           const layerId = `sat-${id}`;
           if (!map.getLayer(layerId)) return;
-          map.setLayoutProperty(layerId, "visibility", showSat ? "visible" : "none");
+          map.setLayoutProperty(
+            layerId,
+            "visibility",
+            showSat ? "visible" : "none",
+          );
           map.setPaintProperty(layerId, "raster-opacity", satOpacity);
         });
       }
@@ -627,7 +661,9 @@
         for (let i = 0; i <= points; i++) {
           const angle = (i / points) * 2 * Math.PI;
           const dLat = (radiusMeters / 111320) * Math.cos(angle);
-          const dLon = (radiusMeters / (111320 * Math.cos(lat * Math.PI / 180))) * Math.sin(angle);
+          const dLon =
+            (radiusMeters / (111320 * Math.cos((lat * Math.PI) / 180))) *
+            Math.sin(angle);
           coords.push([lon + dLon, lat + dLat]);
         }
         return { type: "Polygon", coordinates: [coords] };
@@ -635,40 +671,74 @@
 
       function lineToBufferPolygon(lineGeometry, halfWidthMeters) {
         const coords = lineGeometry.coordinates;
-        const left = [], right = [];
+        const left = [],
+          right = [];
         for (let i = 0; i < coords.length; i++) {
           const [lon, lat] = coords[i];
           const prev = coords[i - 1] || coords[i];
           const next = coords[i + 1] || coords[i];
-          const latRad = lat * Math.PI / 180;
-          const mPerLat = 111320, mPerLon = 111320 * Math.cos(latRad);
-          const dx = (next[0] - prev[0]) * mPerLon, dy = (next[1] - prev[1]) * mPerLat;
+          const latRad = (lat * Math.PI) / 180;
+          const mPerLat = 111320,
+            mPerLon = 111320 * Math.cos(latRad);
+          const dx = (next[0] - prev[0]) * mPerLon,
+            dy = (next[1] - prev[1]) * mPerLat;
           const len = Math.sqrt(dx * dx + dy * dy) || 1;
-          const perpX = -dy / len, perpY = dx / len;
-          const offLon = (perpX * halfWidthMeters) / mPerLon, offLat = (perpY * halfWidthMeters) / mPerLat;
+          const perpX = -dy / len,
+            perpY = dx / len;
+          const offLon = (perpX * halfWidthMeters) / mPerLon,
+            offLat = (perpY * halfWidthMeters) / mPerLat;
           left.push([lon + offLon, lat + offLat]);
           right.push([lon - offLon, lat - offLat]);
         }
-        return { type: "Polygon", coordinates: [[...left, ...right.reverse(), left[0]]] };
+        return {
+          type: "Polygon",
+          coordinates: [[...left, ...right.reverse(), left[0]]],
+        };
       }
 
       function renderGeofences(geofences) {
-        if (!map.isStyleLoaded()) { map.once("idle", () => renderGeofences(geofences)); return; }
+        if (!map.isStyleLoaded()) {
+          map.once("idle", () => renderGeofences(geofences));
+          return;
+        }
 
         const features = [];
         (geofences || []).forEach((g) => {
           const shape = g.shapeType || "circle";
           const color = g.type === "danger" ? "#ff4444" : "#ffcc00";
           if (shape === "polygon") {
-            features.push({ type: "Feature", properties: { color }, geometry: g.geometry });
+            features.push({
+              type: "Feature",
+              properties: { color },
+              geometry: g.geometry,
+            });
           } else if (shape === "polyline") {
             const margin = g.corridorDangerMarginMeters;
             if (margin) {
-              features.push({ type: "Feature", properties: { color: "#ffcc00" }, geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters + margin) });
+              features.push({
+                type: "Feature",
+                properties: { color: "#ffcc00" },
+                geometry: lineToBufferPolygon(
+                  g.geometry,
+                  g.corridorWidthMeters + margin,
+                ),
+              });
             }
-            features.push({ type: "Feature", properties: { color: "#00ff88" }, geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters) });
+            features.push({
+              type: "Feature",
+              properties: { color: "#00ff88" },
+              geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters),
+            });
           } else {
-            features.push({ type: "Feature", properties: { color }, geometry: circleToPolygon(g.center.lat, g.center.lon, g.radiusMeters) });
+            features.push({
+              type: "Feature",
+              properties: { color },
+              geometry: circleToPolygon(
+                g.center.lat,
+                g.center.lon,
+                g.radiusMeters,
+              ),
+            });
           }
         });
 
@@ -676,9 +746,22 @@
         if (map.getSource("geofences-preview")) {
           map.getSource("geofences-preview").setData(geojson);
         } else {
-          map.addSource("geofences-preview", { type: "geojson", data: geojson });
-          map.addLayer({ id: "geofences-fill", type: "fill", source: "geofences-preview", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.25 } });
-          map.addLayer({ id: "geofences-line", type: "line", source: "geofences-preview", paint: { "line-color": ["get", "color"], "line-width": 2 } });
+          map.addSource("geofences-preview", {
+            type: "geojson",
+            data: geojson,
+          });
+          map.addLayer({
+            id: "geofences-fill",
+            type: "fill",
+            source: "geofences-preview",
+            paint: { "fill-color": ["get", "color"], "fill-opacity": 0.25 },
+          });
+          map.addLayer({
+            id: "geofences-line",
+            type: "line",
+            source: "geofences-preview",
+            paint: { "line-color": ["get", "color"], "line-width": 2 },
+          });
         }
       }
 
@@ -693,9 +776,13 @@
       });
 
       function updateVehicle(pos) {
+        const lastSeen = pos.fixTime
+          ? new Date(pos.fixTime).getTime()
+          : Date.now();
+
         fleetState[pos.deviceId] = {
           ...pos,
-          lastSeen: Date.now(),
+          lastSeen,
         };
 
         updateVehicleMarker(pos);
@@ -747,7 +834,7 @@
           item.onclick = () => showVehicleDetail(v.deviceId);
           item.innerHTML = `
           <div class="vehicle-header">
-            <span class="vehicle-name">${v.deviceName || ('Vehículo ' + v.deviceId)}${v.deviceType ? ` <small class="vehicle-type">(${v.deviceType})</small>` : ''}</span>
+            <span class="vehicle-name">${v.deviceName || "Vehículo " + v.deviceId}${v.deviceType ? ` <small class="vehicle-type">(${v.deviceType})</small>` : ""}</span>
             <span class="vehicle-status ${isOffline ? "offline" : ""}">
               ${isOffline ? "Sin señal" : "En línea"}
             </span>
@@ -783,8 +870,9 @@
         const elapsed = Date.now() - v.lastSeen;
         const isOffline = elapsed > 45000;
 
-        document.getElementById("detail-name").textContent =
-          v.deviceName ? `${v.deviceName}${v.deviceType ? ' (' + v.deviceType + ')' : ''}` : `Vehículo ${deviceId}`;
+        document.getElementById("detail-name").textContent = v.deviceName
+          ? `${v.deviceName}${v.deviceType ? " (" + v.deviceType + ")" : ""}`
+          : `Vehículo ${deviceId}`;
         document.getElementById("detail-status").textContent = isOffline
           ? "🔴 Sin señal"
           : "🟢 En línea";
