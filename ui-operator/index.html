@@ -248,14 +248,19 @@
       .full-overlay {
         display: none;
         position: fixed;
-        top: 0; left: 0; right: 0; bottom: 0;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
         background: rgba(10, 10, 20, 0.97);
         z-index: 3000;
         align-items: center;
         justify-content: center;
       }
 
-      .full-overlay.active { display: flex; }
+      .full-overlay.active {
+        display: flex;
+      }
 
       .overlay-card {
         background: #16213e;
@@ -328,9 +333,11 @@
         <div id="status-dot"></div>
         <span id="status-text">Desconectado</span>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <span id="operator-name" style="font-size:12px;color:#aaa;"></span>
-        <button id="btn-end-shift" onclick="endShift()" style="display:none;">Finalizar turno</button>
+      <div style="display: flex; align-items: center; gap: 10px">
+        <span id="operator-name" style="font-size: 12px; color: #aaa"></span>
+        <button id="btn-end-shift" onclick="endShift()" style="display: none">
+          Finalizar turno
+        </button>
         <div id="vehicle-count">0 vehículos</div>
       </div>
     </div>
@@ -341,10 +348,16 @@
     <div id="device-setup-overlay" class="full-overlay">
       <div class="overlay-card">
         <h2>🔧 Configuración de dispositivo</h2>
-        <p>Esta tableta aún no tiene un identificador de vehículo asignado.
-           Ingresa el mismo "Device Identifier" configurado en Traccar Client
-           para esta máquina. Esto solo se hace una vez, al instalar la tableta.</p>
-        <input id="setup-device-id" placeholder="Ej. CAMION-01" autocapitalize="characters" />
+        <p>
+          Esta tableta aún no tiene un identificador de vehículo asignado.
+          Ingresa el mismo "Device Identifier" configurado en Traccar Client
+          para esta máquina. Esto solo se hace una vez, al instalar la tableta.
+        </p>
+        <input
+          id="setup-device-id"
+          placeholder="Ej. CAMION-01"
+          autocapitalize="characters"
+        />
         <button onclick="saveDeviceSetup()">Guardar</button>
         <div class="overlay-error" id="setup-error"></div>
       </div>
@@ -358,8 +371,18 @@
       <div class="overlay-card">
         <h2>👤 Iniciar turno</h2>
         <p>Ingresa tus credenciales para comenzar tu turno en este vehículo.</p>
-        <input id="login-email" type="email" placeholder="Email" autocomplete="username" />
-        <input id="login-password" type="password" placeholder="Contraseña" autocomplete="current-password" />
+        <input
+          id="login-email"
+          type="email"
+          placeholder="Email"
+          autocomplete="username"
+        />
+        <input
+          id="login-password"
+          type="password"
+          placeholder="Contraseña"
+          autocomplete="current-password"
+        />
         <button onclick="doOperatorLogin()">Iniciar turno</button>
         <div class="overlay-error" id="login-error"></div>
       </div>
@@ -370,9 +393,27 @@
 
     <!-- Selector de modo de mapa -->
     <div id="map-mode-selector">
-      <button class="map-mode-btn" data-mode="streets" onclick="setMapMode('streets')">🗺️ Calles</button>
-      <button class="map-mode-btn" data-mode="satellite" onclick="setMapMode('satellite')">🛰️ Satelital</button>
-      <button class="map-mode-btn" data-mode="hybrid" onclick="setMapMode('hybrid')">🔀 Mixto</button>
+      <button
+        class="map-mode-btn"
+        data-mode="streets"
+        onclick="setMapMode('streets')"
+      >
+        🗺️ Calles
+      </button>
+      <button
+        class="map-mode-btn"
+        data-mode="satellite"
+        onclick="setMapMode('satellite')"
+      >
+        🛰️ Satelital
+      </button>
+      <button
+        class="map-mode-btn"
+        data-mode="hybrid"
+        onclick="setMapMode('hybrid')"
+      >
+        🔀 Mixto
+      </button>
     </div>
 
     <!-- Botón centrar -->
@@ -415,7 +456,7 @@
       // o dominio de producción (antes esto rompía en LAN).
       const BACKEND_URL = "";
 
-      let MY_DEVICE_ID = null;   // resuelto por resolveDeviceId()
+      let MY_DEVICE_ID = null; // resuelto por resolveDeviceId()
       let MY_VEHICLE_NAME = "Vehículo";
       let operatorToken = null;
       let operatorSession = null; // { id, user_name, ... }
@@ -455,7 +496,9 @@
         try {
           errorEl.style.color = "#8b949e";
           errorEl.textContent = "Verificando...";
-          const res = await fetch(`${BACKEND_URL}/api/devices/lookup/${encodeURIComponent(value)}`);
+          const res = await fetch(
+            `${BACKEND_URL}/api/devices/lookup/${encodeURIComponent(value)}`,
+          );
           const data = await res.json();
 
           if (!data.exists) {
@@ -471,8 +514,8 @@
             // identificador, usado por una sola tableta física).
             const proceed = confirm(
               `⚠️ "${value}" (${data.name}) ya tiene un turno activo con ${data.activeSession.userName} desde ${new Date(data.activeSession.startedAt).toLocaleString()}.\n\n` +
-              `Si esta es una tableta DISTINTA a la que normalmente usa ese vehículo, probablemente hay un identificador duplicado — verifica con el administrador antes de continuar.\n\n` +
-              `¿Continuar de todos modos?`
+                `Si esta es una tableta DISTINTA a la que normalmente usa ese vehículo, probablemente hay un identificador duplicado — verifica con el administrador antes de continuar.\n\n` +
+                `¿Continuar de todos modos?`,
             );
             if (!proceed) {
               errorEl.style.color = "#8b949e";
@@ -482,7 +525,8 @@
           }
         } catch (err) {
           errorEl.style.color = "#ff4444";
-          errorEl.textContent = "No se pudo verificar el dispositivo — revisa la conexión con el servidor";
+          errorEl.textContent =
+            "No se pudo verificar el dispositivo — revisa la conexión con el servidor";
           return;
         }
 
@@ -555,20 +599,26 @@
             minzoom: m.minZoom ?? 0,
             maxzoom: m.maxZoom ?? 19,
             ...(m.bounds
-              ? { bounds: [m.bounds.minLon, m.bounds.minLat, m.bounds.maxLon, m.bounds.maxLat] }
+              ? {
+                  bounds: [
+                    m.bounds.minLon,
+                    m.bounds.minLat,
+                    m.bounds.maxLon,
+                    m.bounds.maxLat,
+                  ],
+                }
               : {}),
           });
 
-          // Sin minzoom/maxzoom en la CAPA (a diferencia de antes) —
-          // así nunca desaparece al hacer zoom extremo: es la fuente
-          // la que le indica a MapLibre cómo sobre/sub-muestrear más
-          // allá del rango real de tiles generados.
-          map.addLayer({
-            id: sourceId,
-            type: "raster",
-            source: sourceId,
-            paint: { "raster-opacity-transition": { duration: 300 } },
-          });
+          map.addLayer(
+            {
+              id: sourceId,
+              type: "raster",
+              source: sourceId,
+              paint: { "raster-opacity-transition": { duration: 300 } },
+            },
+            map.getLayer("geofences-fill") ? "geofences-fill" : undefined,
+          );
 
           activeSatelliteIds.push(m.id);
         });
@@ -594,13 +644,21 @@
         const satOpacity = mapMode === "hybrid" ? 0.9 : 1;
         const osmOpacity = mapMode === "hybrid" ? 0.35 : 1;
 
-        map.setLayoutProperty("osm-layer", "visibility", showOsm ? "visible" : "none");
+        map.setLayoutProperty(
+          "osm-layer",
+          "visibility",
+          showOsm ? "visible" : "none",
+        );
         map.setPaintProperty("osm-layer", "raster-opacity", osmOpacity);
 
         activeSatelliteIds.forEach((id) => {
           const layerId = `sat-${id}`;
           if (!map.getLayer(layerId)) return;
-          map.setLayoutProperty(layerId, "visibility", showSat ? "visible" : "none");
+          map.setLayoutProperty(
+            layerId,
+            "visibility",
+            showSat ? "visible" : "none",
+          );
           map.setPaintProperty(layerId, "raster-opacity", satOpacity);
         });
       }
@@ -643,7 +701,9 @@
         for (let i = 0; i <= points; i++) {
           const angle = (i / points) * 2 * Math.PI;
           const dLat = (radiusMeters / 111320) * Math.cos(angle);
-          const dLon = (radiusMeters / (111320 * Math.cos(lat * Math.PI / 180))) * Math.sin(angle);
+          const dLon =
+            (radiusMeters / (111320 * Math.cos((lat * Math.PI) / 180))) *
+            Math.sin(angle);
           coords.push([lon + dLon, lat + dLat]);
         }
         return { type: "Polygon", coordinates: [coords] };
@@ -651,40 +711,74 @@
 
       function lineToBufferPolygon(lineGeometry, halfWidthMeters) {
         const coords = lineGeometry.coordinates;
-        const left = [], right = [];
+        const left = [],
+          right = [];
         for (let i = 0; i < coords.length; i++) {
           const [lon, lat] = coords[i];
           const prev = coords[i - 1] || coords[i];
           const next = coords[i + 1] || coords[i];
-          const latRad = lat * Math.PI / 180;
-          const mPerLat = 111320, mPerLon = 111320 * Math.cos(latRad);
-          const dx = (next[0] - prev[0]) * mPerLon, dy = (next[1] - prev[1]) * mPerLat;
+          const latRad = (lat * Math.PI) / 180;
+          const mPerLat = 111320,
+            mPerLon = 111320 * Math.cos(latRad);
+          const dx = (next[0] - prev[0]) * mPerLon,
+            dy = (next[1] - prev[1]) * mPerLat;
           const len = Math.sqrt(dx * dx + dy * dy) || 1;
-          const perpX = -dy / len, perpY = dx / len;
-          const offLon = (perpX * halfWidthMeters) / mPerLon, offLat = (perpY * halfWidthMeters) / mPerLat;
+          const perpX = -dy / len,
+            perpY = dx / len;
+          const offLon = (perpX * halfWidthMeters) / mPerLon,
+            offLat = (perpY * halfWidthMeters) / mPerLat;
           left.push([lon + offLon, lat + offLat]);
           right.push([lon - offLon, lat - offLat]);
         }
-        return { type: "Polygon", coordinates: [[...left, ...right.reverse(), left[0]]] };
+        return {
+          type: "Polygon",
+          coordinates: [[...left, ...right.reverse(), left[0]]],
+        };
       }
 
       function renderGeofences(geofences) {
-        if (!map.isStyleLoaded()) { map.once("idle", () => renderGeofences(geofences)); return; }
+        if (!map.isStyleLoaded()) {
+          map.once("idle", () => renderGeofences(geofences));
+          return;
+        }
 
         const features = [];
         (geofences || []).forEach((g) => {
           const shape = g.shapeType || "circle";
           const color = g.type === "danger" ? "#ff4444" : "#ffcc00";
           if (shape === "polygon") {
-            features.push({ type: "Feature", properties: { color }, geometry: g.geometry });
+            features.push({
+              type: "Feature",
+              properties: { color },
+              geometry: g.geometry,
+            });
           } else if (shape === "polyline") {
             const margin = g.corridorDangerMarginMeters;
             if (margin) {
-              features.push({ type: "Feature", properties: { color: "#ffcc00" }, geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters + margin) });
+              features.push({
+                type: "Feature",
+                properties: { color: "#ffcc00" },
+                geometry: lineToBufferPolygon(
+                  g.geometry,
+                  g.corridorWidthMeters + margin,
+                ),
+              });
             }
-            features.push({ type: "Feature", properties: { color: "#00ff88" }, geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters) });
+            features.push({
+              type: "Feature",
+              properties: { color: "#00ff88" },
+              geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters),
+            });
           } else {
-            features.push({ type: "Feature", properties: { color }, geometry: circleToPolygon(g.center.lat, g.center.lon, g.radiusMeters) });
+            features.push({
+              type: "Feature",
+              properties: { color },
+              geometry: circleToPolygon(
+                g.center.lat,
+                g.center.lon,
+                g.radiusMeters,
+              ),
+            });
           }
         });
 
@@ -692,9 +786,22 @@
         if (map.getSource("geofences-preview")) {
           map.getSource("geofences-preview").setData(geojson);
         } else {
-          map.addSource("geofences-preview", { type: "geojson", data: geojson });
-          map.addLayer({ id: "geofences-fill", type: "fill", source: "geofences-preview", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.25 } });
-          map.addLayer({ id: "geofences-line", type: "line", source: "geofences-preview", paint: { "line-color": ["get", "color"], "line-width": 2 } });
+          map.addSource("geofences-preview", {
+            type: "geojson",
+            data: geojson,
+          });
+          map.addLayer({
+            id: "geofences-fill",
+            type: "fill",
+            source: "geofences-preview",
+            paint: { "fill-color": ["get", "color"], "fill-opacity": 0.25 },
+          });
+          map.addLayer({
+            id: "geofences-line",
+            type: "line",
+            source: "geofences-preview",
+            paint: { "line-color": ["get", "color"], "line-width": 2 },
+          });
         }
       }
 
@@ -760,7 +867,7 @@
             .setLngLat(lngLat)
             .setPopup(
               new maplibregl.Popup({ offset: 25 })
-                .setHTML(`<b>${pos.deviceName || ('Vehículo ' + pos.deviceId)}${pos.deviceType ? ' <small>(' + pos.deviceType + ')</small>' : ''}</b><br>
+                .setHTML(`<b>${pos.deviceName || "Vehículo " + pos.deviceId}${pos.deviceType ? " <small>(" + pos.deviceType + ")</small>" : ""}</b><br>
                       Lat: ${pos.latitude.toFixed(6)}<br>
                       Lon: ${pos.longitude.toFixed(6)}<br>
                       Speed: ${(pos.speed * 3.6).toFixed(1)} km/h`),
@@ -781,7 +888,7 @@
         if (pos.deviceName) {
           MY_VEHICLE_NAME = pos.deviceName;
           document.getElementById("device-name").textContent =
-            `${pos.deviceName}${pos.deviceType ? ' (' + pos.deviceType + ')' : ''}`;
+            `${pos.deviceName}${pos.deviceType ? " (" + pos.deviceType + ")" : ""}`;
         }
       }
 
@@ -1005,7 +1112,9 @@
       // en la tabla operator_sessions (ver /api/operator-sessions).
       async function initOperatorAuth() {
         if (!MY_DEVICE_ID) {
-          document.getElementById("device-setup-overlay").classList.add("active");
+          document
+            .getElementById("device-setup-overlay")
+            .classList.add("active");
           return;
         }
 
@@ -1017,7 +1126,9 @@
 
         if (operatorToken && parsedSession) {
           try {
-            const res = await fetch(`${BACKEND_URL}/api/operator-sessions/active?deviceId=${encodeURIComponent(MY_DEVICE_ID)}`);
+            const res = await fetch(
+              `${BACKEND_URL}/api/operator-sessions/active?deviceId=${encodeURIComponent(MY_DEVICE_ID)}`,
+            );
             const active = await res.json();
             // La sesión activa en el backend (fuente de verdad) debe
             // coincidir con la guardada localmente — si alguien más
@@ -1035,13 +1146,18 @@
           operatorToken = null;
         }
 
-        document.getElementById("operator-login-overlay").classList.add("active");
+        document
+          .getElementById("operator-login-overlay")
+          .classList.add("active");
       }
 
       function showOperatorBar(session) {
         operatorSession = session;
-        document.getElementById("operator-login-overlay").classList.remove("active");
-        document.getElementById("operator-name").textContent = `👤 ${session.user_name}`;
+        document
+          .getElementById("operator-login-overlay")
+          .classList.remove("active");
+        document.getElementById("operator-name").textContent =
+          `👤 ${session.user_name}`;
         document.getElementById("btn-end-shift").style.display = "";
         startHeartbeat();
       }
@@ -1060,24 +1176,38 @@
             // forzar re-login (a diferencia del panel admin) — la
             // expiración real por inactividad la maneja el heartbeat
             // + el job de limpieza del backend, no el JWT en sí.
-            body: JSON.stringify({ email, password, longLived: true })
+            body: JSON.stringify({ email, password, longLived: true }),
           });
           const loginData = await loginRes.json();
-          if (!loginRes.ok) throw new Error(loginData.error || "Credenciales inválidas");
+          if (!loginRes.ok)
+            throw new Error(loginData.error || "Credenciales inválidas");
 
           operatorToken = loginData.token;
 
-          const sessionRes = await fetch(`${BACKEND_URL}/api/operator-sessions/start`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${operatorToken}` },
-            body: JSON.stringify({ deviceId: MY_DEVICE_ID })
-          });
+          const sessionRes = await fetch(
+            `${BACKEND_URL}/api/operator-sessions/start`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${operatorToken}`,
+              },
+              body: JSON.stringify({ deviceId: MY_DEVICE_ID }),
+            },
+          );
           const sessionData = await sessionRes.json();
-          if (!sessionRes.ok) throw new Error(sessionData.error || "No se pudo iniciar el turno");
+          if (!sessionRes.ok)
+            throw new Error(sessionData.error || "No se pudo iniciar el turno");
 
-          const session = { id: sessionData.id, user_name: loginData.user.name };
+          const session = {
+            id: sessionData.id,
+            user_name: loginData.user.name,
+          };
           localStorage.setItem("gaga_operator_token", operatorToken);
-          localStorage.setItem("gaga_operator_session", JSON.stringify(session));
+          localStorage.setItem(
+            "gaga_operator_session",
+            JSON.stringify(session),
+          );
           showOperatorBar(session);
         } catch (err) {
           errorEl.textContent = err.message;
@@ -1089,12 +1219,18 @@
         if (!confirm("¿Finalizar tu turno?")) return;
 
         try {
-          await fetch(`${BACKEND_URL}/api/operator-sessions/${operatorSession.id}/end`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${operatorToken}` }
-          });
+          await fetch(
+            `${BACKEND_URL}/api/operator-sessions/${operatorSession.id}/end`,
+            {
+              method: "POST",
+              headers: { Authorization: `Bearer ${operatorToken}` },
+            },
+          );
         } catch (err) {
-          console.error("Error cerrando turno (se limpia localmente igual):", err.message);
+          console.error(
+            "Error cerrando turno (se limpia localmente igual):",
+            err.message,
+          );
         }
 
         localStorage.removeItem("gaga_operator_token");
@@ -1103,7 +1239,9 @@
         operatorSession = null;
         document.getElementById("operator-name").textContent = "";
         document.getElementById("btn-end-shift").style.display = "none";
-        document.getElementById("operator-login-overlay").classList.add("active");
+        document
+          .getElementById("operator-login-overlay")
+          .classList.add("active");
         stopHeartbeat();
       }
 
@@ -1116,17 +1254,23 @@
 
       function startHeartbeat() {
         stopHeartbeat();
-        heartbeatTimer = setInterval(async () => {
-          if (!operatorSession || !operatorToken) return;
-          try {
-            await fetch(`${BACKEND_URL}/api/operator-sessions/${operatorSession.id}/heartbeat`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${operatorToken}` }
-            });
-          } catch (err) {
-            console.error("Error en heartbeat de turno:", err.message);
-          }
-        }, 5 * 60 * 1000);
+        heartbeatTimer = setInterval(
+          async () => {
+            if (!operatorSession || !operatorToken) return;
+            try {
+              await fetch(
+                `${BACKEND_URL}/api/operator-sessions/${operatorSession.id}/heartbeat`,
+                {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${operatorToken}` },
+                },
+              );
+            } catch (err) {
+              console.error("Error en heartbeat de turno:", err.message);
+            }
+          },
+          5 * 60 * 1000,
+        );
       }
 
       function stopHeartbeat() {

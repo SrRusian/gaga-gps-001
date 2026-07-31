@@ -571,16 +571,15 @@
               : {}),
           });
 
-          // Sin minzoom/maxzoom en la CAPA — así nunca desaparece al
-          // hacer zoom extremo, es la fuente la que le indica a
-          // MapLibre cómo sobre/sub-muestrear más allá del rango
-          // real de tiles generados.
-          map.addLayer({
-            id: sourceId,
-            type: "raster",
-            source: sourceId,
-            paint: { "raster-opacity-transition": { duration: 300 } },
-          });
+          map.addLayer(
+            {
+              id: sourceId,
+              type: "raster",
+              source: sourceId,
+              paint: { "raster-opacity-transition": { duration: 300 } },
+            },
+            map.getLayer("geofences-fill") ? "geofences-fill" : undefined,
+          );
 
           activeSatelliteIds.push(m.id);
         });
