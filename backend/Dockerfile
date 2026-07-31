@@ -1,7 +1,7 @@
 # Build (desde la raíz del repo):
 #   docker build -f backend/Dockerfile -t gaga-backend .
-# O simplemente:
-#   docker compose -f docker-compose.prod.yml up -d --build
+# O simplemente (recomendado — levanta todo el stack):
+#   docker compose up -d --build
 
 FROM node:22-bookworm-slim AS deps
 
@@ -19,7 +19,6 @@ FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
-# GDAL — convierte imágenes georreferenciadas (TIF+TFW/JPG+JPW) a MBTiles para el importador de mapas satelitales
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gdal-bin python3-gdal \
     && rm -rf /var/lib/apt/lists/*
@@ -36,7 +35,6 @@ COPY ui-admin ./ui-admin
 COPY ui-operator ./ui-operator
 COPY ui-supervisor ./ui-supervisor
 
-# Carpeta de mapas (.mbtiles) y de archivos fuente subidos (TIF/TFW).
 RUN mkdir -p /app/maps/sources /app/maps/tmp \
     && chown -R node:node /app
 

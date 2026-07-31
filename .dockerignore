@@ -8,7 +8,3 @@ backend/.env.production
 TEST-FILES
 README.md
 
-# Mapas .mbtiles — se montan como volumen, no se hornean en la imagen
-maps/*.mbtiles
-
-

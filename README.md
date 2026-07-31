@@ -129,7 +129,6 @@ gaga-gps-001/
 ├── ui-supervisor/index.html        # SPA vanilla — sala de control
 ├── ui-admin/index.html             # SPA vanilla — panel de administración
 │
-├── maps/                           # archivos .mbtiles generados (no versionados)
 ├── TEST-FILES/                     # imágenes de muestra para el pipeline de mapas (no versionado)
 │
 ├── docker-compose.yml              # stack completo (backend + UIs + Postgres + Redis) — dev y producción
@@ -239,10 +238,11 @@ Supervisor en tiempo real.
   fuente subidos. No se puede eliminar un mapa mientras esté activo
   (desactívalo primero).
 - Los archivos fuente originales se conservan en
-  `maps/sources/<id>/` (no se suben a git — ver `.gitignore`) por si
-  hace falta reprocesar; si el resultado quedó mal georreferenciado,
-  la manera de corregirlo es volver a importar con el CRS correcto,
-  no editar el mapa ya generado.
+  `/app/maps/sources/<id>/` dentro del contenedor (volumen `maps_data`,
+  no en el host ni en git) por si hace falta reprocesar; si el
+  resultado quedó mal georreferenciado, la manera de corregirlo es
+  volver a importar con el CRS correcto, no editar el mapa ya
+  generado.
 - Solo un mapa a la vez puede estar en `processing` de forma
   práctica — no hay cola de trabajos; para una operación de este
   tamaño no hizo falta construir una.
@@ -308,11 +308,12 @@ docker compose up -d --build
 ### Persistencia de datos — instalación limpia vs. actualización vs. borrado total
 
 - **`docker compose up -d --build`** (el comando de siempre, primera vez
-  o actualización) **nunca borra datos** — PostgreSQL y Redis viven en
-  volúmenes con nombre (`postgres_data`, `redis_data`) que Compose
-  reutiliza automáticamente si ya existen. Reconstruir la imagen del
-  backend solo reemplaza el código; los contenedores de base de datos
-  ni se tocan si no cambiaron.
+  o actualización) **nunca borra datos** — PostgreSQL, Redis y los
+  mapas satelitales (`.mbtiles`) viven en volúmenes con nombre
+  (`postgres_data`, `redis_data`, `maps_data`) que Compose reutiliza
+  automáticamente si ya existen. Reconstruir la imagen del backend
+  solo reemplaza el código; los contenedores de base de datos ni se
+  tocan si no cambiaron.
 - El nombre de esos volúmenes está fijado explícitamente
   (`name: gaga-gps-001` al inicio de `docker-compose.yml`) — **no**
   depende del nombre de la carpeta donde clonaste el repo. Antes de
@@ -335,7 +336,9 @@ docker compose up -d --build
   docker compose down -v
   ```
   El `-v` es lo que borra los volúmenes — sin él, `docker compose down`
-  (o simplemente apagar y prender Docker Desktop) conserva todo.
+  (o simplemente apagar y prender Docker Desktop) conserva todo. **Ojo:**
+  esto también borra `maps_data`, es decir, los `.mbtiles` importados —
+  no es un comando para usar a la ligera en producción.
 
 Notas:
 - `NODE_ENV=production` (default en `.env.example`) activa
@@ -346,9 +349,9 @@ Notas:
 - `gaga-backend` depende de que `postgres` y `redis` pasen su
   healthcheck antes de arrancar, y expone su propio healthcheck en
   `/health` (visible en `docker compose ps`).
-- El volumen `./maps:/app/maps` persiste los `.mbtiles` fuera del
-  contenedor — colócalos ahí manualmente si tu operación usa mapas
-  offline (`cp /ruta/a/tus/*.mbtiles maps/`).
+- Los `.mbtiles` viven en el volumen nombrado `maps_data`, gestionado
+  por Docker (no en una carpeta del host) — se importan siempre desde
+  el panel Admin → Mapas, nunca copiando archivos a mano.
 - El diseño original contempla un reverse proxy HTTPS (Caddy) frente
   al backend para exponerlo con dominio propio en producción — **no
   está incluido todavía** en `docker-compose.yml` (ver limitaciones
@@ -741,7 +744,7 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota (JSON por disposit
 | El backend falla al arrancar con "Configuración insegura" | Falta `JWT_SECRET` o `TELEMETRY_SHARED_SECRET` en `.env` y `NODE_ENV=production` | Completar ambas variables en `.env` — son obligatorias en `NODE_ENV=production` |
 | `docker compose up -d --build` falla compilando `better-sqlite3` | Faltan herramientas de build en la imagen | Ya cubierto — `backend/Dockerfile` instala `python3 make g++` en la etapa de dependencias |
 | `gaga-backend` se queda "unhealthy"/reiniciando en bucle | Postgres/Redis aún no listos, o credenciales no coinciden | Revisar `docker compose logs gaga-backend`; confirmar que `.env` tiene las contraseñas correctas y coincide con el contenedor ya arrancado |
-| Los `.mbtiles` no aparecen en `/tiles` tras el deploy | No se colocaron en `maps/` en el host, o el volumen no está montado | Copiar los archivos a `./maps/` en el servidor — se montan como volumen (`./maps:/app/maps`), no van dentro de la imagen |
+| Los `.mbtiles` no aparecen en `/tiles` tras el deploy | El mapa no se importó (o no se activó) desde el panel Admin en este entorno — el volumen `maps_data` es propio de cada stack/servidor | Importar y activar el mapa desde Admin → Mapas en ese entorno; los `.mbtiles` no se comparten entre despliegues distintos |
 | Clonaste el repo de nuevo y aparece como instalación limpia (sin dispositivos/usuarios que ya tenías) | El proyecto de Docker Compose se resolvió con otro nombre (por defecto viene del nombre de la carpeta) y creó volúmenes nuevos y vacíos — ver [Persistencia de datos](#persistencia-de-datos--instalación-limpia-vs-actualización-vs-borrado-total) | Los datos viejos probablemente siguen en un volumen huérfano — revisa `docker volume ls`, busca `<carpeta-vieja>_postgres_data`. `docker-compose.yml` ya fija `name: gaga-gps-001` para que esto no vuelva a pasar sin importar el nombre de la carpeta |
 
 ## Limitaciones conocidas / trabajo futuro

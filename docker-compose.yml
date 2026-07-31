@@ -7,6 +7,7 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  maps_data:
 
 services:
 
@@ -16,6 +17,7 @@ services:
       dockerfile: backend/Dockerfile
     container_name: gaga-backend
     restart: unless-stopped
+    init: true
     env_file:
       - ./.env
     environment:
@@ -26,7 +28,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
     volumes:
-      - ./maps:/app/maps
+      - maps_data:/app/maps
     depends_on:
       postgres:
         condition: service_healthy
