@@ -8,8 +8,23 @@ volumes:
   postgres_data:
   redis_data:
   maps_data:
+  caddy_data:
+  caddy_config:
 
 services:
+  caddy:
+    image: caddy:2.11
+    container_name: gaga-caddy
+    restart: unless-stopped
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - gaga-net
+    ports:
+      - "80:80"
+      - "443:443"
 
   gaga-backend:
     build:

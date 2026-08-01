@@ -1,0 +1,7 @@
+gaga-maquinaria.com {
+	redir https://app.{host}{uri}
+}
+
+app.gaga-maquinaria.com {
+    reverse_proxy gaga-backend:3001
+}

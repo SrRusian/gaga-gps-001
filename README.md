@@ -23,6 +23,7 @@ servidor, que ahora apunta directamente a este backend Node.js.
 4. [Estructura del proyecto](#estructura-del-proyecto)
 5. [Modelo de datos](#modelo-de-datos)
 6. [Instalación y despliegue](#instalación-y-despliegue)
+    - [Caddy: HTTPS y dominio](#caddy-https-y-dominio)
     - [Persistencia de datos](#persistencia-de-datos--instalación-limpia-vs-actualización-vs-borrado-total)
     - [Importador de mapas satelitales](#importador-de-mapas-satelitales-tiftfw--mbtiles)
 7. [Variables de entorno](#variables-de-entorno)
@@ -93,7 +94,8 @@ momento en que llega la petición HTTP.
 | Caché / estado en vivo | Redis 7 | Última posición conocida de cada dispositivo (no guarda histórico) |
 | Autenticación | JWT (jsonwebtoken) + bcryptjs | Login del panel admin, con revalidación de usuario activo en cada request |
 | Mapas | MapLibre GL + MBTiles (better-sqlite3) | Renderizado de mapas offline en las tabletas |
-| Contenerización | Docker + Docker Compose | Stack completo (backend + UIs + PostgreSQL + Redis) con un solo `docker-compose.yml`, mismo para desarrollo y producción |
+| Contenerización | Docker + Docker Compose | Stack completo (Caddy + backend + UIs + PostgreSQL + Redis) con un solo `docker-compose.yml`, mismo para desarrollo y producción |
+| Reverse proxy HTTPS | Caddy 2.11 | Terminación HTTPS automática y proxy inverso hacia el backend |
 | Cliente GPS | Traccar Client (app de terceros, sin modificar) | Corre en las tabletas, protocolo OsmAnd |
 
 ## Estructura del proyecto
@@ -131,7 +133,10 @@ gaga-gps-001/
 │
 ├── TEST-FILES/                     # imágenes de muestra para el pipeline de mapas (no versionado)
 │
-├── docker-compose.yml              # stack completo (backend + UIs + Postgres + Redis) — dev y producción
+├── caddy/
+│   └── Caddyfile                   # configuración HTTPS/proxy
+│
+├── docker-compose.yml              # stack completo (Caddy + backend + UIs + Postgres + Redis) — dev y producción
 ├── .dockerignore                   # contexto de build = raíz del repo (ver backend/Dockerfile)
 ├── .env.example                    # única plantilla de variables — copiar a .env y editar
 └── README.md
@@ -305,15 +310,51 @@ git pull
 docker compose up -d --build
 ```
 
+### Caddy: HTTPS y dominio
+
+El servicio `caddy` (`caddy:2.11`, contenedor `gaga-caddy`) publica los
+puertos públicos `80` y `443` y actúa como reverse proxy HTTPS. Para
+producción, crea registros DNS **A** (IPv4) y/o **AAAA** (IPv6) para
+ambos nombres, apuntando a la IP pública del servidor:
+
+- `gaga-maquinaria.com`
+- `app.gaga-maquinaria.com`
+
+El firewall, proveedor cloud y router del servidor deben permitir tráfico
+entrante público en `80/tcp` y `443/tcp`. Con ambos nombres resolviendo al
+host, Caddy obtiene y renueva automáticamente los certificados TLS. La URL
+principal del sistema es `https://app.gaga-maquinaria.com`; las peticiones a
+`https://gaga-maquinaria.com` se redirigen a
+`https://app.gaga-maquinaria.com` conservando la ruta y los parámetros.
+
+El `Caddyfile` dirige `app.gaga-maquinaria.com` a
+`gaga-backend:3001` dentro de la red Docker. `reverse_proxy` de Caddy
+soporta las conexiones WebSocket usadas por Socket.io, por lo que las UIs y
+los eventos en tiempo real funcionan a través del mismo dominio HTTPS.
+
+Comandos útiles para comprobar, recargar y revisar Caddy:
+
+```bash
+# Validar la configuración que ve el contenedor
+docker compose exec caddy caddy validate \
+  --config /etc/caddy/Caddyfile --adapter caddyfile
+
+# Recargarla sin detener el proxy
+docker compose exec caddy caddy reload \
+  --config /etc/caddy/Caddyfile --adapter caddyfile
+
+# Ver solicitudes, certificados y errores
+docker compose logs -f caddy
+```
+
 ### Persistencia de datos — instalación limpia vs. actualización vs. borrado total
 
 - **`docker compose up -d --build`** (el comando de siempre, primera vez
   o actualización) **nunca borra datos** — PostgreSQL, Redis y los
   mapas satelitales (`.mbtiles`) viven en volúmenes con nombre
-  (`postgres_data`, `redis_data`, `maps_data`) que Compose reutiliza
-  automáticamente si ya existen. Reconstruir la imagen del backend
-  solo reemplaza el código; los contenedores de base de datos ni se
-  tocan si no cambiaron.
+  (`postgres_data`, `redis_data`, `maps_data`, `caddy_data`,
+  `caddy_config`) que Compose reutiliza automáticamente si ya existen.
+  Los dos últimos conservan certificados y estado de Caddy. Reconstruir la imagen del backend solo reemplaza el código; los contenedores de base de datos ni se tocan si no cambiaron.
 - El nombre de esos volúmenes está fijado explícitamente
   (`name: gaga-gps-001` al inicio de `docker-compose.yml`) — **no**
   depende del nombre de la carpeta donde clonaste el repo. Antes de
@@ -352,10 +393,6 @@ Notas:
 - Los `.mbtiles` viven en el volumen nombrado `maps_data`, gestionado
   por Docker (no en una carpeta del host) — se importan siempre desde
   el panel Admin → Mapas, nunca copiando archivos a mano.
-- El diseño original contempla un reverse proxy HTTPS (Caddy) frente
-  al backend para exponerlo con dominio propio en producción — **no
-  está incluido todavía** en `docker-compose.yml` (ver limitaciones
-  al final del documento).
 
 ### Alternativa: correr el backend sin Docker (avanzado)
 
@@ -388,6 +425,10 @@ Este flujo es opcional y no forma parte del despliegue estándar.
 | `http://localhost:3001/supervisor` | UI Supervisor |
 | `http://localhost:3001/admin` | Panel de administración |
 | `http://localhost:3001/health` | Health check (estado de Postgres/Redis) |
+| `https://app.gaga-maquinaria.com` | URL pública principal en producción, servida por Caddy |
+
+En producción usa la URL HTTPS de Caddy; las direcciones `localhost:3001`
+son útiles para desarrollo o acceso directo al backend.
 
 ## Variables de entorno
 
@@ -747,6 +788,8 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota (JSON por disposit
 | Los `.mbtiles` no aparecen en `/tiles` tras el deploy | El mapa no se importó (o no se activó) desde el panel Admin en este entorno — el volumen `maps_data` es propio de cada stack/servidor | Importar y activar el mapa desde Admin → Mapas en ese entorno; los `.mbtiles` no se comparten entre despliegues distintos |
 | Clonaste el repo de nuevo y aparece como instalación limpia (sin dispositivos/usuarios que ya tenías) | El proyecto de Docker Compose se resolvió con otro nombre (por defecto viene del nombre de la carpeta) y creó volúmenes nuevos y vacíos — ver [Persistencia de datos](#persistencia-de-datos--instalación-limpia-vs-actualización-vs-borrado-total) | Los datos viejos probablemente siguen en un volumen huérfano — revisa `docker volume ls`, busca `<carpeta-vieja>_postgres_data`. `docker-compose.yml` ya fija `name: gaga-gps-001` para que esto no vuelva a pasar sin importar el nombre de la carpeta |
 
+| No se emite el certificado HTTPS | DNS de alguno de los dos dominios no apunta al host, o el puerto público 80/443 está bloqueado | Crear los registros A/AAAA para `gaga-maquinaria.com` y `app.gaga-maquinaria.com` hacia el servidor y abrir `80/tcp` y `443/tcp` |
+
 ## Limitaciones conocidas / trabajo futuro
 
 - **PostGIS** está instalado (`CREATE EXTENSION postgis`) pero
@@ -760,9 +803,6 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota (JSON por disposit
   offline en este proyecto. Tampoco hay cola de procesamiento — una
   importación a la vez.
 - **Exportación a PDF** de reportes no está implementada — solo CSV.
-- **Reverse proxy HTTPS (Caddy)** contemplado en el diseño original
-  no está incluido en `docker-compose.yml` — el backend se
-  expone hoy directamente en el puerto configurado.
 - **Geocercas** son únicamente circulares (centro + radio), no
   soportan polígonos arbitrarios.
 - **Filtro de posiciones GPS** — el umbral adaptativo (ver
