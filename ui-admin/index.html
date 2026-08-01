@@ -1190,8 +1190,8 @@
           currentShape === "circle"
             ? "Clic en el mapa para fijar el centro."
             : currentShape === "polygon"
-              ? "Dibuje el polígono en el mapa (clic para cada vértice, doble clic para terminar)."
-              : "Dibuje la ruta en el mapa (clic para cada punto, doble clic para terminar).";
+              ? "Dibuje el polígono en el mapa (clic para cada vértice, doble clic para terminar antes de presionar Crear)."
+              : "Dibuje la ruta en el mapa (clic para cada punto, doble clic para terminar antes de presionar Crear).";
 
         draw.deleteAll();
         document.getElementById("btn-cancel-draw").style.display =
@@ -1439,6 +1439,15 @@
               }),
             });
           } else {
+            if (
+              !isEditing &&
+              ["draw_polygon", "draw_line_string"].includes(draw.getMode())
+            ) {
+              return alert(
+                "Termine el dibujo con doble clic en el último punto antes de guardar",
+              );
+            }
+
             const drawn = draw.getAll();
             if (!drawn.features.length)
               return alert("Dibuje la forma en el mapa antes de guardar");
