@@ -3,3 +3,4 @@ TEST-FILES/
 .env
 *.log
 dist/
+CLAUDE.md
