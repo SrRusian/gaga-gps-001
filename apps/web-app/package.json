@@ -1,0 +1,30 @@
+{
+  "name": "@gaga-gps/web-app",
+  "version": "0.0.0",
+  "private": true,
+  "description": "App única (login + Admin + Supervisor + Operador) — arquitectura feature-driven con React Router y code-splitting por rol. Reemplaza los 4 proyectos separados (web-gateway/web-admin/web-supervisor/web-operator).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@gaga-gps/client": "*",
+    "@gaga-gps/map-core": "*",
+    "@gaga-gps/shared-types": "*",
+    "@gaga-gps/ui": "*",
+    "@mapbox/mapbox-gl-draw": "^1.4.3",
+    "maplibre-gl": "^5.24.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.18.2"
+  },
+  "devDependencies": {
+    "@types/mapbox__mapbox-gl-draw": "^1.4.8",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^6.0.5",
+    "vite": "^8.0.0"
+  }
+}

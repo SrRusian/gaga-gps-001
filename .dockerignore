@@ -1,9 +1,9 @@
 .git
 .gitignore
 **/node_modules
+**/dist
 .env
-backend/.env
-backend/.env.production
+apps/backend/.env
 *.log
 TEST-FILES
 README.md

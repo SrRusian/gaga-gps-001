@@ -1,5 +1,5 @@
 node_modules/
-.env
-.env.production
-*.log
 TEST-FILES/
+.env
+*.log
+dist/

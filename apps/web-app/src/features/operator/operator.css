@@ -1,0 +1,291 @@
+.op-app {
+  position: fixed;
+  inset: 0;
+  background: #1a1a2e;
+  color: #ffffff;
+  overflow: hidden;
+}
+
+#op-status-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 50px;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  z-index: 1000;
+  border-bottom: 2px solid #00ff88;
+}
+#op-device-name {
+  font-size: 16px;
+  font-weight: bold;
+  color: #00ff88;
+}
+#op-connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+#op-vehicle-count {
+  font-size: 13px;
+  color: #aaaaaa;
+}
+#op-operator-name {
+  font-size: 12px;
+  color: #aaa;
+}
+#op-btn-end-shift {
+  background: none;
+  border: 1px solid #ff4444;
+  color: #ff4444;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#op-btn-register-device {
+  background: none;
+  border: 1px solid #00ff88;
+  color: #00ff88;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#op-btn-logout {
+  background: none;
+  border: 1px solid #ff4444;
+  color: #ff4444;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#op-map-container {
+  position: fixed;
+  top: 50px;
+  left: 0;
+  right: 0;
+  bottom: 60px;
+  z-index: 1;
+}
+#op-map {
+  width: 100%;
+  height: 100%;
+}
+
+#op-info-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0 16px;
+  z-index: 1000;
+  border-top: 1px solid #333;
+}
+.op-info-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.op-info-label {
+  font-size: 10px;
+  color: #888888;
+  text-transform: uppercase;
+}
+.op-info-value {
+  font-size: 16px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+#op-map-mode-selector-wrap {
+  position: fixed;
+  top: 58px;
+  right: 10px;
+  z-index: 1000;
+}
+
+#op-btn-center {
+  position: fixed;
+  bottom: 75px;
+  right: 16px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #00ff88;
+  border: none;
+  color: #000;
+  font-size: 22px;
+  cursor: pointer;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+#op-alert-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2000;
+  pointer-events: none;
+}
+#op-alert-overlay.warning {
+  display: block;
+  border: 8px solid #ffaa00;
+  animation: op-pulse-warning 1s infinite;
+}
+#op-alert-overlay.danger {
+  display: block;
+  border: 12px solid #ff2222;
+  background: rgba(255, 0, 0, 0.15);
+  animation: op-pulse-danger 0.5s infinite;
+}
+
+#op-alert-message {
+  display: none;
+  position: fixed;
+  top: 60px;
+  left: 16px;
+  right: 16px;
+  padding: 16px;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: bold;
+  text-align: center;
+  z-index: 2001;
+}
+#op-alert-message.warning {
+  display: block;
+  background: #ffaa00;
+  color: #000;
+}
+#op-alert-message.danger {
+  display: block;
+  background: #ff2222;
+  color: #fff;
+  font-size: 22px;
+}
+
+@keyframes op-pulse-warning {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+@keyframes op-pulse-danger {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.op-full-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(10, 10, 20, 0.97);
+  z-index: 3000;
+  align-items: center;
+  justify-content: center;
+}
+.op-full-overlay.active {
+  display: flex;
+}
+.op-overlay-card {
+  position: relative;
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 10px;
+  padding: 28px;
+  width: 320px;
+  max-width: 90vw;
+}
+.op-overlay-card button.op-overlay-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: auto;
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 16px;
+  font-weight: normal;
+}
+.op-overlay-card button.op-overlay-close:hover {
+  color: #fff;
+}
+.op-overlay-card h2 {
+  color: #00ff88;
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+.op-overlay-card p {
+  font-size: 13px;
+  color: #aaa;
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+.op-overlay-card input {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: #0d1117;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 15px;
+}
+.op-overlay-card button {
+  width: 100%;
+  padding: 12px;
+  background: #00ff88;
+  border: none;
+  border-radius: 6px;
+  color: #0d1117;
+  font-weight: bold;
+  font-size: 15px;
+  cursor: pointer;
+}
+.op-overlay-error {
+  color: #ff4444;
+  font-size: 13px;
+  margin-top: 8px;
+  min-height: 16px;
+}
+
+.op-vehicle-marker {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  cursor: pointer;
+}

@@ -1,0 +1,163 @@
+/* Design system compartido — GAGA-GPS. Import una sola vez por app. */
+
+.gg-button {
+  padding: 12px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.gg-button--primary {
+  background: #00ff88;
+  color: #0d1117;
+}
+.gg-button--primary:hover {
+  background: #00cc6e;
+}
+.gg-button--danger {
+  background: #ff2222;
+  color: #fff;
+}
+.gg-button--danger:hover {
+  background: #cc0000;
+}
+.gg-button--secondary {
+  background: transparent;
+  border: 1px solid #30363d;
+  color: #fff;
+}
+.gg-button--secondary:hover {
+  background: #21262d;
+}
+.gg-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gg-map-mode-selector {
+  display: flex;
+  background: rgba(13, 17, 23, 0.9);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #30363d;
+}
+.gg-map-mode-btn {
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 11px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.gg-map-mode-btn.active {
+  background: #00ff88;
+  color: #0d1117;
+  font-weight: bold;
+}
+
+.gg-alert-banner {
+  padding: 8px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  border-left: 3px solid;
+}
+.gg-alert-banner--danger {
+  background: #1a0d0d;
+  border-color: #ff4444;
+  color: #ff8888;
+}
+.gg-alert-banner--warning {
+  background: #1a1400;
+  border-color: #ffaa00;
+  color: #ffcc44;
+}
+.gg-alert-banner--info {
+  background: #0d1a1a;
+  border-color: #00ff88;
+  color: #88ffcc;
+}
+.gg-alert-banner__time {
+  font-size: 10px;
+  color: #6e7681;
+  margin-top: 2px;
+}
+
+.gg-vehicle-card {
+  padding: 12px 16px;
+  border-bottom: 1px solid #21262d;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.gg-vehicle-card:hover {
+  background: #21262d;
+}
+.gg-vehicle-card--alert {
+  border-left: 3px solid #ff4444;
+  background: #1a0d0d;
+}
+.gg-vehicle-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.gg-vehicle-card__name {
+  font-size: 14px;
+  font-weight: bold;
+}
+.gg-vehicle-card__status {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #238636;
+  color: white;
+}
+.gg-vehicle-card__status--offline {
+  background: #6e7681;
+}
+.gg-vehicle-card__status--alert {
+  background: #da3633;
+}
+.gg-vehicle-card__info {
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.gg-stat-card {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+.gg-stat-card__label {
+  font-size: 10px;
+  color: #8b949e;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.gg-stat-card__value {
+  font-size: 24px;
+  font-weight: bold;
+  color: #00ff88;
+}
+.gg-stat-card__value--alert {
+  color: #ff4444;
+}
+.gg-stat-card__value--warning {
+  color: #ffaa00;
+}
+
+.gg-connection-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff4444;
+  transition: background 0.3s;
+}
+.gg-connection-dot.connected {
+  background: #00ff88;
+}

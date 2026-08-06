@@ -1,0 +1,11 @@
+{
+  "name": "@gaga-gps/shared-types",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tipos compartidos del contrato de datos (Device, Geofence, Position, FleetState, eventos de Socket.io) entre backend y las 3 apps web.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@types/geojson": "^7946.0.16"
+  }
+}
