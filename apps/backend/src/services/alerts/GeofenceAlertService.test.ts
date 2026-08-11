@@ -19,6 +19,14 @@ const warningCircle = {
   radiusMeters: 50,
 };
 
+const parkingCircle = {
+  id: 5,
+  name: 'Estacionamiento Norte',
+  type: 'parking',
+  center: { lat: 19.5, lon: -103.7 },
+  radiusMeters: 50,
+};
+
 function pos(lat: number, lon: number, deviceId = 'V1') {
   return { deviceId, latitude: lat, longitude: lon };
 }
@@ -159,6 +167,43 @@ describe('GeofenceAlertService', () => {
         eventType: 'enter',
         severity: 'danger',
       }),
+    );
+  });
+
+  it('emite alert:info (sin loop) al entrar en una geocerca "parking", sin sonar como warning/danger', () => {
+    service.addGeofence(parkingCircle);
+    service.evaluate(pos(19.5, -103.7));
+
+    expect(io.emit).toHaveBeenCalledWith(
+      'alert:info',
+      expect.objectContaining({
+        type: 'geofence_parking',
+        geofenceId: parkingCircle.id,
+        message: 'ZONA DE ESTACIONAMIENTO',
+        loop: false,
+      }),
+    );
+    expect(io.emit).not.toHaveBeenCalledWith('alert:warning', expect.anything());
+    expect(io.emit).not.toHaveBeenCalledWith('alert:critical', expect.anything());
+  });
+
+  it('warning tiene prioridad sobre "parking" cuando el vehículo está en ambas a la vez', () => {
+    service.addGeofence({ ...parkingCircle, center: warningCircle.center });
+    service.addGeofence(warningCircle);
+    service.evaluate(pos(19.4, -103.6));
+
+    expect(io.emit).toHaveBeenCalledWith('alert:warning', expect.anything());
+    expect(io.emit).not.toHaveBeenCalledWith('alert:info', expect.anything());
+  });
+
+  it('_persistEvent registra severity "info" para geocercas de estacionamiento', async () => {
+    const record = vi.fn().mockResolvedValue(undefined);
+    const withRepo = new GeofenceAlertService({ io, geofenceEventRepo: { record } });
+    withRepo.addGeofence(parkingCircle);
+    withRepo.evaluate(pos(19.5, -103.7));
+
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: 'enter', severity: 'info' }),
     );
   });
 

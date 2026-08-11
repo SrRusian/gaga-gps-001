@@ -17,7 +17,7 @@ export function OperatorLoginOverlay({ onStartShift, error }: OperatorLoginOverl
   return (
     <div className="op-full-overlay active">
       <div className="op-overlay-card">
-        <h2>👤 Iniciar turno</h2>
+        <h2>Iniciar turno</h2>
         <p>{user ? `Hola, ${user.name}. ` : ''}Confirma para empezar tu turno en este vehículo.</p>
         <button onClick={onStartShift}>Iniciar turno</button>
         <div className="op-overlay-error">{error}</div>

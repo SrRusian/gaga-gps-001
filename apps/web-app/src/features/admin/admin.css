@@ -1,26 +1,40 @@
 .ad-app {
+  --ad-bg: #0b0d10;
+  --ad-surface: #14171c;
+  --ad-surface-2: #1a1e24;
+  --ad-border: #262b33;
+  --ad-text: #e8eaed;
+  --ad-text-muted: #8b949e;
+  --ad-accent: #4f8ff0;
+  --ad-danger: #e5484d;
+  --ad-warning: #f0a83c;
+
   height: 100vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #0d1117;
+  background: var(--ad-bg);
+  color: var(--ad-text);
 }
 
 .btn {
-  width: 100%;
-  padding: 10px;
-  background: #00ff88;
+  padding: 9px 16px;
+  background: var(--ad-accent);
   border: none;
-  border-radius: 4px;
-  color: #0d1117;
-  font-weight: bold;
+  border-radius: 6px;
+  color: #0b0d10;
+  font-weight: 600;
+  font-size: 13px;
   cursor: pointer;
+}
+.btn:hover {
+  background: #3f7cd6;
 }
 
 .ad-header {
-  height: 55px;
-  background: #161b22;
-  border-bottom: 2px solid #00ff88;
+  height: 52px;
+  background: var(--ad-surface);
+  border-bottom: 1px solid var(--ad-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -28,23 +42,33 @@
   flex-shrink: 0;
 }
 .ad-header h1 {
-  font-size: 18px;
-  color: #00ff88;
-  font-weight: bold;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--ad-text);
 }
 .ad-header-right {
   display: flex;
   align-items: center;
   gap: 16px;
   font-size: 13px;
+  color: var(--ad-text);
+}
+.ad-user-role {
+  color: var(--ad-text-muted);
 }
 .ad-logout-btn {
   background: none;
-  border: 1px solid #ff4444;
-  color: #ff4444;
-  padding: 6px 12px;
-  border-radius: 4px;
+  border: 1px solid var(--ad-border);
+  color: var(--ad-text-muted);
+  padding: 6px 14px;
+  border-radius: 6px;
   cursor: pointer;
+  font-size: 13px;
+}
+.ad-logout-btn:hover {
+  border-color: var(--ad-danger);
+  color: var(--ad-danger);
 }
 
 .ad-body {
@@ -53,33 +77,39 @@
   overflow: hidden;
 }
 
+/* ── Nav — barra lateral vertical en pantallas anchas; se convierte
+   en tira horizontal con scroll en pantallas angostas (tableta) para
+   no competir por espacio con el contenido. ── */
 .ad-nav {
-  width: 180px;
-  background: #161b22;
-  border-right: 1px solid #30363d;
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--ad-surface);
+  border-right: 1px solid var(--ad-border);
   display: flex;
   flex-direction: column;
   padding: 10px 0;
   overflow-y: auto;
-  flex-shrink: 0;
 }
 .ad-nav button {
   background: none;
   border: none;
-  color: #c9d1d9;
-  text-align: left;
-  padding: 12px 20px;
-  font-size: 14px;
-  cursor: pointer;
   border-left: 3px solid transparent;
+  color: var(--ad-text-muted);
+  text-align: left;
+  padding: 11px 20px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
 }
 .ad-nav button:hover {
-  background: #21262d;
+  background: var(--ad-surface-2);
+  color: var(--ad-text);
 }
 .ad-nav button.active {
-  color: #00ff88;
-  border-left-color: #00ff88;
-  background: #21262d;
+  color: var(--ad-accent);
+  border-left-color: var(--ad-accent);
+  background: var(--ad-surface-2);
+  font-weight: 600;
 }
 
 .ad-content {
@@ -87,13 +117,29 @@
   overflow-y: auto;
   padding: 20px;
 }
+.ad-content h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ad-text);
+  margin-bottom: 12px;
+}
 
+/* ── Tarjetas — contenedor genérico para formularios/tablas ── */
 .card {
-  background: #161b22;
-  border: 1px solid #30363d;
+  background: var(--ad-surface);
+  border: 1px solid var(--ad-border);
   border-radius: 8px;
-  padding: 16px;
+  padding: 16px 18px;
   margin-bottom: 16px;
+}
+
+/* Caso especial: una tarjeta cuyo contenido son métricas del
+   dashboard — se acomodan en grid en vez de inline-block (que deja
+   huecos de espacio en blanco irregulares al envolver). */
+.card:has(.metric) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
 }
 
 table {
@@ -104,11 +150,18 @@ table {
 th,
 td {
   text-align: left;
-  padding: 8px;
-  border-bottom: 1px solid #30363d;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--ad-border);
 }
 th {
-  color: #00ff88;
+  color: var(--ad-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+tbody tr:hover {
+  background: var(--ad-surface-2);
 }
 
 .form-row {
@@ -120,21 +173,29 @@ th {
 }
 .form-row input,
 .form-row select {
-  background: #0d1117;
-  border: 1px solid #30363d;
-  color: #fff;
-  padding: 8px;
-  border-radius: 4px;
+  background: var(--ad-bg);
+  border: 1px solid var(--ad-border);
+  color: var(--ad-text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.form-row input:focus,
+.form-row select:focus {
+  outline: none;
+  border-color: var(--ad-accent);
 }
 
 .btn-sm {
-  padding: 6px 10px;
+  padding: 7px 12px;
   font-size: 12px;
-  width: auto;
 }
 .btn-danger {
-  background: #ff4444;
+  background: var(--ad-danger);
   color: #fff;
+}
+.btn-danger:hover {
+  background: #c93b40;
 }
 
 #ad-map,
@@ -142,10 +203,11 @@ th {
   border-radius: 8px;
   margin-bottom: 16px;
   position: relative;
+  border: 1px solid var(--ad-border);
 }
 #ad-map {
   height: calc(100vh - 320px);
-  min-height: 480px;
+  min-height: 420px;
 }
 #ad-hist-map {
   height: 400px;
@@ -157,34 +219,34 @@ th {
   left: 12px;
   z-index: 10;
   display: flex;
-  background: rgba(13, 17, 23, 0.9);
+  background: rgba(20, 23, 28, 0.92);
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid #30363d;
+  border: 1px solid var(--ad-border);
 }
 .map-mode-btn {
   background: none;
   border: none;
-  color: #8b949e;
+  color: var(--ad-text-muted);
   font-size: 11px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   cursor: pointer;
 }
 .map-mode-btn.active {
-  background: #00ff88;
-  color: #0d1117;
-  font-weight: bold;
+  background: var(--ad-accent);
+  color: #0b0d10;
+  font-weight: 600;
 }
 .map-mode-btn:disabled {
-  color: #444;
+  color: #454b55;
   cursor: not-allowed;
 }
 
 .no-maps-banner {
   display: flex;
-  background: #1a1400;
-  border: 1px solid #ffaa00;
-  color: #ffcc44;
+  background: var(--ad-surface-2);
+  border: 1px solid var(--ad-warning);
+  color: var(--ad-warning);
   border-radius: 6px;
   padding: 8px 12px;
   font-size: 12px;
@@ -195,26 +257,88 @@ th {
 }
 
 .metric {
-  display: inline-block;
-  background: #0d1117;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  padding: 12px 20px;
-  margin-right: 12px;
+  background: var(--ad-surface-2);
+  border: 1px solid var(--ad-border);
+  border-radius: 8px;
+  padding: 14px 16px;
 }
 .metric .value {
-  font-size: 24px;
-  color: #00ff88;
-  font-weight: bold;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--ad-accent);
 }
 .metric .label {
-  font-size: 12px;
-  color: #8b949e;
+  font-size: 11px;
+  color: var(--ad-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-top: 2px;
 }
 
-.status-online {
-  color: #00ff88;
+.status-online,
+.status-ready {
+  color: var(--ad-accent);
 }
-.status-offline {
-  color: #ff4444;
+.status-offline,
+.status-processing {
+  color: var(--ad-text-muted);
+}
+.status-failed {
+  color: var(--ad-danger);
+}
+
+.zone-in {
+  color: var(--ad-accent);
+}
+.zone-out {
+  color: var(--ad-text-muted);
+}
+
+.ad-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--ad-surface-2);
+  border: 1px solid var(--ad-accent);
+  color: var(--ad-accent);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+}
+
+/* ── Adaptativo — tableta/pantalla angosta: la barra lateral se
+   convierte en una tira horizontal con scroll, para no robarle
+   ancho al contenido. ── */
+@media (max-width: 860px) {
+  .ad-body {
+    flex-direction: column;
+  }
+  .ad-nav {
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: visible;
+    border-right: none;
+    border-bottom: 1px solid var(--ad-border);
+    padding: 6px 8px;
+  }
+  .ad-nav button {
+    border-left: none;
+    border-bottom: 3px solid transparent;
+    padding: 8px 14px;
+  }
+  .ad-nav button.active {
+    border-left-color: transparent;
+    border-bottom-color: var(--ad-accent);
+  }
+  .ad-content {
+    padding: 14px;
+  }
+  #ad-map {
+    height: 60vh;
+    min-height: 320px;
+  }
 }

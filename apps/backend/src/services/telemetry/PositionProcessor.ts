@@ -24,10 +24,12 @@ import type PositionRepository from '../../repositories/PositionRepository';
 import type CollisionRiskService from '../alerts/CollisionRiskService';
 import type GeofenceAlertService from '../alerts/GeofenceAlertService';
 import type SignalLostService from '../alerts/SignalLostService';
+import type VehicleProximityService from '../alerts/VehicleProximityService';
 import type StaticEquipmentManager from '../static_equipment/StaticEquipmentManager';
 import type DeviceManager from './DeviceManager';
 import type FleetStateManager from './FleetStateManager';
 import type PositionFilterService from './PositionFilterService';
+import type SpeedEstimationService from './SpeedEstimationService';
 
 interface SocketServerLike {
   broadcast(event: string, payload: unknown): void;
@@ -41,8 +43,10 @@ export interface PositionProcessorDeps {
   geofenceService?: GeofenceAlertService;
   signalLostService?: SignalLostService;
   collisionService?: CollisionRiskService;
+  proximityService?: VehicleProximityService;
   equipmentManager?: StaticEquipmentManager;
   positionFilter?: PositionFilterService;
+  speedEstimator?: SpeedEstimationService;
 }
 
 class PositionProcessor {
@@ -53,8 +57,10 @@ class PositionProcessor {
   geofenceService?: GeofenceAlertService;
   signalLostService?: SignalLostService;
   collisionService?: CollisionRiskService;
+  proximityService?: VehicleProximityService;
   equipmentManager?: StaticEquipmentManager;
   positionFilter?: PositionFilterService;
+  speedEstimator?: SpeedEstimationService;
 
   constructor({
     positionRepo,
@@ -64,8 +70,10 @@ class PositionProcessor {
     geofenceService,
     signalLostService,
     collisionService,
+    proximityService,
     equipmentManager,
     positionFilter,
+    speedEstimator,
   }: PositionProcessorDeps) {
     this.positionRepo = positionRepo;
     this.fleetState = fleetState;
@@ -76,12 +84,14 @@ class PositionProcessor {
     this.geofenceService = geofenceService;
     this.signalLostService = signalLostService;
     this.collisionService = collisionService;
+    this.proximityService = proximityService;
     this.equipmentManager = equipmentManager;
 
     // Descarta "teletransportes" por glitch RTK/NTRIP antes de que
     // el punto llegue a Redis/alertas/mapa — opcional, si no se
     // inyecta el comportamiento es idéntico al de antes.
     this.positionFilter = positionFilter;
+    this.speedEstimator = speedEstimator;
   }
 
   /**
@@ -152,6 +162,23 @@ class PositionProcessor {
         }
       }
 
+      // 1.6 Velocidad suavizada — SpeedEstimationService
+      if (this.speedEstimator) {
+        const fixTimeMs = new Date(position.fixTime).getTime();
+        const estimate = this.speedEstimator.estimate(
+          position.deviceId,
+          position.latitude,
+          position.longitude,
+          fixTimeMs,
+          position.speed,
+        );
+        position.attributes = {
+          ...(position.attributes || {}),
+          rawSpeedKmh: estimate.rawDeviceKmh ?? undefined,
+        };
+        position.speed = estimate.speedMs;
+      }
+
       // 2. Persistir en PostgreSQL/TimescaleDB
       await this.positionRepo.save(position);
 
@@ -172,6 +199,11 @@ class PositionProcessor {
             { deviceId: number; latitude: number; longitude: number }
           >,
         );
+      }
+
+      if (this.proximityService) {
+        const fleet = await this.fleetState.getAll();
+        this.proximityService.evaluate(position, fleet, this.geofenceService?.activeGeofences);
       }
 
       if (this.equipmentManager) {

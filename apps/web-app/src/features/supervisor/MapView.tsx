@@ -1,4 +1,11 @@
-import { useGeofenceLayer, useMapLibreMap, useSatelliteLayers } from '@gaga-gps/map-core';
+import {
+  createHeadingArrow,
+  updateVehicleMarkerHeading,
+  useGeofenceLayer,
+  useMapLibreMap,
+  useSatelliteLayers,
+} from '@gaga-gps/map-core';
+import { colors } from '@gaga-gps/ui';
 import type { MapMode } from '@gaga-gps/map-core';
 import type { ActiveMap, Geofence } from '@gaga-gps/shared-types';
 import maplibregl from 'maplibre-gl';
@@ -51,6 +58,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const existing = markersRef.current[id];
       if (existing) {
         existing.setLngLat(lngLat);
+        updateVehicleMarkerHeading(existing.getElement(), v.deviceId, v.course, v.speed);
         return;
       }
 
@@ -58,6 +66,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       el.className = 'sup-vehicle-marker';
       el.textContent = `V${v.deviceId}`;
       el.onclick = () => onVehicleClickRef.current(v.deviceId);
+      el.appendChild(createHeadingArrow(colors.accent));
+      updateVehicleMarkerHeading(el, v.deviceId, v.course, v.speed);
 
       markersRef.current[id] = new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map);
     });

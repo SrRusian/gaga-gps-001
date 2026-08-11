@@ -76,7 +76,7 @@ export function HistorySection() {
         const b = points[i + 1];
         segments.push({
           type: 'Feature',
-          properties: { color: a.zones.length > 0 ? '#00ff88' : '#ff4444' },
+          properties: { color: a.zones.length > 0 ? '#4f8ff0' : '#e5484d' },
           geometry: {
             type: 'LineString',
             coordinates: [
@@ -186,7 +186,7 @@ export function HistorySection() {
         {!hasMaps && (
           <div className="no-maps-banner visible">
             <span>
-              ⚠️ No hay ningún mapa satelital importado todavía — los modos Satelital/Mixto no
+              No hay ningún mapa satelital importado todavía — los modos Satelital/Mixto no
               mostrarán nada.
             </span>
           </div>
@@ -198,21 +198,21 @@ export function HistorySection() {
               className={`map-mode-btn${mapMode === 'streets' ? ' active' : ''}`}
               onClick={() => setMapMode('streets')}
             >
-              🗺️ Calles
+              Calles
             </button>
             <button
               className={`map-mode-btn${mapMode === 'satellite' ? ' active' : ''}`}
               disabled={!hasMaps}
               onClick={() => setMapMode('satellite')}
             >
-              🛰️ Satelital
+              Satelital
             </button>
             <button
               className={`map-mode-btn${mapMode === 'hybrid' ? ' active' : ''}`}
               disabled={!hasMaps}
               onClick={() => setMapMode('hybrid')}
             >
-              🔀 Mixto
+              Mixto
             </button>
           </div>
           <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
@@ -220,7 +220,7 @@ export function HistorySection() {
 
         <div className="form-row" style={{ marginTop: 8, alignItems: 'center' }}>
           <button className="btn btn-sm" style={{ width: 'auto' }} onClick={togglePlayback}>
-            {playing ? '⏸️ Pausar' : '▶️ Reproducir'}
+            {playing ? 'Pausar' : 'Reproducir'}
           </button>
           <input
             type="range"
@@ -237,8 +237,8 @@ export function HistorySection() {
           </span>
         </div>
         <div className="form-row" style={{ fontSize: 12, color: '#8b949e' }}>
-          <span>🟢 Dentro de zona autorizada</span>
-          <span>🔴 Fuera de toda zona autorizada</span>
+          <span className="zone-in">Dentro de zona autorizada</span>
+          <span className="zone-out">Fuera de toda zona autorizada</span>
           <span>
             {history.length
               ? `${inZoneCount}/${history.length} puntos dentro de zona autorizada`
@@ -264,10 +264,8 @@ export function HistorySection() {
                 <td>{p.latitude}</td>
                 <td>{p.longitude}</td>
                 <td>{(p.speed * 3.6).toFixed(1)}</td>
-                <td>
-                  {p.zones.length
-                    ? `🟢 ${p.zones.map((z) => z.name).join(', ')}`
-                    : '🔴 fuera de zona'}
+                <td className={p.zones.length ? 'zone-in' : 'zone-out'}>
+                  {p.zones.length ? p.zones.map((z) => z.name).join(', ') : 'Fuera de zona'}
                 </td>
               </tr>
             ))}

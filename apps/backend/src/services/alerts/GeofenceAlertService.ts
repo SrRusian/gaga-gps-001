@@ -19,7 +19,7 @@
 import type { Geofence } from '@gaga-gps/shared-types';
 import { getCorridorSeverity, isInsideGeofence } from '../../utils/geometry';
 
-type Severity = 'warning' | 'danger' | null;
+type Severity = 'warning' | 'danger' | 'info' | null;
 
 interface EvaluatedPosition {
   deviceId: string;
@@ -112,7 +112,8 @@ class GeofenceAlertService {
       if (geofence.shapeType === 'polyline') {
         severity = getCorridorSeverity(latitude, longitude, geofence);
       } else if (isInsideGeofence(latitude, longitude, geofence)) {
-        severity = geofence.type === 'danger' ? 'danger' : 'warning';
+        severity =
+          geofence.type === 'danger' ? 'danger' : geofence.type === 'parking' ? 'info' : 'warning';
       }
 
       if (severity === 'danger') {
@@ -125,6 +126,12 @@ class GeofenceAlertService {
         // de arriba, que siempre corta el loop con break — TypeScript
         // lo confirma (maxSeverity nunca puede ser 'danger' en este punto).
         maxSeverity = 'warning';
+        triggeredGeofence = geofence;
+      } else if (severity === 'info' && maxSeverity !== 'warning') {
+        // 'info' (zona de estacionamiento) es la de menor prioridad —
+        // no debe pisar un 'warning' ya encontrado en una geocerca
+        // anterior de la misma posición.
+        maxSeverity = 'info';
         triggeredGeofence = geofence;
       }
     }
@@ -146,18 +153,25 @@ class GeofenceAlertService {
   /**
    * Activa alerta en el dispositivo y notifica al supervisor
    */
-  triggerAlert(deviceId: string, severity: 'warning' | 'danger', geofence: Geofence): void {
+  triggerAlert(deviceId: string, severity: 'warning' | 'danger' | 'info', geofence: Geofence): void {
     const messages = {
       warning: 'PRECAUCIÓN — ZONA DE RIESGO — REDUCIR VELOCIDAD',
       danger: 'PELIGRO — DETENER VEHÍCULO INMEDIATAMENTE',
+      info: 'ZONA DE ESTACIONAMIENTO',
     };
+    const types = {
+      warning: 'geofence_yellow',
+      danger: 'geofence_red',
+      info: 'geofence_parking',
+    } as const;
 
     const alertPayload = {
-      type: severity === 'danger' ? 'geofence_red' : 'geofence_yellow',
+      type: types[severity],
       deviceId,
+      geofenceId: geofence.id,
       geofenceName: geofence.name,
       message: messages[severity],
-      loop: severity === 'danger', // sirena en bucle para zona roja
+      loop: severity === 'danger', // sirena en bucle solo para zona roja
       timestamp: new Date().toISOString(),
     };
 
@@ -169,6 +183,9 @@ class GeofenceAlertService {
     // En producción usaremos rooms por deviceId
     if (severity === 'danger') {
       this.io.emit('alert:critical', alertPayload);
+    } else if (severity === 'info') {
+      // Sin sirena/sonido — solo aviso visual (RF de zonas de estacionamiento)
+      this.io.emit('alert:info', alertPayload);
     } else {
       this.io.emit('alert:warning', alertPayload);
     }

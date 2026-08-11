@@ -294,7 +294,7 @@ export function GeofencesSection() {
         {!hasMaps && (
           <div className="no-maps-banner visible">
             <span>
-              ⚠️ No hay ningún mapa satelital importado todavía — los modos Satelital/Mixto no
+              No hay ningún mapa satelital importado todavía — los modos Satelital/Mixto no
               mostrarán nada.
             </span>
           </div>
@@ -305,21 +305,21 @@ export function GeofencesSection() {
               className={`map-mode-btn${mapMode === 'streets' ? ' active' : ''}`}
               onClick={() => setMapMode('streets')}
             >
-              🗺️ Calles
+              Calles
             </button>
             <button
               className={`map-mode-btn${mapMode === 'satellite' ? ' active' : ''}`}
               disabled={!hasMaps}
               onClick={() => setMapMode('satellite')}
             >
-              🛰️ Satelital
+              Satelital
             </button>
             <button
               className={`map-mode-btn${mapMode === 'hybrid' ? ' active' : ''}`}
               disabled={!hasMaps}
               onClick={() => setMapMode('hybrid')}
             >
-              🔀 Mixto
+              Mixto
             </button>
           </div>
           <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
@@ -347,6 +347,7 @@ export function GeofencesSection() {
           <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
             <option value="warning">Advertencia (amarilla)</option>
             <option value="danger">Peligro (roja)</option>
+            <option value="parking">Estacionamiento (azul)</option>
           </select>
           {shape === 'circle' && (
             <>
@@ -400,10 +401,10 @@ export function GeofencesSection() {
         </div>
         <div className="form-row">
           <button className="btn btn-sm" onClick={() => exportGeofences('geojson')}>
-            ⬇️ Exportar GeoJSON
+            Exportar GeoJSON
           </button>
           <button className="btn btn-sm" onClick={() => exportGeofences('kml')}>
-            ⬇️ Exportar KML
+            Exportar KML
           </button>
           <input
             type="file"
@@ -419,11 +420,11 @@ export function GeofencesSection() {
             className="btn btn-sm"
             onClick={() => document.getElementById('geo-import-file')?.click()}
           >
-            ⬆️ Importar (GeoJSON/KML)
+            Importar (GeoJSON/KML)
           </button>
         </div>
         <div
-          style={{ fontSize: 12, marginTop: 6, color: importFeedback.ok ? '#00ff88' : '#ff4444' }}
+          style={{ fontSize: 12, marginTop: 6, color: importFeedback.ok ? '#4f8ff0' : '#e5484d' }}
         >
           {importFeedback.text}
         </div>

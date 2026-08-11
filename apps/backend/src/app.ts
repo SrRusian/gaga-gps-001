@@ -15,6 +15,7 @@ import { db, env, redis } from './config';
 // ── Repositorios ───────────────────────────────────────────────
 import DeviceRepository from './repositories/DeviceRepository';
 import PositionRepository from './repositories/PositionRepository';
+import DeviceSensorRepository from './repositories/DeviceSensorRepository';
 import GeofenceRepository from './repositories/GeofenceRepository';
 import GeofenceEventRepository from './repositories/GeofenceEventRepository';
 import EquipmentRepository from './repositories/EquipmentRepository';
@@ -26,6 +27,7 @@ import MapRepository from './repositories/MapRepository';
 import GeofenceAlertService from './services/alerts/GeofenceAlertService';
 import SignalLostService from './services/alerts/SignalLostService';
 import CollisionRiskService from './services/alerts/CollisionRiskService';
+import VehicleProximityService from './services/alerts/VehicleProximityService';
 import PreventiveStopService from './services/alerts/PreventiveStopService';
 import StaticEquipmentManager from './services/static_equipment/StaticEquipmentManager';
 
@@ -34,6 +36,7 @@ import FleetStateManager from './services/telemetry/FleetStateManager';
 import DeviceManager from './services/telemetry/DeviceManager';
 import PositionProcessor from './services/telemetry/PositionProcessor';
 import PositionFilterService from './services/telemetry/PositionFilterService';
+import SpeedEstimationService from './services/telemetry/SpeedEstimationService';
 import FleetSocketServer from './sockets/FleetSocketServer';
 
 // ── Middleware ──────────────────────────────────────────────────
@@ -57,6 +60,7 @@ import buildMapsAdminRouter from './api/routes/maps-admin.routes';
 import buildReportsRouter from './api/routes/reports.routes';
 import buildUsersRouter from './api/routes/users.routes';
 import buildOperatorSessionsRouter from './api/routes/operator-sessions.routes';
+import buildDeviceSensorsRouter from './api/routes/device-sensors.routes';
 import MapPipelineService from './services/maps/MapPipelineService';
 
 const app = express();
@@ -80,20 +84,28 @@ const equipmentRepo = new EquipmentRepository();
 const userRepo = new UserRepository();
 const operatorSessionRepo = new OperatorSessionRepository();
 const mapRepo = new MapRepository();
+const sensorRepo = new DeviceSensorRepository();
 
 const authMiddleware = buildAuthMiddleware({ userRepo });
 io.use(buildSocketAuthMiddleware({ userRepo }));
 
+// Se crea antes que los servicios de seguridad porque SignalLostService
+// lo necesita para marcar `devices.status='offline'` en PostgreSQL en
+// cuanto se detecta pérdida de señal (ver más abajo) — antes esa
+// transición nunca se persistía y el panel admin quedaba mostrando
+// "online" indefinidamente.
+const deviceManager = new DeviceManager({ deviceRepo });
+
 // ── Servicios de seguridad ──────────────────────────────────────
 const geofenceService = new GeofenceAlertService({ io, geofenceEventRepo });
 const preventiveStopService = new PreventiveStopService({ io });
-const signalLostService = new SignalLostService({ io, preventiveStopService });
+const signalLostService = new SignalLostService({ io, preventiveStopService, deviceManager });
 const collisionService = new CollisionRiskService({ io });
+const proximityService = new VehicleProximityService({ io });
 const equipmentManager = new StaticEquipmentManager({ io });
 
 // ── Telemetría propia ───────────────────────────────────────────
 const fleetState = new FleetStateManager(redis.redis);
-const deviceManager = new DeviceManager({ deviceRepo });
 const socketServer = new FleetSocketServer({
   io,
   fleetState,
@@ -102,6 +114,7 @@ const socketServer = new FleetSocketServer({
   mapRepo,
 });
 const positionFilter = new PositionFilterService(env.positionFilter);
+const speedEstimator = new SpeedEstimationService();
 
 const positionProcessor = new PositionProcessor({
   positionRepo,
@@ -111,8 +124,10 @@ const positionProcessor = new PositionProcessor({
   geofenceService,
   signalLostService,
   collisionService,
+  proximityService,
   equipmentManager,
   positionFilter,
+  speedEstimator,
 });
 
 // ── UI estática ──────────────────────────────────────────────────
@@ -172,6 +187,10 @@ app.use('/api/users', authMiddleware, requireRole('admin'), buildUsersRouter({ u
 app.use(
   '/api/operator-sessions',
   buildOperatorSessionsRouter({ operatorSessionRepo, authMiddleware, requireRole }),
+);
+app.use(
+  '/api/devices',
+  buildDeviceSensorsRouter({ sensorRepo, authMiddleware, requireRole }),
 );
 
 app.use(
@@ -243,6 +262,19 @@ async function loadPersistedState(): Promise<void> {
     const geofences = await geofenceRepo.findAllActive();
     geofences.forEach((g) => geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(g)));
     console.log(`✅ ${geofences.length} geocerca(s) cargada(s) desde PostgreSQL`);
+
+    // Recupera el reloj de "última señal" de los dispositivos que
+    // quedaron marcados online antes de este reinicio — así
+    // SignalLostService los re-evalúa de inmediato en vez de
+    // olvidarlos (ver comentario en SignalLostService.hydrate).
+    const devices = await deviceRepo.findAll();
+    const staleTrackedDevices = devices
+      .filter((d) => d.status === 'online' && d.last_update)
+      .map((d) => ({ deviceId: d.unique_id, lastSeenAt: d.last_update as Date }));
+    signalLostService.hydrate(staleTrackedDevices);
+    console.log(
+      `✅ ${staleTrackedDevices.length} dispositivo(s) "online" recuperado(s) para monitoreo de señal`,
+    );
 
     const equipment = await equipmentRepo.findAll();
     equipment.forEach((eq) =>

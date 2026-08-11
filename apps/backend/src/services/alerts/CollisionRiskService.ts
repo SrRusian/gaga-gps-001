@@ -37,6 +37,9 @@ class CollisionRiskService {
   collisionAlerts: Record<string, CollisionAlertLevel>;
   readonly THRESHOLD_1_METERS = 80;
   readonly THRESHOLD_2_METERS = 40;
+  // Histéresis de limpieza — evita parpadeo por jitter de GPS en
+  // vehículos casi estáticos (ver areConverging).
+  readonly CLEAR_MARGIN = 1.15;
 
   constructor({ io }: { io: SocketIoLike }) {
     this.io = io;
@@ -44,8 +47,7 @@ class CollisionRiskService {
     // Historial de posiciones por dispositivo (últimas 5)
     this.positionHistory = {};
 
-    // Estado de alerta de colisión por par de vehículos
-    // clave: "deviceId1-deviceId2" (siempre menor-mayor)
+    // Estado de alerta de colisión por par — clave: IDs ordenados como texto
     this.collisionAlerts = {};
   }
 
@@ -105,9 +107,10 @@ class CollisionRiskService {
    * Evalúa el riesgo de colisión entre dos vehículos específicos
    */
   evaluatePair(pos1: EvaluatedPosition, pos2: EvaluatedPosition): void {
-    const id1 = Math.min(pos1.deviceId, pos2.deviceId);
-    const id2 = Math.max(pos1.deviceId, pos2.deviceId);
-    const pairKey = `${id1}-${id2}`;
+    // deviceId es un unique_id de texto (ej. "CAMION-01") aunque el
+    // tipo diga number — Math.min/Math.max daría NaN para ambos y
+    // colapsaría todos los pares en una sola llave.
+    const pairKey = [String(pos1.deviceId), String(pos2.deviceId)].sort().join('-');
 
     // Calcular distancia actual entre ambos vehículos
     const distance = this.calculateDistance(
@@ -126,21 +129,22 @@ class CollisionRiskService {
       // Umbral 2 — Colisión inminente
       if (currentAlert !== 'critical') {
         this.triggerCritical(pos1.deviceId, pos2.deviceId, distance);
-        this.collisionAlerts[pairKey] = 'critical';
       }
-    } else if (distance <= this.THRESHOLD_1_METERS && converging) {
+      this.collisionAlerts[pairKey] = 'critical';
+    } else if (distance <= this.THRESHOLD_1_METERS && converging && currentAlert === 'none') {
       // Umbral 1 — Proximidad con convergencia
-      if (currentAlert === 'none') {
-        this.triggerProximity(pos1.deviceId, pos2.deviceId, distance);
-        this.collisionAlerts[pairKey] = 'proximity';
-      }
-    } else {
-      // Fuera de umbrales o trayectorias no convergentes
-      if (currentAlert !== 'none') {
-        this.clearCollisionAlert(pos1.deviceId, pos2.deviceId);
-        this.collisionAlerts[pairKey] = 'none';
-      }
+      this.triggerProximity(pos1.deviceId, pos2.deviceId, distance);
+      this.collisionAlerts[pairKey] = 'proximity';
+    } else if (currentAlert !== 'none' && distance > this.THRESHOLD_1_METERS * this.CLEAR_MARGIN) {
+      // Solo se limpia cuando la distancia realmente creció más allá
+      // del umbral (con margen) — no por un solo tick sin
+      // convergencia, que puede ser ruido de GPS.
+      this.clearCollisionAlert(pos1.deviceId, pos2.deviceId);
+      this.collisionAlerts[pairKey] = 'none';
     }
+    // Ningún caso: se mantiene el estado actual (p. ej. "critical"
+    // con la distancia todavía peligrosa pero sin convergencia en
+    // este tick puntual).
   }
 
   /**
@@ -232,11 +236,9 @@ class CollisionRiskService {
   clearCollisionAlert(deviceId1: number, deviceId2: number): void {
     console.log(`✅ Vehículos ${deviceId1} y ${deviceId2} ya no están en riesgo de colisión`);
 
-    this.io.emit('collision:clear', {
-      deviceId1,
-      deviceId2,
-      timestamp: new Date().toISOString(),
-    });
+    const timestamp = new Date().toISOString();
+    this.io.emit('collision:clear', { deviceId1, deviceId2, timestamp });
+    this.io.emit('supervisor:collision', { deviceId1, deviceId2, level: 0, timestamp });
   }
 
   /**

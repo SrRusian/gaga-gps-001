@@ -1,43 +1,72 @@
 .sup-app {
+  --sup-bg: #0b0d10;
+  --sup-surface: #14171c;
+  --sup-surface-2: #1a1e24;
+  --sup-border: #262b33;
+  --sup-text: #e8eaed;
+  --sup-text-muted: #8b949e;
+  --sup-accent: #4f8ff0;
+  --sup-danger: #e5484d;
+  --sup-warning: #f0a83c;
+  --sup-info: #4f8ff0;
+
   height: 100vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #0d1117;
+  background: var(--sup-bg);
+  color: var(--sup-text);
 }
 
 .sup-header {
-  height: 55px;
-  background: #161b22;
-  border-bottom: 2px solid #00ff88;
+  min-height: 56px;
+  background: var(--sup-surface);
+  border-bottom: 1px solid var(--sup-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 24px;
   flex-shrink: 0;
 }
 .sup-header h1 {
-  font-size: 18px;
-  color: #00ff88;
-  font-weight: bold;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--sup-text);
 }
 .sup-header-right {
   display: flex;
   align-items: center;
   gap: 20px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--sup-text-muted);
 }
 .sup-connection {
   display: flex;
   align-items: center;
   gap: 6px;
 }
+.sup-app .gg-connection-dot {
+  background: var(--sup-danger);
+}
+.sup-app .gg-connection-dot.connected {
+  background: var(--sup-accent);
+}
 .sup-logout-btn {
   background: none;
-  border: 1px solid #ff4444;
-  color: #ff4444;
-  padding: 6px 12px;
-  border-radius: 4px;
+  border: 1px solid var(--sup-border);
+  color: var(--sup-text-muted);
+  padding: 6px 14px;
+  border-radius: 6px;
   cursor: pointer;
+  font-size: 13px;
+}
+.sup-logout-btn:hover {
+  border-color: var(--sup-danger);
+  color: var(--sup-danger);
 }
 
 .sup-main {
@@ -46,10 +75,12 @@
   overflow: hidden;
 }
 
+/* Ancho fluido, no fijo — deja más mapa disponible en pantallas
+   angostas y no desperdicia espacio de más en monitores anchos. */
 .sup-left-panel {
-  width: 320px;
-  background: #161b22;
-  border-right: 1px solid #30363d;
+  width: clamp(300px, 26vw, 380px);
+  background: var(--sup-surface);
+  border-right: 1px solid var(--sup-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -58,58 +89,133 @@
 
 .sup-dashboard {
   padding: 16px;
-  border-bottom: 1px solid #30363d;
+  border-bottom: 1px solid var(--sup-border);
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 10px;
+}
+.sup-app .gg-stat-card {
+  background: var(--sup-surface-2);
+  border: 1px solid var(--sup-border);
+}
+.sup-app .gg-stat-card__value {
+  color: var(--sup-text);
+}
+.sup-app .gg-stat-card__value--alert {
+  color: var(--sup-danger);
+}
+.sup-app .gg-stat-card__value--warning {
+  color: var(--sup-warning);
 }
 
 .sup-stop-section {
   padding: 16px;
-  border-bottom: 1px solid #30363d;
+  border-bottom: 1px solid var(--sup-border);
+}
+.sup-app .gg-button--primary {
+  background: var(--sup-accent);
+  color: #0b0d10;
+}
+.sup-app .gg-button--primary:hover {
+  background: #3f7cd6;
+}
+.sup-app .gg-button--danger {
+  background: var(--sup-danger);
 }
 .sup-stop-btn {
   width: 100%;
-  padding: 14px !important;
-  font-size: 15px !important;
-  letter-spacing: 0.5px;
-}
-.sup-stop-btn + .sup-stop-btn {
-  margin-top: 8px;
+  padding: 13px !important;
+  font-size: 14px !important;
+  letter-spacing: 0.2px;
+  text-transform: none !important;
 }
 .sup-stop-status {
-  margin-top: 8px;
+  margin-top: 10px;
   font-size: 12px;
-  color: #8b949e;
+  color: var(--sup-text-muted);
   text-align: center;
 }
 .sup-stop-status.active {
-  color: #ff4444;
-  font-weight: bold;
+  color: var(--sup-danger);
+  font-weight: 600;
 }
 
 .sup-section-header {
   padding: 12px 16px;
-  font-size: 12px;
-  color: #8b949e;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sup-text-muted);
   text-transform: uppercase;
-  border-bottom: 1px solid #30363d;
+  letter-spacing: 0.6px;
+  border-bottom: 1px solid var(--sup-border);
+  flex-shrink: 0;
 }
 
 .sup-alerts-section {
-  padding: 12px 16px;
-  border-bottom: 1px solid #30363d;
-  max-height: 200px;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 220px;
+  border-bottom: 1px solid var(--sup-border);
+  overflow: hidden;
+}
+.sup-alerts-list {
+  padding: 10px 12px;
   overflow-y: auto;
+  flex: 1;
 }
 .sup-alerts-empty {
-  color: #6e7681;
+  color: var(--sup-text-muted);
   font-size: 12px;
+  padding: 8px 4px;
+}
+.sup-app .gg-alert-banner {
+  background: var(--sup-surface-2);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+.sup-app .gg-alert-banner--danger {
+  border-color: var(--sup-danger);
+  color: var(--sup-text);
+}
+.sup-app .gg-alert-banner--warning {
+  border-color: var(--sup-warning);
+  color: var(--sup-text);
+}
+.sup-app .gg-alert-banner--info {
+  border-color: var(--sup-info);
+  color: var(--sup-text);
+}
+.sup-app .gg-alert-banner__time {
+  color: var(--sup-text-muted);
 }
 
 .sup-vehicle-list {
-  flex: 1;
+  flex: 1 1 auto;
   overflow-y: auto;
+  min-height: 140px;
+}
+.sup-app .gg-vehicle-card {
+  border-bottom: 1px solid var(--sup-border);
+}
+.sup-app .gg-vehicle-card:hover {
+  background: var(--sup-surface-2);
+}
+.sup-app .gg-vehicle-card--alert {
+  background: var(--sup-surface-2);
+  border-left: 3px solid var(--sup-danger);
+}
+.sup-app .gg-vehicle-card__status {
+  background: var(--sup-accent);
+  color: #0b0d10;
+}
+.sup-app .gg-vehicle-card__status--offline {
+  background: var(--sup-border);
+  color: var(--sup-text-muted);
+}
+.sup-app .gg-vehicle-card__status--alert {
+  background: var(--sup-danger);
+  color: #fff;
 }
 
 .sup-map-container {
@@ -127,22 +233,35 @@
   left: 16px;
   z-index: 10;
 }
+.sup-app .gg-map-mode-selector {
+  background: rgba(20, 23, 28, 0.92);
+  border-color: var(--sup-border);
+}
+.sup-app .gg-map-mode-btn {
+  color: var(--sup-text-muted);
+}
+.sup-app .gg-map-mode-btn.active {
+  background: var(--sup-accent);
+  color: #0b0d10;
+}
 
 .sup-vehicle-detail {
   position: absolute;
   top: 16px;
   right: 16px;
-  width: 260px;
-  background: rgba(22, 27, 34, 0.95);
-  border: 1px solid #30363d;
+  width: min(300px, calc(100vw - 32px));
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  background: rgba(20, 23, 28, 0.97);
+  border: 1px solid var(--sup-border);
   border-radius: 8px;
   padding: 16px;
   z-index: 100;
 }
 .sup-detail-title {
-  font-size: 16px;
-  font-weight: bold;
-  color: #00ff88;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sup-text);
   margin-bottom: 12px;
   display: flex;
   justify-content: space-between;
@@ -150,37 +269,83 @@
 .sup-btn-close {
   background: none;
   border: none;
-  color: #8b949e;
+  color: var(--sup-text-muted);
   cursor: pointer;
-  font-size: 18px;
+  font-size: 16px;
+  line-height: 1;
+}
+.sup-btn-close:hover {
+  color: var(--sup-text);
 }
 .sup-detail-row {
   display: flex;
   justify-content: space-between;
-  padding: 4px 0;
-  font-size: 13px;
-  border-bottom: 1px solid #21262d;
+  padding: 5px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--sup-border);
+}
+.sup-detail-row:last-child {
+  border-bottom: none;
 }
 .sup-detail-label {
-  color: #8b949e;
+  color: var(--sup-text-muted);
 }
 .sup-detail-value {
-  color: #ffffff;
-  font-weight: bold;
+  color: var(--sup-text);
+  font-weight: 500;
+}
+.sup-detail-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .sup-vehicle-marker {
-  width: 36px;
-  height: 36px;
+  position: relative;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
-  border: 3px solid #00ff88;
-  background: #003322;
+  border: 2px solid var(--sup-accent);
+  background: #0f1720;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 11px;
-  font-weight: bold;
-  color: #00ff88;
+  font-weight: 600;
+  color: var(--sup-accent);
   cursor: pointer;
-  box-shadow: 0 0 8px #00ff88;
+}
+
+/* ── Adaptativo — pantalla angosta (tableta): el panel lateral pasa
+   de columna a franja superior con su propio scroll, el mapa ocupa
+   el resto. Nada se oculta — sigue siendo toda la misma información,
+   solo cambia de columna a fila. ── */
+@media (max-width: 860px) {
+  .sup-main {
+    flex-direction: column;
+  }
+  .sup-left-panel {
+    width: 100%;
+    max-height: 46vh;
+    overflow-y: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--sup-border);
+  }
+  /* Dentro del panel apilado, que sea el panel completo el que
+     scrollea como una sola unidad — no cada sección peleando por una
+     porción fija de un espacio ya reducido (42vh). */
+  .sup-alerts-section {
+    flex: none;
+    min-height: 0;
+  }
+  .sup-vehicle-list {
+    flex: none;
+    min-height: 0;
+  }
+  .sup-alerts-list {
+    max-height: 200px;
+  }
+  .sup-vehicle-detail {
+    width: min(280px, calc(100vw - 24px));
+  }
 }

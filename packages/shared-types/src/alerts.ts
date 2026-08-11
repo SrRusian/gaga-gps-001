@@ -18,8 +18,9 @@ export interface PreventiveStopStatus {
 }
 
 export interface GeofenceAlertPayload {
-  type: 'geofence_red' | 'geofence_yellow';
+  type: 'geofence_red' | 'geofence_yellow' | 'geofence_parking';
   deviceId: string;
+  geofenceId: number;
   geofenceName: string;
   message: string;
   loop: boolean;
@@ -75,8 +76,47 @@ export interface CollisionClearPayload {
   timestamp: string;
 }
 
-export interface SupervisorCollisionPayload extends CollisionPayload {
-  level: 1 | 2;
+export interface SupervisorCollisionPayload extends Partial<CollisionPayload> {
+  deviceId1: number;
+  deviceId2: number;
+  level: 0 | 1 | 2;
+  timestamp: string;
+}
+
+/**
+ * Radar de proximidad fuera de ruta — VehicleProximityService.
+ * Distinto de CollisionPayload (RF-ALR-10, con heurística de
+ * convergencia): este es puro por distancia, solo para vehículos
+ * que no están dentro de ningún corredor (polyline) activo.
+ */
+export interface ProximityPayload {
+  type: 'proximity_warning' | 'proximity_critical';
+  deviceId1: string;
+  deviceId2: string;
+  distance: number;
+  message: string;
+  loop?: boolean;
+  timestamp: string;
+}
+
+export interface ProximityClearPayload {
+  deviceId1: string;
+  deviceId2: string;
+  timestamp: string;
+}
+
+export interface ProximityDistanceUpdatePayload {
+  deviceId: string;
+  nearestDeviceId: string;
+  distance: number;
+  timestamp: string;
+}
+
+export interface SupervisorProximityPayload extends Partial<ProximityPayload> {
+  deviceId1: string;
+  deviceId2: string;
+  level: 0 | 1 | 2;
+  timestamp: string;
 }
 
 export interface PreventiveStopActivePayload {

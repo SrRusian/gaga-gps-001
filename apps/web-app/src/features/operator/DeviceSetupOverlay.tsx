@@ -18,7 +18,7 @@ export function DeviceSetupOverlay({ onSave, onClose, error, verifying }: Device
             ✕
           </button>
         )}
-        <h2>🔧 Configuración de dispositivo</h2>
+        <h2>Configuración de dispositivo</h2>
         <p>
           Esta tableta aún no tiene un identificador de vehículo asignado. Ingresa el mismo "Device
           Identifier" configurado en Traccar Client para esta máquina. Esto solo se hace una vez, al

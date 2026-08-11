@@ -20,7 +20,7 @@ export type GeofenceShapeType = 'circle' | 'polygon' | 'polyline';
 export interface GeofenceRow {
   id: number;
   name: string;
-  type: 'warning' | 'danger';
+  type: 'warning' | 'danger' | 'parking';
   shape_type: GeofenceShapeType;
   active: boolean;
   center_lat: number | null;

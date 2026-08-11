@@ -38,12 +38,15 @@ servidor, que ahora apunta directamente a este backend Node.js.
 12. [Eventos de Socket.io en tiempo real](#eventos-de-socketio-en-tiempo-real)
 13. [Módulos de seguridad (RF-ALR)](#módulos-de-seguridad-rf-alr)
     - [Filtro de posiciones GPS (anti-teletransporte RTK/NTRIP)](#filtro-de-posiciones-gps-anti-teletransporte-rtkntrip)
+    - [Estimación de velocidad](#estimación-de-velocidad)
+    - [Radar de proximidad fuera de ruta](#radar-de-proximidad-fuera-de-ruta)
 14. [Seguridad del backend](#seguridad-del-backend)
 15. [Retención y compresión de datos](#retención-y-compresión-de-datos)
 16. [Panel de administración](#panel-de-administración)
-17. [Acceso directo a PostgreSQL y Redis](#acceso-directo-a-postgresql-y-redis)
-18. [Solución de problemas comunes](#solución-de-problemas-comunes)
-19. [Limitaciones conocidas / trabajo futuro](#limitaciones-conocidas--trabajo-futuro)
+17. [Panel de Operador y Supervisor](#panel-de-operador-y-supervisor)
+18. [Acceso directo a PostgreSQL y Redis](#acceso-directo-a-postgresql-y-redis)
+19. [Solución de problemas comunes](#solución-de-problemas-comunes)
+20. [Limitaciones conocidas / trabajo futuro](#limitaciones-conocidas--trabajo-futuro)
 
 ---
 
@@ -1006,7 +1009,7 @@ obtenido en el login.
 | PATCH    | `/api/devices/:id`                        | JWT                        | Editar dispositivo                                                                                                                                                                |
 | DELETE   | `/api/devices/:id?force=true`             | JWT                        | Eliminar dispositivo (`force=true` purga también su historial de posiciones; sin ese flag, responde 409 si tiene historial)                                                       |
 | GET      | `/api/geofences`                          | JWT                        | Listar geocercas activas (cualquier forma)                                                                                                                                        |
-| POST     | `/api/geofences`                          | JWT                        | Crear geocerca — `shapeType`: `circle` \| `polygon` \| `polyline`                                                                                                                 |
+| POST     | `/api/geofences`                          | JWT                        | Crear geocerca — `shapeType`: `circle` \| `polygon` \| `polyline`; `type`: `warning` \| `danger` \| `parking`                                                                     |
 | DELETE   | `/api/geofences/:id`                      | JWT                        | Eliminar geocerca                                                                                                                                                                 |
 | GET      | `/api/geofences/export.geojson`           | JWT                        | Exportar todas las geocercas activas en GeoJSON                                                                                                                                   |
 | GET      | `/api/geofences/export.kml`               | JWT                        | Exportar todas las geocercas activas en KML                                                                                                                                       |
@@ -1049,12 +1052,14 @@ El servidor emite (y las UIs escuchan) estos eventos:
 | `fleet:update`                                                                                                                                 | PositionProcessor / FleetSocketServer | Nueva posición de uno o más vehículos                                                                  |
 | `geofences:update`                                                                                                                             | geofences.routes / FleetSocketServer  | Lista de geocercas activas actualizada                                                                 |
 | `equipment:update`                                                                                                                             | equipment.routes                      | Lista de equipo estático actualizada                                                                   |
-| `alert:critical` / `alert:warning` / `alert:clear`                                                                                             | GeofenceAlertService                  | Alertas de geocerca al dispositivo afectado                                                            |
+| `alert:critical` / `alert:warning` / `alert:info` / `alert:clear`                                                                              | GeofenceAlertService                  | Alertas de geocerca al dispositivo afectado (`info` = zona de estacionamiento, sin sirena)              |
 | `supervisor:alert`                                                                                                                             | GeofenceAlertService                  | Notificación de geocerca al panel de supervisor                                                        |
 | `signal:lost:level1` / `signal:lost:level2` / `signal:recovered`                                                                               | SignalLostService                     | Pérdida/recuperación de señal de un vehículo                                                           |
 | `supervisor:signal_lost`                                                                                                                       | SignalLostService                     | Notificación de pérdida de señal al supervisor                                                         |
 | `collision:proximity` / `collision:critical` / `collision:clear`                                                                               | CollisionRiskService                  | Riesgo de colisión entre vehículos                                                                     |
 | `supervisor:collision`                                                                                                                         | CollisionRiskService                  | Notificación de riesgo de colisión al supervisor                                                       |
+| `proximity:distance_update` / `proximity:warning` / `proximity:critical` / `proximity:clear`                                                  | VehicleProximityService               | Distancia en vivo y alertas de proximidad fuera de ruta                                                |
+| `supervisor:proximity`                                                                                                                         | VehicleProximityService               | Notificación de proximidad al supervisor                                                               |
 | `fleet:preventive_stop` / `fleet:preventive_stop_clear`                                                                                        | PreventiveStopService                 | Activación/cancelación de parada preventiva colectiva                                                  |
 | `supervisor:preventive_stop`                                                                                                                   | PreventiveStopService                 | Notificación al supervisor                                                                             |
 | `equipment:approach_outer` / `equipment:approach_inner` / `equipment:minimum_limit` / `equipment:distance_update` / `equipment:approach_clear` | StaticEquipmentManager                | Guía de aproximación a equipo estático                                                                 |
@@ -1068,13 +1073,14 @@ Estos 5 módulos existían antes de la migración y **no se modificaron**
 — solo cambió dónde se invocan (antes desde `TraccarWsClient.js`,
 ahora desde `PositionProcessor.ts`):
 
-| Módulo                   | RF           | Función                                                                      |
-| ------------------------ | ------------ | ---------------------------------------------------------------------------- |
-| `GeofenceAlertService`   | RF-ALR-02/03 | Alerta al entrar en zona amarilla (advertencia) o roja (peligro)             |
-| `SignalLostService`      | RF-ALR-05    | Nivel 1 (45s sin señal) y Nivel 2 (90s, activa parada preventiva automática) |
-| `CollisionRiskService`   | RF-ALR-10    | Anticolisión — distancia + trayectoria proyectada entre vehículos            |
-| `PreventiveStopService`  | RF-ALR-11    | Parada preventiva colectiva — solo el supervisor puede desactivarla          |
-| `StaticEquipmentManager` | RF-ALR-12    | Guía de aproximación a equipo estático con radio de giro                     |
+| Módulo                    | RF           | Función                                                                      |
+| ------------------------- | ------------ | ---------------------------------------------------------------------------- |
+| `GeofenceAlertService`    | RF-ALR-02/03 | Alerta al entrar en zona amarilla (advertencia), roja (peligro) o azul (estacionamiento, sin sirena) |
+| `SignalLostService`       | RF-ALR-05    | Nivel 1 (10s sin señal) y Nivel 2 (20s, activa parada preventiva automática) |
+| `CollisionRiskService`    | RF-ALR-10    | Anticolisión — distancia + trayectoria proyectada entre vehículos            |
+| `VehicleProximityService` | —            | Radar de distancia entre vehículos fuera de un corredor/ruta autorizada (ver [más abajo](#radar-de-proximidad-fuera-de-ruta)) |
+| `PreventiveStopService`   | RF-ALR-11    | Parada preventiva colectiva — solo el supervisor puede desactivarla          |
+| `StaticEquipmentManager`  | RF-ALR-12    | Guía de aproximación a equipo estático con radio de giro                     |
 
 ### Filtro de posiciones GPS (anti-teletransporte RTK/NTRIP)
 
@@ -1127,6 +1133,40 @@ LIMIT 50;
 
 Todas las variables de ajuste (`POSITION_FILTER_*`) son opcionales
 y tienen default — ver [Variables de entorno](#variables-de-entorno).
+
+### Estimación de velocidad
+
+El `speed` que reporta el GPS (Doppler, instantáneo) puede divergir
+bastante de la velocidad real — visto en pruebas: GPS marcando 40
+km/h con el vehículo realmente a ~24 km/h. `SpeedEstimationService.ts`
+corre en `PositionProcessor.ts` después del filtro anti-teletransporte:
+combina ese valor con la velocidad derivada del desplazamiento real
+(Haversine/Δt entre fixes), descarta el reportado si diverge más de
+`maxDivergenceKmh` (15 km/h por default) y aplica un EMA para suavizar
+ruido punto a punto. El valor final sobrescribe `position.speed` (se
+usa en mapa, HUD, reportes); el crudo del GPS queda en
+`attributes.rawSpeedKmh` para auditoría.
+
+### Radar de proximidad fuera de ruta
+
+`VehicleProximityService.ts` — a diferencia de `CollisionRiskService`
+(que exige trayectorias convergentes), este es un radar de distancia
+puro, pensado para patios/zonas de maniobra sin ruta definida. Solo
+evalúa vehículos que **no** estén dentro de un corredor autorizado
+(geocerca `polyline`). Umbrales: `VISIBILITY_METERS` (150, solo
+actualiza la distancia en vivo en el HUD del operador),
+`WARNING_METERS` (80) y `CRITICAL_METERS` (35). Emite
+`proximity:distance_update` / `proximity:warning` / `proximity:critical`
+/ `proximity:clear` — ver [Eventos de Socket.io](#eventos-de-socketio-en-tiempo-real).
+
+### Formato de precisión GPS/RTK
+
+`formatAccuracy()` (`packages/ui/src/format.ts`) — bajo 1m se muestra
+en centímetros en vez de redondear a "±0 m" (usado hoy en el panel de
+Supervisor). Con GPS puro esto casi no se nota (rara vez baja de 1m),
+pero con RTK en FIX real (el objetivo son unos pocos centímetros)
+redondear a metros enteros escondería exactamente la mejora que se
+busca medir al pasar a un NTRIP propio/más cercano.
 
 ## Seguridad del backend
 
@@ -1208,6 +1248,150 @@ primer usuario). Secciones:
   nuevo es editar esa lista, no una migración.
 - **Sistema** — health check en vivo.
 
+## Panel de Operador y Supervisor
+
+**Principio de diseño — local complementa, nunca reemplaza:** para el
+propio vehículo del operador, todo lo que el navegador puede leer
+localmente (posición, rumbo, velocidad, vehículo más cercano) tiene
+prioridad sobre el dato que llega por servidor — respuesta inmediata,
+funciona sin conexión, y sigue funcionando igual de bien conectado.
+Pero el servidor sigue siendo indispensable para todo lo que el
+navegador **no puede ver por sí solo**: el resto de la flota, alertas
+de colisión/proximidad (siguen siendo decisión exclusiva del backend,
+nunca del cliente), geocercas, mapas satelitales y turnos. Ningún dato
+local sustituye a esto — solo se adelanta el propio, mientras el
+servidor completa todo lo demás. Traccar Client sigue siendo, y
+seguirá siendo, la única fuente que ve el resto de conductores/supervisor
+sobre este vehículo — lo local es exclusivamente para la pantalla del
+propio operador.
+
+¿Hay diferencia entre cómo Traccar Client formatea/envía la posición y
+cómo la lee el navegador? En la práctica, no debería: ambos leen del
+mismo proveedor de ubicación de Android (el mismo mock-location que
+inyecta GNSS Master llega igual a Traccar y a Chrome) — mismas
+unidades (velocidad en m/s, rumbo en grados 0-360, precisión en
+metros), mismo reloj del sistema para el timestamp. Verificado en vivo
+durante pruebas con RTK/NTRIP conectado: posiciones casi idénticas
+(diferencia de centímetros) entre lo que reportó Traccar y lo que leyó
+el navegador en el mismo instante. La única diferencia real es de
+*muestreo* (cada canal consulta al proveedor de forma independiente,
+puede tomar el fix en un milisegundo distinto), no de formato — y
+ambos pasan por la misma lógica anti-teletransporte (ver
+"Continuidad offline" más abajo), así que un glitch de fix/float del
+RTK se filtra igual en los dos lados.
+
+**Mapa (Operador y Supervisor):**
+- Flecha de rumbo en cada marcador (`packages/map-core/src/vehicleMarker.ts`), a partir de `course` — es el **rumbo de desplazamiento real** que calcula el propio GPS/RTK (dirección en la que el vehículo se está moviendo, medida por los fixes sucesivos), no la brújula/orientación física del dispositivo. Por eso ya refleja correctamente ir en reversa: si el vehículo retrocede, `course` apunta hacia atrás porque es hacia ahí donde en realidad se está desplazando, sin importar hacia dónde "mire" la tableta. Se atenúa (no desaparece) cuando el vehículo está detenido, porque a velocidad ~0 ese dato es ruido, no rumbo real.
+- Para el propio vehículo del Operador, el rumbo usa directamente `useDeviceGeolocation` (sensor del navegador) en vez de esperar el viaje de ida y vuelta al servidor — respuesta inmediata, no la del último fix que llegó por socket.
+- **Glide entre posiciones** (`MapView.tsx`, `glideMarkerTo`) — los marcadores ya no saltan de golpe con cada fix nuevo; se animan con `requestAnimationFrame` desde la posición anterior a la nueva, en el mismo intervalo que tardó el fix anterior en llegar (así el movimiento se ve continuo, estilo Google Maps/Uber, sin adelantarse a datos reales ni acumular retraso). No pelea con el pan/zoom del mapa porque solo llama a `marker.setLngLat(...)` en cada frame — la misma API que usaría una actualización normal.
+- Zonas de estacionamiento — geocerca tipo `parking` (azul), solo admin puede crearlas, sin sirena.
+- Marcador "amenaza" con halo pulsante durante una alerta activa de proximidad/colisión; geocerca activa resaltada con pulso.
+- Auto-seguimiento (botón 🎯, persiste en `localStorage`) — sigue la posición propia sin forzar zoom; se apaga solo si el operador interactúa manualmente con el mapa. Al entrar una amenaza crítica, encuadra ambos vehículos por unos segundos antes de retomar el seguimiento normal.
+- "Más cercano" en el HUD del Operador se recalcula en el cliente (`packages/map-core/src/geometry.ts`, Haversine) usando la posición **local** propia contra la última posición conocida de cada vehículo — no espera el siguiente `proximity:distance_update` del servidor. Si esa última posición del otro vehículo ya es vieja (>10s, mismo umbral que el resto del sistema), se marca "(sin señal)" junto a la distancia. La alerta de proximidad/colisión en sí (sonido, banner, halo) sigue siendo la que dispara el servidor — esto solo adelanta el número informativo del HUD.
+
+**Continuidad offline (Operador):**
+La posición/velocidad propia ya no depende de la ida y vuelta al
+servidor — `useDeviceGeolocation.ts` usa la Geolocation API del
+navegador (`watchPosition`) como fuente primaria para "mi" marcador y
+HUD, funcionando incluso sin conexión. El resto de la flota sigue
+viniendo del servidor (no hay forma de verla sin conexión). Además:
+- Indicador propio "GPS local" en la barra superior, independiente de "Conectado al servidor".
+- Batería del dispositivo vía Battery Status API (`useBatteryLevel.ts`), cuando el navegador la expone.
+- Si el socket se cae más de 10s/20s, una alerta local (sin depender del servidor) avisa reducir velocidad / detenerse — mismos umbrales que `SignalLostService`.
+- **Filtro anti-teletransporte también en el navegador** — cada fix que entrega `watchPosition` pasa por una copia de `PositionFilterService` (`packages/map-core/src/positionFilter.ts`) antes de aceptarse. Sin esto, un salto físicamente implausible (glitch fix/float del RTK) que el backend ya descarta para lo que ve el resto de la flota se seguiría mostrando sin filtrar en la pantalla del propio operador — más visible todavía ahora que el marcador anima ("glide") entre posiciones. Misma lógica que la copia del backend (`apps/backend/src/services/telemetry/PositionFilterService.ts`); no comparten un paquete en común porque el backend no puede depender de `map-core` (trae React/MapLibre) — si se ajusta el criterio en un lado, replicar en el otro.
+- Es una solución puente en el navegador; RTK y anti-spoofing quedan para la futura app móvil nativa.
+
+**Captura extendida de sensores del navegador (Operador):**
+Traccar Client es una app nativa — solo manda lat/lon/velocidad/rumbo/precisión/batería
+por el protocolo OsmAnd (`/gps`), a la frecuencia que tenga configurada
+en la propia app (hoy 1 fix/segundo con el RTK conectado — es ajuste
+de Traccar, no del backend). Todo lo demás que el navegador puede ver
+(red, memoria, pantalla, orientación/movimiento, almacenamiento) viaja
+por un canal separado: `useDeviceSensorReporter.ts` → `POST
+/api/devices/:deviceId/sensors` → hypertable JSONB propia
+`device_sensor_snapshots` (independiente de `positions`; compresión a
+1 día, retención 30 días — son datos exploratorios, no historial
+operativo). Consulta de verificación (admin/supervisor): `GET
+/api/devices/:deviceId/sensors?limit=50`.
+
+Optimizado en dos niveles para no duplicar ni repetir dato inútil:
+- **Perfil fijo, una sola vez por sesión** (`source='browser_profile'`):
+  `userAgent`, `platform`, `language(s)`, `hardwareConcurrency`,
+  `deviceMemoryGb` — no cambian dentro de una misma sesión, no tiene
+  sentido repetirlos cada ciclo.
+- **Snapshot variable, cada 30s** (`source='browser'`): `network`,
+  `battery`, `screen`, `storage`, `deviceOrientation`/`deviceMotion`,
+  `onLine`, `visibilityState` — sí cambian, pero no lo bastante rápido
+  como para necesitar 1Hz (batería/red no se mueven en 1 segundo).
+- **Sin `geolocation` en este snapshot** — lat/lon/precisión/altitud/
+  rumbo/velocidad del propio dispositivo ya quedan en `positions` a la
+  frecuencia real del GPS/RTK (vía Traccar); guardarlos otra vez aquí
+  cada 30s sería el mismo dato dos veces sin ganar nada.
+
+**Zona horaria de la base de datos:** fijada a `America/Mexico_City`
+(`ALTER DATABASE gaga_gps SET timezone ...` en `001_init.sql`, aplica
+también a cualquier instalación nueva) — la operación es de un solo
+sitio (Colima), así que cualquier consulta directa por psql/DBeaver
+muestra la hora local en vez de UTC. No afecta lo guardado ni al
+backend: `TIMESTAMPTZ` siempre representa el mismo instante real sin
+importar la zona de sesión, y el driver `pg` nunca formatea fechas
+como texto.
+
+**Panel de Administración** — mismo rediseño visual/paleta que
+Operador y Supervisor (`admin.css`, sin tocar la lógica de ninguna
+sección). Nav lateral de ancho fijo pasa a franja horizontal con
+scroll bajo 860px, en vez de robarle ancho al contenido. Las tarjetas
+de métricas del dashboard usan grid (`.card:has(.metric)`) en vez de
+`inline-block`, que dejaba huecos irregulares al envolver. Cero
+emojis — incluye el selector de modo de mapa compartido
+(`MapModeSelector`, `packages/ui`), que también los tenía y afectaba
+de paso a Operador/Supervisor.
+
+**Panel de Supervisor** — ajustes adicionales de espacio/adaptabilidad
+sobre el rediseño ya existente, sin quitar ningún dato (sigue
+mostrando el detalle completo de cada vehículo): panel lateral con
+ancho fluido (`clamp()`) en vez de fijo, panel flotante de detalle con
+`max-height`/scroll propio para que nunca se corte información en
+pantallas bajas, y en pantallas angostas el layout pasa de columnas a
+panel superior + mapa abajo (mismo criterio que la nav de Admin).
+
+**Panel de Operador** — mismo rediseño visual que Supervisor (paleta
+oscura neutra compartida vía `packages/ui/src/tokens.ts`, sin neón ni
+emojis). Estructura por flexbox real en vez de posiciones fijas
+adivinadas: encabezado (identidad + acciones en una fila, estado de
+conexión/GPS en otra, ambas con `flex-wrap` para no recortarse en
+pantallas angostas), área de mapa flexible (selector de modo y
+botones flotantes de centrado/auto-seguimiento viven **dentro** de esa
+misma caja, nunca pueden quedar por encima de la barra inferior sin
+importar cuántas filas ocupe), y barra de HUD inferior en grid
+(`repeat(auto-fit, minmax(...))`) que se reacomoda sola en vez de
+comprimir texto — pensado para 7" pero sin ningún tamaño fijo que
+rompa en otras resoluciones. Los iconos de centrado/auto-seguimiento
+pasaron de emoji a SVG inline.
+
+**Panel de Supervisor** — rediseño visual (paleta oscura neutra, sin
+neón ni emojis, secciones con bordes y contraste claros) y modelo de
+alertas nuevo: en vez de una lista que crece con cada re-disparo de
+la misma alerta (`useSupervisorSocket.ts` antes hacía `addAlert` en
+cada evento), ahora se mantiene un mapa de **alertas activas**
+(`Record<string, AlertEntry>`), una por clave estable
+(`colisión:V1-V2`, `señal:V3`, `geocerca:V4`, `paro_preventivo`) — un
+nuevo disparo de la misma alerta actualiza la entrada existente en
+vez de duplicarla, y desaparece sola cuando el evento `nivel 0`/
+"resuelto" llega. El contador de "Alertas" ahora es simplemente el
+tamaño de ese mapa (antes solo subía). Al seleccionar un vehículo:
+- Operador con turno activo (nombre, hora de inicio) vía `/api/operator-sessions/active`.
+- Rumbo, precisión GPS, altitud y batería, además de velocidad/posición.
+- El estado online/offline se calcula en el cliente contra `lastSeen` (nunca confía en un campo persistido) — ver siguiente sección para el equivalente en Admin.
+
+**Panel de administración — estado online/offline corregido:**
+`devices.status` se quedaba en `'online'` para siempre tras el primer
+reporte (`DeviceManager.markOffline` existía pero nunca se llamaba).
+Ahora `SignalLostService` lo marca `offline` al entrar a nivel 1 o 2,
+y al arrancar el backend siembra su reloj de última señal desde
+`devices.last_update` (`hydrate()`) para no "olvidar" dispositivos ya
+inactivos antes de un reinicio.
+
 ## Acceso directo a PostgreSQL y Redis
 
 **PostgreSQL** (contenedor `gaga-postgres`, puerto `5432`):
@@ -1262,23 +1446,19 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota (JSON por disposit
 
 ## Limitaciones conocidas / trabajo futuro
 
-- **⚠️ Bug pre-existente encontrado durante la migración a TypeScript
-  (RF-ALR-10, anticolisión)** — `CollisionRiskService` asume
-  `deviceId` numérico (`Math.min(pos1.deviceId, pos2.deviceId)` para
-  construir la clave interna del par de vehículos), pero
-  `PositionProcessor` en realidad le pasa el `deviceId` como
-  **string** (el `unique_id` del dispositivo, ej. `"CAMION-01"`).
-  `Math.min("CAMION-01", "CAMION-02")` da `NaN` — es decir, la clave
-  de deduplicación de alertas (`"NaN-NaN"`) es probablemente la misma
-  para **todos los pares de vehículos** en vez de una por par. Esto
-  ya existía antes de esta migración (TypeScript solo lo hizo
-  visible al tipar el módulo); se dejó **intacto a propósito** — ver
-  `apps/backend/src/services/telemetry/PositionProcessor.ts` (cast
-  explícito documentado en el código) — porque corregirlo es un
-  cambio de comportamiento en un módulo de seguridad que merece su
-  propia decisión consciente, tests dedicados y verificación, no un
-  ajuste de paso durante una conversión de lenguaje. Pendiente de
-  decidir y arreglar por separado.
+- ~~Bug de `CollisionRiskService` con `Math.min`/deviceId de texto~~
+  **corregido** — la clave interna del par ahora se arma ordenando
+  los IDs como texto (`[id1, id2].sort().join('-')`), no con
+  `Math.min`/`Math.max` (que daba `NaN` para IDs no numéricos y
+  colapsaba todos los pares en una sola llave). Junto con este fix
+  se corrigió también la limpieza de la alerta: antes dependía de
+  "trayectorias convergiendo" en cada tick, lo que causaba parpadeo
+  con vehículos casi estáticos (ruido de GPS haciendo que la
+  convergencia oscile); ahora solo se limpia cuando la distancia
+  realmente crece más allá del umbral (con margen de histéresis). Se
+  agregó además `supervisor:collision`/`supervisor:proximity` nivel
+  `0` cuando una alerta se resuelve — antes el supervisor nunca se
+  enteraba.
 - **PostGIS** está instalado (`CREATE EXTENSION postgis`) pero
   **no se usa** — todos los cálculos de distancia/geocercas usan
   la fórmula de Haversine en JavaScript sobre columnas
@@ -1290,6 +1470,17 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota (JSON por disposit
   offline en este proyecto. Tampoco hay cola de procesamiento — una
   importación a la vez.
 - **Exportación a PDF** de reportes no está implementada — solo CSV.
+- **Estimación de velocidad** — el suavizado es un EMA simple (ver
+  [Estimación de velocidad](#estimación-de-velocidad)), no un filtro
+  de Kalman con modelo de movimiento; suficiente para corregir picos
+  del GPS, pero es un primer nivel, no el óptimo teórico.
+- **GPS local del navegador** — es un puente para que Operador
+  funcione offline hoy (ver [Panel de Operador y Supervisor](#panel-de-operador-y-supervisor));
+  no reemplaza RTK ni detecta mock-location — eso queda para la app
+  móvil nativa planeada.
+- **Battery Status API** — deprecada/restringida en varios navegadores
+  (Chrome de escritorio ya no la expone); el dato de batería en el
+  HUD del operador simplemente no aparece donde no está disponible.
 - **Filtro de posiciones GPS** — el umbral adaptativo (ver
   [Filtro de posiciones GPS](#filtro-de-posiciones-gps-anti-teletransporte-rtkntrip))
   protege muy bien el caso dominante (maquinaria lenta), pero para

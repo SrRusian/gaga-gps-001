@@ -24,6 +24,14 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
+-- Zona horaria de presentación de la base — la operación es de un
+-- solo sitio (Colima, México). No afecta lo guardado: TIMESTAMPTZ
+-- siempre representa el mismo instante real sin importar la zona de
+-- sesión; esto solo cambia cómo se ve al consultar por psql/DBeaver
+-- directo (el backend nunca formatea fechas como texto, así que no
+-- le afecta).
+ALTER DATABASE gaga_gps SET timezone TO 'America/Mexico_City';
+
 -- ─────────────────────────────────────────────────────────────
 -- Dispositivos (tabletas Traccar Client)
 -- ─────────────────────────────────────────────────────────────
@@ -99,6 +107,40 @@ SELECT add_compression_policy('positions', INTERVAL '7 days', if_not_exists => T
 SELECT add_retention_policy('positions', INTERVAL '1 year', if_not_exists => TRUE);
 
 -- ─────────────────────────────────────────────────────────────
+-- Snapshots de sensores del navegador — batería, red, memoria,
+-- pantalla, orientación/movimiento, almacenamiento, etc. Cuerpo
+-- libre en JSONB (mismo criterio que `attributes` arriba) porque
+-- el set de sensores disponibles crece/cambia con cada navegador
+-- y no vale la pena una columna por sensor. Hypertable propia,
+-- separada de `positions`, porque el operador la reporta con su
+-- propio ciclo (cada 30s) independiente de cada fix GPS.
+-- ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS device_sensor_snapshots (
+  id          BIGSERIAL,
+  device_id   VARCHAR(255) NOT NULL REFERENCES devices(unique_id),
+  source      VARCHAR(20) NOT NULL DEFAULT 'browser',
+  data        JSONB NOT NULL DEFAULT '{}',
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (id, captured_at)
+);
+
+SELECT create_hypertable('device_sensor_snapshots', 'captured_at', if_not_exists => TRUE);
+
+CREATE INDEX IF NOT EXISTS idx_sensor_snapshots_device_time
+  ON device_sensor_snapshots (device_id, captured_at DESC);
+
+-- Igual que `positions`: comprime lo viejo, purga lo muy viejo —
+-- son datos exploratorios/de diagnóstico, no historial operativo
+-- crítico, así que la retención puede ser más corta.
+ALTER TABLE device_sensor_snapshots SET (
+  timescaledb.compress,
+  timescaledb.compress_segmentby = 'device_id',
+  timescaledb.compress_orderby = 'captured_at DESC'
+);
+SELECT add_compression_policy('device_sensor_snapshots', INTERVAL '1 day', if_not_exists => TRUE);
+SELECT add_retention_policy('device_sensor_snapshots', INTERVAL '30 days', if_not_exists => TRUE);
+
+-- ─────────────────────────────────────────────────────────────
 -- Geocercas — círculo, polígono o polilínea/corredor.
 -- Círculo usa center_lat/center_lon/radius_meters; polígono y
 -- polilínea usan `geometry` en GeoJSON (JSONB) — estándar de facto
@@ -110,7 +152,7 @@ SELECT add_retention_policy('positions', INTERVAL '1 year', if_not_exists => TRU
 CREATE TABLE IF NOT EXISTS geofences (
   id                             SERIAL PRIMARY KEY,
   name                           VARCHAR(255) NOT NULL,
-  type                           VARCHAR(20) NOT NULL CHECK (type IN ('warning', 'danger')),
+  type                           VARCHAR(20) NOT NULL CHECK (type IN ('warning', 'danger', 'parking')),
   shape_type                     VARCHAR(20) NOT NULL DEFAULT 'circle'
                                   CHECK (shape_type IN ('circle', 'polygon', 'polyline')),
   center_lat                     DOUBLE PRECISION,

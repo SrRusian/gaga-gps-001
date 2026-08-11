@@ -4,9 +4,9 @@ import { adminApi } from '../api';
 import type { MapRow } from '../types';
 
 const MAP_STATUS_LABEL: Record<string, string> = {
-  processing: '⏳ Procesando…',
-  ready: '✅ Listo',
-  failed: '❌ Error',
+  processing: 'Procesando…',
+  ready: 'Listo',
+  failed: 'Error',
 };
 
 const CRS_OPTIONS = [
@@ -176,9 +176,11 @@ export function MapsSection() {
               <tr key={m.id}>
                 <td>
                   {m.name}
-                  {m.active ? ' ⭐' : ''}
+                  {m.active && <span className="ad-badge">Activo</span>}
                 </td>
-                <td title={m.error_message || ''}>{MAP_STATUS_LABEL[m.status] || m.status}</td>
+                <td className={`status-${m.status}`} title={m.error_message || ''}>
+                  {MAP_STATUS_LABEL[m.status] || m.status}
+                </td>
                 <td>
                   {m.source_crs || '-'}
                   {m.crs_auto_detected ? ' (auto)' : ''}

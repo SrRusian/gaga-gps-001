@@ -146,7 +146,8 @@ interface FeatureConversionResult {
 function featureToGeofenceInput(feature: Feature, index: number): FeatureConversionResult {
   const props: Record<string, unknown> = feature.properties || {};
   const name = (props.name as string) || `Geocerca importada ${index + 1}`;
-  const type: GeofenceType = props.type === 'danger' ? 'danger' : 'warning';
+  const type: GeofenceType =
+    props.type === 'danger' ? 'danger' : props.type === 'parking' ? 'parking' : 'warning';
   const geometry = feature.geometry;
 
   if (!geometry) return { error: `Feature ${index + 1}: sin geometría` };

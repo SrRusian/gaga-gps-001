@@ -21,11 +21,15 @@ import type {
   GeofenceClearPayload,
   PreventiveStopActivePayload,
   PreventiveStopClearPayload,
+  ProximityClearPayload,
+  ProximityDistanceUpdatePayload,
+  ProximityPayload,
   SignalLostPayload,
   SignalRecoveredPayload,
   SupervisorCollisionPayload,
   SupervisorGeofenceAlertPayload,
   SupervisorPreventiveStopPayload,
+  SupervisorProximityPayload,
   SupervisorSignalLostPayload,
 } from './alerts';
 import type { StaticEquipment } from './equipment';
@@ -50,6 +54,7 @@ export interface ServerToClientEvents {
 
   'alert:critical': (payload: GeofenceAlertPayload) => void;
   'alert:warning': (payload: GeofenceAlertPayload) => void;
+  'alert:info': (payload: GeofenceAlertPayload) => void;
   'alert:clear': (payload: GeofenceClearPayload) => void;
   'supervisor:alert': (payload: SupervisorGeofenceAlertPayload) => void;
 
@@ -62,6 +67,12 @@ export interface ServerToClientEvents {
   'collision:critical': (payload: CollisionPayload) => void;
   'collision:clear': (payload: CollisionClearPayload) => void;
   'supervisor:collision': (payload: SupervisorCollisionPayload) => void;
+
+  'proximity:distance_update': (payload: ProximityDistanceUpdatePayload) => void;
+  'proximity:warning': (payload: ProximityPayload) => void;
+  'proximity:critical': (payload: ProximityPayload) => void;
+  'proximity:clear': (payload: ProximityClearPayload) => void;
+  'supervisor:proximity': (payload: SupervisorProximityPayload) => void;
 
   'fleet:preventive_stop': (payload: PreventiveStopActivePayload) => void;
   'fleet:preventive_stop_clear': (payload: PreventiveStopClearPayload) => void;

@@ -4,6 +4,7 @@ import {
   AlertBanner,
   Button,
   ConnectionStatusDot,
+  formatAccuracy,
   MapModeSelector,
   StatCard,
   VehicleCard,
@@ -12,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './supervisor.css';
 import { MapView, type MapViewHandle } from './MapView';
+import { useActiveOperatorSession } from './useActiveOperatorSession';
 import { useSupervisorSocket } from './useSupervisorSocket';
 
 const OFFLINE_THRESHOLD_MS = 45000;
@@ -81,11 +83,12 @@ export default function SupervisorApp() {
 
   const detail = selectedVehicle ? fleet[selectedVehicle] : null;
   const detailOffline = detail ? now.getTime() - detail.lastSeen > OFFLINE_THRESHOLD_MS : false;
+  const activeSession = useActiveOperatorSession(selectedVehicle);
 
   return (
     <div className="sup-app">
       <header className="sup-header">
-        <h1>🛰️ GAGA GPS — Panel de Supervisión</h1>
+        <h1>GAGA GPS — Panel de Supervisión</h1>
         <div className="sup-header-right">
           <span>{now.toLocaleTimeString('es-MX')}</span>
           <div className="sup-connection">
@@ -111,34 +114,38 @@ export default function SupervisorApp() {
           <div className="sup-stop-section">
             {!stopStatus.active ? (
               <Button variant="danger" className="sup-stop-btn" onClick={handleActivateStop}>
-                🛑 PARADA PREVENTIVA COLECTIVA
+                Parada preventiva colectiva
               </Button>
             ) : (
-              <Button
-                variant="primary"
-                className="sup-stop-btn"
-                style={{ background: '#00aa44' }}
-                onClick={handleDeactivateStop}
-              >
-                ✅ REANUDAR OPERACIÓN
+              <Button variant="primary" className="sup-stop-btn" onClick={handleDeactivateStop}>
+                Reanudar operación
               </Button>
             )}
             <div className={`sup-stop-status${stopStatus.active ? ' active' : ''}`}>
               {stopStatus.active
-                ? `🛑 ACTIVA${stopStatus.reason ? ` — ${stopStatus.reason}` : ''}`
+                ? `Activa${stopStatus.reason ? ` — ${stopStatus.reason}` : ''}`
                 : 'Sistema en operación normal'}
             </div>
           </div>
 
           <div className="sup-alerts-section">
-            <div className="sup-section-header">Alertas recientes</div>
-            {alerts.length === 0 ? (
-              <div className="sup-alerts-empty">Sin alertas activas</div>
-            ) : (
-              alerts.map((a) => (
-                <AlertBanner key={a.id} severity={a.severity} message={a.message} time={a.time} />
-              ))
-            )}
+            <div className="sup-section-header">
+              Alertas activas{alertCount > 0 ? ` (${alertCount})` : ''}
+            </div>
+            <div className="sup-alerts-list">
+              {alerts.length === 0 ? (
+                <div className="sup-alerts-empty">Sin alertas activas</div>
+              ) : (
+                alerts.map((a) => (
+                  <AlertBanner
+                    key={a.key}
+                    severity={a.severity}
+                    message={a.message}
+                    time={`Desde ${a.since}`}
+                  />
+                ))
+              )}
+            </div>
           </div>
 
           <div className="sup-section-header">Vehículos registrados</div>
@@ -188,14 +195,35 @@ export default function SupervisorApp() {
               </div>
               <div className="sup-detail-row">
                 <span className="sup-detail-label">Estado</span>
-                <span className="sup-detail-value">
-                  {detailOffline ? '🔴 Sin señal' : '🟢 En línea'}
+                <span className="sup-detail-value sup-detail-status">
+                  <ConnectionStatusDot connected={!detailOffline} />
+                  {detailOffline ? 'Sin señal' : 'En línea'}
                 </span>
               </div>
+              <div className="sup-detail-row">
+                <span className="sup-detail-label">Operador</span>
+                <span className="sup-detail-value">
+                  {activeSession ? activeSession.user_name : 'Sin turno abierto'}
+                </span>
+              </div>
+              {activeSession && (
+                <div className="sup-detail-row">
+                  <span className="sup-detail-label">Turno iniciado</span>
+                  <span className="sup-detail-value">
+                    {new Date(activeSession.started_at).toLocaleString('es-MX')}
+                  </span>
+                </div>
+              )}
               <div className="sup-detail-row">
                 <span className="sup-detail-label">Velocidad</span>
                 <span className="sup-detail-value">
                   {Math.round((detail.speed || 0) * 3.6)} km/h
+                </span>
+              </div>
+              <div className="sup-detail-row">
+                <span className="sup-detail-label">Rumbo</span>
+                <span className="sup-detail-value">
+                  {detail.course !== undefined ? `${Math.round(detail.course)}°` : '--'}
                 </span>
               </div>
               <div className="sup-detail-row">
@@ -205,6 +233,24 @@ export default function SupervisorApp() {
               <div className="sup-detail-row">
                 <span className="sup-detail-label">Longitud</span>
                 <span className="sup-detail-value">{detail.longitude?.toFixed(6)}</span>
+              </div>
+              <div className="sup-detail-row">
+                <span className="sup-detail-label">Precisión GPS</span>
+                <span className="sup-detail-value">{formatAccuracy(detail.accuracy)}</span>
+              </div>
+              <div className="sup-detail-row">
+                <span className="sup-detail-label">Altitud</span>
+                <span className="sup-detail-value">
+                  {detail.altitude !== undefined ? `${Math.round(detail.altitude)} m` : '--'}
+                </span>
+              </div>
+              <div className="sup-detail-row">
+                <span className="sup-detail-label">Batería</span>
+                <span className="sup-detail-value">
+                  {detail.battery !== undefined && detail.battery !== null
+                    ? `${Math.round(detail.battery)}%`
+                    : '--'}
+                </span>
               </div>
               <div className="sup-detail-row">
                 <span className="sup-detail-label">Última actualización</span>

@@ -1,4 +1,7 @@
 export * from './useMapLibreMap';
+export * from './geometry';
+export * from './positionFilter';
 export * from './mapMode';
 export * from './satelliteLayers';
 export * from './geofenceLayer';
+export * from './vehicleMarker';

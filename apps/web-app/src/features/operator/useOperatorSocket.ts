@@ -4,9 +4,26 @@ import { useEffect, useRef, useState } from 'react';
 import { useAlertSound } from './useAlertSound';
 
 export interface AlertState {
-  severity: 'warning' | 'danger' | null;
+  severity: 'warning' | 'danger' | 'info' | null;
   message: string;
 }
+
+export interface NearestVehicle {
+  deviceId: string;
+  distance: number;
+}
+
+export interface ThreatVehicle {
+  deviceId: string;
+  distance: number;
+}
+
+// Mismos umbrales que SignalLostService.ts (backend) — mantenidos en
+// sincronía a propósito, ver comentario ahí. Estos corren en el
+// cliente porque, si el propio socket está caído, el servidor no
+// tiene forma de empujarle `signal:lost:level1/2` a este operador.
+const LOCAL_DISCONNECT_LEVEL1_MS = 10000;
+const LOCAL_DISCONNECT_LEVEL2_MS = 20000;
 
 export function useOperatorSocket(deviceId: string | null) {
   const [connected, setConnected] = useState(false);
@@ -16,12 +33,19 @@ export function useOperatorSocket(deviceId: string | null) {
   const [myPosition, setMyPosition] = useState<Position | null>(null);
   const [myOnline, setMyOnline] = useState(false);
   const [alert, setAlert] = useState<AlertState>({ severity: null, message: '' });
+  const [nearestVehicle, setNearestVehicle] = useState<NearestVehicle | null>(null);
+  const [threat, setThreat] = useState<ThreatVehicle | null>(null);
+  const [activeGeofenceId, setActiveGeofenceId] = useState<number | null>(null);
   const { playWarningSound, playDangerSound, stopSound } = useAlertSound();
 
   // Refs para no re-suscribir el socket cada vez que cambian (los
   // handlers de socket.io capturan closures al momento de registrarse).
   const soundsRef = useRef({ playWarningSound, playDangerSound, stopSound });
   soundsRef.current = { playWarningSound, playDangerSound, stopSound };
+
+  // Detección local de desconexión — independiente del servidor.
+  const disconnectedAtRef = useRef<number | null>(null);
+  const localSignalLevelRef = useRef<'none' | 'level1' | 'level2'>('none');
 
   useEffect(() => {
     // Sin vehículo registrado no hay "mi posición" ni turno posible —
@@ -33,12 +57,22 @@ export function useOperatorSocket(deviceId: string | null) {
 
     const showWarning = (message: string) => setAlert({ severity: 'warning', message });
     const showDanger = (message: string) => setAlert({ severity: 'danger', message });
+    const showInfo = (message: string) => setAlert({ severity: 'info', message });
     const clearAlertState = () => setAlert({ severity: null, message: '' });
 
-    socket.on('connect', () => setConnected(true));
+    socket.on('connect', () => {
+      setConnected(true);
+      disconnectedAtRef.current = null;
+      if (localSignalLevelRef.current !== 'none') {
+        localSignalLevelRef.current = 'none';
+        clearAlertState();
+        soundsRef.current.stopSound();
+      }
+    });
     socket.on('disconnect', () => {
       setConnected(false);
       setMyOnline(false);
+      disconnectedAtRef.current = Date.now();
     });
 
     socket.on('maps:active_update', ({ maps }) => setActiveMaps(maps));
@@ -64,18 +98,28 @@ export function useOperatorSocket(deviceId: string | null) {
     socket.on('alert:warning', (data) => {
       if (data.deviceId === deviceId) {
         showWarning(data.message);
+        setActiveGeofenceId(data.geofenceId);
         soundsRef.current.playWarningSound();
       }
     });
     socket.on('alert:critical', (data) => {
       if (data.deviceId === deviceId) {
         showDanger(data.message);
+        setActiveGeofenceId(data.geofenceId);
         soundsRef.current.playDangerSound(data.loop);
+      }
+    });
+    // Zonas de estacionamiento — solo visual, sin sonido/sirena.
+    socket.on('alert:info', (data) => {
+      if (data.deviceId === deviceId) {
+        showInfo(data.message);
+        setActiveGeofenceId(data.geofenceId);
       }
     });
     socket.on('alert:clear', (data) => {
       if (data.deviceId === deviceId) {
         clearAlertState();
+        setActiveGeofenceId(null);
         soundsRef.current.stopSound();
       }
     });
@@ -102,10 +146,36 @@ export function useOperatorSocket(deviceId: string | null) {
     socket.on('collision:critical', (data) => {
       showDanger(data.message);
       soundsRef.current.playDangerSound(data.loop);
+      const otherId = String(data.deviceId1) === deviceId ? data.deviceId2 : data.deviceId1;
+      setThreat({ deviceId: String(otherId), distance: data.distance });
     });
     socket.on('collision:clear', () => {
       clearAlertState();
       soundsRef.current.stopSound();
+      setThreat(null);
+    });
+
+    // Proximidad fuera de ruta — VehicleProximityService
+    socket.on('proximity:distance_update', (data) => {
+      if (data.deviceId === deviceId) {
+        setNearestVehicle({ deviceId: data.nearestDeviceId, distance: data.distance });
+      }
+    });
+    socket.on('proximity:warning', (data) => {
+      showWarning(data.message);
+      soundsRef.current.playWarningSound();
+    });
+    socket.on('proximity:critical', (data) => {
+      showDanger(data.message);
+      soundsRef.current.playDangerSound(data.loop);
+      const otherId = data.deviceId1 === deviceId ? data.deviceId2 : data.deviceId1;
+      setThreat({ deviceId: otherId, distance: data.distance });
+    });
+    socket.on('proximity:clear', () => {
+      clearAlertState();
+      soundsRef.current.stopSound();
+      setThreat(null);
+      setNearestVehicle(null);
     });
 
     // RF-ALR-12 — aproximación a equipo estático
@@ -148,7 +218,47 @@ export function useOperatorSocket(deviceId: string | null) {
     };
   }, [deviceId]);
 
+  // Detección local de desconexión prolongada — corre siempre que
+  // haya un vehículo registrado, sin depender de que el socket esté
+  // vivo (es justamente el caso que cubre: socket caído).
+  useEffect(() => {
+    if (!deviceId) return;
+
+    const interval = setInterval(() => {
+      if (disconnectedAtRef.current === null) return;
+      const elapsed = Date.now() - disconnectedAtRef.current;
+
+      if (elapsed >= LOCAL_DISCONNECT_LEVEL2_MS && localSignalLevelRef.current !== 'level2') {
+        localSignalLevelRef.current = 'level2';
+        setAlert({
+          severity: 'danger',
+          message: 'SIN CONEXIÓN PROLONGADA — DETÉNGASE Y REPORTE POR RADIO',
+        });
+        playDangerSound(true);
+      } else if (elapsed >= LOCAL_DISCONNECT_LEVEL1_MS && localSignalLevelRef.current === 'none') {
+        localSignalLevelRef.current = 'level1';
+        setAlert({ severity: 'warning', message: 'SIN CONEXIÓN — REDUZCA VELOCIDAD' });
+        playWarningSound();
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- playWarningSound/playDangerSound son estables por render (ver useAlertSound), no hace falta re-suscribir el interval por ellas
+  }, [deviceId]);
+
   const activeCount = Object.keys(fleet).length;
 
-  return { connected, fleet, geofences, activeMaps, myPosition, myOnline, alert, activeCount };
+  return {
+    connected,
+    fleet,
+    geofences,
+    activeMaps,
+    myPosition,
+    myOnline,
+    alert,
+    activeCount,
+    nearestVehicle,
+    threat,
+    activeGeofenceId,
+  };
 }

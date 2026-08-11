@@ -6,20 +6,20 @@ import {
   goToLogin,
 } from '@gaga-gps/client';
 import type { ActiveMap, Geofence, Position, PreventiveStopStatus } from '@gaga-gps/shared-types';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 export interface FleetVehicle extends Position {
   lastSeen: number;
 }
 
 export interface AlertEntry {
-  id: number;
+  key: string;
   message: string;
   severity: 'danger' | 'warning' | 'info';
-  time: string;
+  since: string;
 }
 
-const MAX_ALERTS = 10;
+const SEVERITY_RANK: Record<AlertEntry['severity'], number> = { danger: 0, warning: 1, info: 2 };
 
 const api = createApiClient({
   getToken: getStoredToken,
@@ -29,28 +29,37 @@ const api = createApiClient({
   },
 });
 
+function pairKey(prefix: string, a: string | number, b: string | number): string {
+  return `${prefix}:${[a, b].sort().join('-')}`;
+}
+
 export function useSupervisorSocket() {
   const [connected, setConnected] = useState(false);
   const [fleet, setFleet] = useState<Record<string, FleetVehicle>>({});
   const [geofences, setGeofences] = useState<Geofence[]>([]);
   const [activeMaps, setActiveMaps] = useState<ActiveMap[]>([]);
-  const [alerts, setAlerts] = useState<AlertEntry[]>([]);
-  const [alertCount, setAlertCount] = useState(0);
+  const [activeAlerts, setActiveAlerts] = useState<Record<string, AlertEntry>>({});
   const [stopStatus, setStopStatus] = useState<{ active: boolean; reason?: string }>({
     active: false,
   });
-  const alertIdRef = useRef(0);
 
-  const addAlert = useCallback((message: string, severity: AlertEntry['severity']) => {
-    alertIdRef.current += 1;
-    const entry: AlertEntry = {
-      id: alertIdRef.current,
-      message,
-      severity,
-      time: new Date().toLocaleTimeString('es-MX'),
-    };
-    setAlerts((prev) => [entry, ...prev].slice(0, MAX_ALERTS));
-    setAlertCount((prev) => prev + 1);
+  const upsertAlert = useCallback(
+    (key: string, message: string, severity: AlertEntry['severity']) => {
+      setActiveAlerts((prev) => ({
+        ...prev,
+        [key]: { key, message, severity, since: prev[key]?.since ?? new Date().toLocaleTimeString('es-MX') },
+      }));
+    },
+    [],
+  );
+
+  const resolveAlert = useCallback((key: string) => {
+    setActiveAlerts((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -74,35 +83,59 @@ export function useSupervisorSocket() {
     });
 
     socket.on('supervisor:alert', (data) => {
-      if (data.action === 'entered') {
-        addAlert(`🚨 Vehículo ${data.deviceId} — ${data.geofenceName ?? ''}`, 'danger');
+      const key = `geofence:${data.deviceId}`;
+      if (data.action !== 'entered') {
+        resolveAlert(key);
+        return;
       }
+      const severity =
+        data.type === 'geofence_red' ? 'danger' : data.type === 'geofence_parking' ? 'info' : 'warning';
+      upsertAlert(key, `Vehículo ${data.deviceId} — ${data.geofenceName ?? 'geocerca'}`, severity);
     });
 
     socket.on('supervisor:signal_lost', (data) => {
-      if (data.level === 1) {
-        addAlert(`⚠️ Vehículo ${data.deviceId} sin señal (${data.elapsedSeconds}s)`, 'warning');
-      } else if (data.level === 2) {
-        addAlert(`🚨 EMERGENCIA — Vehículo ${data.deviceId} desconectado`, 'danger');
-      } else if (data.level === 0) {
-        addAlert(`✅ Vehículo ${data.deviceId} reconectado`, 'info');
-        setAlertCount((prev) => Math.max(0, prev - 1));
+      const key = `signal:${data.deviceId}`;
+      if (data.level === 0) {
+        resolveAlert(key);
+      } else if (data.level === 1) {
+        upsertAlert(key, `Vehículo ${data.deviceId} sin señal (${data.elapsedSeconds}s)`, 'warning');
+      } else {
+        upsertAlert(key, `Vehículo ${data.deviceId} sin señal — emergencia`, 'danger');
       }
     });
 
     socket.on('supervisor:collision', (data) => {
-      const label = data.level === 2 ? '🚨 COLISIÓN INMINENTE' : '⚠️ Proximidad';
-      addAlert(
-        `${label} — V${data.deviceId1} y V${data.deviceId2} a ${data.distance}m`,
+      const key = pairKey('collision', data.deviceId1, data.deviceId2);
+      if (data.level === 0) {
+        resolveAlert(key);
+        return;
+      }
+      upsertAlert(
+        key,
+        `Colisión ${data.level === 2 ? 'inminente' : 'próxima'} — V${data.deviceId1} y V${data.deviceId2} a ${data.distance}m`,
+        data.level === 2 ? 'danger' : 'warning',
+      );
+    });
+
+    socket.on('supervisor:proximity', (data) => {
+      const key = pairKey('proximity', data.deviceId1, data.deviceId2);
+      if (data.level === 0) {
+        resolveAlert(key);
+        return;
+      }
+      upsertAlert(
+        key,
+        `Proximidad fuera de ruta — V${data.deviceId1} y V${data.deviceId2} a ${data.distance}m`,
         data.level === 2 ? 'danger' : 'warning',
       );
     });
 
     socket.on('supervisor:preventive_stop', (data) => {
+      const key = 'preventive_stop';
       if (data.active) {
-        addAlert(`🛑 PARADA PREVENTIVA ACTIVADA — ${data.reason ?? ''}`, 'danger');
+        upsertAlert(key, `Parada preventiva activada — ${data.reason ?? ''}`, 'danger');
       } else {
-        addAlert('✅ Parada preventiva desactivada', 'info');
+        resolveAlert(key);
       }
     });
 
@@ -116,7 +149,13 @@ export function useSupervisorSocket() {
     return () => {
       socket.disconnect();
     };
-  }, [addAlert]);
+  }, [upsertAlert, resolveAlert]);
+
+  const alerts = useMemo(
+    () => Object.values(activeAlerts).sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]),
+    [activeAlerts],
+  );
+  const alertCount = alerts.length;
 
   const activateStop = useCallback(async () => {
     await api.post<{ success: boolean; status: PreventiveStopStatus }>('/api/fleet/stop', {

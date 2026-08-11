@@ -1,142 +1,238 @@
 .op-app {
+  --op-bg: #0b0d10;
+  --op-surface: #14171c;
+  --op-surface-2: #1a1e24;
+  --op-border: #262b33;
+  --op-text: #e8eaed;
+  --op-text-muted: #8b949e;
+  --op-accent: #4f8ff0;
+  --op-danger: #e5484d;
+  --op-warning: #f0a83c;
+  --op-info: #4f8ff0;
+
   position: fixed;
   inset: 0;
-  background: #1a1a2e;
-  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  background: var(--op-bg);
+  color: var(--op-text);
   overflow: hidden;
+  font-size: 14px;
 }
 
-#op-status-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 50px;
-  background: rgba(0, 0, 0, 0.85);
+/* ── Encabezado — dos filas que se acomodan solas, nunca se recortan
+   ni se sobreponen porque reservan su propio espacio real (flexbox),
+   no coordenadas fijas adivinadas. ── */
+.op-header {
+  flex-shrink: 0;
+  background: var(--op-surface);
+  border-bottom: 1px solid var(--op-border);
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.op-header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
-  z-index: 1000;
-  border-bottom: 2px solid #00ff88;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.op-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
 }
 #op-device-name {
-  font-size: 16px;
-  font-weight: bold;
-  color: #00ff88;
-}
-#op-connection-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-#op-vehicle-count {
-  font-size: 13px;
-  color: #aaaaaa;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--op-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 #op-operator-name {
   font-size: 12px;
-  color: #aaa;
+  color: var(--op-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-#op-btn-end-shift {
-  background: none;
-  border: 1px solid #ff4444;
-  color: #ff4444;
-  font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
+.op-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
-#op-btn-register-device {
-  background: none;
-  border: 1px solid #00ff88;
-  color: #00ff88;
-  font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-#op-btn-logout {
-  background: none;
-  border: 1px solid #ff4444;
-  color: #ff4444;
-  font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
+#op-vehicle-count {
+  font-size: 12px;
+  color: var(--op-text-muted);
+  white-space: nowrap;
 }
 
-#op-map-container {
-  position: fixed;
-  top: 50px;
-  left: 0;
-  right: 0;
-  bottom: 60px;
-  z-index: 1;
+.op-status-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.op-status-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--op-text-muted);
+}
+.op-app .gg-connection-dot {
+  background: var(--op-danger);
+}
+.op-app .gg-connection-dot.connected {
+  background: var(--op-accent);
+}
+#op-gps-error {
+  font-size: 11px;
+  color: var(--op-warning);
+}
+
+.op-btn {
+  background: none;
+  border: 1px solid var(--op-border);
+  color: var(--op-text-muted);
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.op-btn:hover {
+  border-color: var(--op-accent);
+  color: var(--op-text);
+}
+.op-btn--danger:hover {
+  border-color: var(--op-danger);
+  color: var(--op-danger);
+}
+
+/* ── Área del mapa — único hijo flexible; todo lo flotante (selector
+   de mapa, botones de centrado/seguimiento) vive DENTRO de esta
+   misma caja, así nunca puede quedar por encima de la barra inferior
+   sin importar cuántas filas ocupe esa barra. ── */
+.op-map-area {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 #op-map {
   width: 100%;
   height: 100%;
 }
 
-#op-info-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 60px;
-  background: rgba(0, 0, 0, 0.85);
+.op-map-mode-selector-wrap {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+}
+.op-app .gg-map-mode-selector {
+  background: rgba(20, 23, 28, 0.92);
+  border-color: var(--op-border);
+}
+.op-app .gg-map-mode-btn {
+  color: var(--op-text-muted);
+}
+.op-app .gg-map-mode-btn.active {
+  background: var(--op-accent);
+  color: #0b0d10;
+}
+
+.op-floating-actions {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.op-fab {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--op-surface);
+  border: 1px solid var(--op-border);
+  color: var(--op-text-muted);
+  cursor: pointer;
   display: flex;
   align-items: center;
-  justify-content: space-around;
-  padding: 0 16px;
-  z-index: 1000;
-  border-top: 1px solid #333;
+  justify-content: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+.op-fab:hover {
+  border-color: var(--op-accent);
+  color: var(--op-text);
+}
+.op-fab.active {
+  border-color: var(--op-accent);
+  color: var(--op-accent);
+  background: var(--op-surface-2);
+}
+.op-fab svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ── Barra inferior de información — grid que se reacomoda solo en
+   pantallas angostas (7") en vez de comprimir texto hasta que se
+   traslape. Altura mínima, no fija, para que crecer a 2 filas nunca
+   recorte contenido. ── */
+#op-info-bar {
+  flex-shrink: 0;
+  background: var(--op-surface);
+  border-top: 1px solid var(--op-border);
+  padding: 10px 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 6px 12px;
 }
 .op-info-item {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  min-width: 0;
 }
 .op-info-label {
   font-size: 10px;
-  color: #888888;
+  color: var(--op-text-muted);
   text-transform: uppercase;
+  letter-spacing: 0.4px;
 }
 .op-info-value {
   font-size: 16px;
-  font-weight: bold;
-  color: #ffffff;
-}
-
-#op-map-mode-selector-wrap {
-  position: fixed;
-  top: 58px;
-  right: 10px;
-  z-index: 1000;
-}
-
-#op-btn-center {
-  position: fixed;
-  bottom: 75px;
-  right: 16px;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: #00ff88;
-  border: none;
-  color: #000;
-  font-size: 22px;
-  cursor: pointer;
-  z-index: 1000;
+  font-weight: 600;
+  color: var(--op-text);
   display: flex;
   align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  gap: 4px;
+  white-space: nowrap;
+}
+.op-info-value--online {
+  color: var(--op-accent);
+}
+.op-info-value--offline {
+  color: var(--op-text-muted);
+}
+#op-nearest-stale {
+  font-size: 10px;
+  color: var(--op-warning);
 }
 
+/* ── Alertas de pantalla completa — siguen fijas sobre todo lo demás
+   a propósito (deben verse sin importar qué esté pasando en el resto
+   del panel), pero con la paleta profesional en vez de neón. ── */
 #op-alert-overlay {
   display: none;
   position: fixed;
@@ -149,39 +245,47 @@
 }
 #op-alert-overlay.warning {
   display: block;
-  border: 8px solid #ffaa00;
-  animation: op-pulse-warning 1s infinite;
+  border: 6px solid var(--op-warning);
+  animation: op-pulse-warning 1.2s infinite;
 }
 #op-alert-overlay.danger {
   display: block;
-  border: 12px solid #ff2222;
-  background: rgba(255, 0, 0, 0.15);
-  animation: op-pulse-danger 0.5s infinite;
+  border: 10px solid var(--op-danger);
+  background: rgba(229, 72, 77, 0.12);
+  animation: op-pulse-danger 0.6s infinite;
 }
 
 #op-alert-message {
   display: none;
   position: fixed;
-  top: 60px;
+  top: 16px;
   left: 16px;
   right: 16px;
-  padding: 16px;
+  padding: 14px 18px;
   border-radius: 8px;
-  font-size: 18px;
-  font-weight: bold;
+  font-size: 16px;
+  font-weight: 600;
   text-align: center;
   z-index: 2001;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 #op-alert-message.warning {
   display: block;
-  background: #ffaa00;
-  color: #000;
+  background: var(--op-warning);
+  color: #1a1204;
 }
 #op-alert-message.danger {
   display: block;
-  background: #ff2222;
+  background: var(--op-danger);
   color: #fff;
-  font-size: 22px;
+  font-size: 18px;
+}
+#op-alert-message.info {
+  display: block;
+  background: var(--op-info);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 @keyframes op-pulse-warning {
@@ -190,7 +294,7 @@
     opacity: 1;
   }
   50% {
-    opacity: 0.4;
+    opacity: 0.35;
   }
 }
 @keyframes op-pulse-danger {
@@ -203,6 +307,7 @@
   }
 }
 
+/* ── Overlays de configuración/turno — misma paleta profesional ── */
 .op-full-overlay {
   display: none;
   position: fixed;
@@ -210,7 +315,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(10, 10, 20, 0.97);
+  background: rgba(11, 13, 16, 0.92);
   z-index: 3000;
   align-items: center;
   justify-content: center;
@@ -220,8 +325,8 @@
 }
 .op-overlay-card {
   position: relative;
-  background: #16213e;
-  border: 1px solid #333;
+  background: var(--op-surface);
+  border: 1px solid var(--op-border);
   border-radius: 10px;
   padding: 28px;
   width: 320px;
@@ -235,21 +340,22 @@
   padding: 4px 8px;
   background: none;
   border: none;
-  color: #888;
+  color: var(--op-text-muted);
   font-size: 16px;
   font-weight: normal;
 }
 .op-overlay-card button.op-overlay-close:hover {
-  color: #fff;
+  color: var(--op-text);
 }
 .op-overlay-card h2 {
-  color: #00ff88;
-  font-size: 18px;
+  color: var(--op-text);
+  font-size: 16px;
+  font-weight: 600;
   margin-bottom: 8px;
 }
 .op-overlay-card p {
   font-size: 13px;
-  color: #aaa;
+  color: var(--op-text-muted);
   margin-bottom: 16px;
   line-height: 1.4;
 }
@@ -257,35 +363,77 @@
   width: 100%;
   padding: 12px;
   margin-bottom: 10px;
-  background: #0d1117;
-  border: 1px solid #333;
+  background: var(--op-bg);
+  border: 1px solid var(--op-border);
   border-radius: 6px;
-  color: #fff;
+  color: var(--op-text);
   font-size: 15px;
 }
 .op-overlay-card button {
   width: 100%;
   padding: 12px;
-  background: #00ff88;
+  background: var(--op-accent);
   border: none;
   border-radius: 6px;
-  color: #0d1117;
-  font-weight: bold;
+  color: #0b0d10;
+  font-weight: 600;
   font-size: 15px;
   cursor: pointer;
 }
 .op-overlay-error {
-  color: #ff4444;
+  color: var(--op-danger);
   font-size: 13px;
   margin-top: 8px;
   min-height: 16px;
 }
 
-.op-vehicle-marker {
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  cursor: pointer;
+.vehicle-marker--threat {
+  animation: op-vehicle-threat-pulse 0.8s infinite;
+}
+@keyframes op-vehicle-threat-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 8px 4px rgba(229, 72, 77, 0.85);
+  }
+  50% {
+    box-shadow: 0 0 8px 12px rgba(229, 72, 77, 0.15);
+  }
+}
+
+/* ── Adaptativo — tableta angosta en vertical (7" portrait ~600px) ── */
+@media (max-width: 640px) {
+  .op-app {
+    font-size: 13px;
+  }
+  .op-header {
+    padding: 8px 12px;
+  }
+  #op-device-name {
+    font-size: 14px;
+  }
+  #op-info-bar {
+    padding: 8px 10px;
+    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  }
+  .op-info-value {
+    font-size: 14px;
+  }
+  .op-fab {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+/* ── Adaptativo — muy poca altura (7" landscape ~480-600px) ── */
+@media (max-height: 520px) {
+  .op-header {
+    padding: 6px 12px;
+    gap: 4px;
+  }
+  #op-info-bar {
+    padding: 6px 12px;
+  }
+  .op-info-value {
+    font-size: 14px;
+  }
 }

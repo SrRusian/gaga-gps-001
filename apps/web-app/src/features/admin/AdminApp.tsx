@@ -13,15 +13,15 @@ import { UsersSection } from './sections/UsersSection';
 import { useAdminAuth } from './useAdminAuth';
 
 const NAV_ITEMS = [
-  { id: 'dashboard', label: '📊 Dashboard' },
-  { id: 'devices', label: '📱 Dispositivos' },
-  { id: 'geofences', label: '🚧 Geocercas' },
-  { id: 'equipment', label: '🏗️ Equipo estático' },
-  { id: 'maps', label: '🛰️ Mapas' },
-  { id: 'history', label: '🕓 Historial' },
-  { id: 'reports', label: '📄 Reportes' },
-  { id: 'users', label: '👤 Usuarios' },
-  { id: 'system', label: '⚙️ Sistema' },
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'devices', label: 'Dispositivos' },
+  { id: 'geofences', label: 'Geocercas' },
+  { id: 'equipment', label: 'Equipo estático' },
+  { id: 'maps', label: 'Mapas' },
+  { id: 'history', label: 'Historial' },
+  { id: 'reports', label: 'Reportes' },
+  { id: 'users', label: 'Usuarios' },
+  { id: 'system', label: 'Sistema' },
 ] as const;
 
 type SectionId = (typeof NAV_ITEMS)[number]['id'];
@@ -52,20 +52,20 @@ export default function AdminApp() {
 
   return (
     <div className="ad-app">
-      <div className="ad-header">
-        <h1>🛰️ GAGA GPS — Panel Admin</h1>
+      <header className="ad-header">
+        <h1>GAGA GPS — Panel Admin</h1>
         <div className="ad-header-right">
-          <span>
-            {user.name} ({user.role})
+          <span className="ad-user">
+            {user.name} <span className="ad-user-role">({user.role})</span>
           </span>
           <button className="ad-logout-btn" onClick={logout}>
             Salir
           </button>
         </div>
-      </div>
+      </header>
 
       <div className="ad-body">
-        <div className="ad-nav">
+        <nav className="ad-nav">
           {NAV_ITEMS.map((item) => (
             <button
               key={item.id}
@@ -75,11 +75,11 @@ export default function AdminApp() {
               {item.label}
             </button>
           ))}
-        </div>
+        </nav>
 
-        <div className="ad-content">
+        <main className="ad-content">
           <ActiveSection key={section} />
-        </div>
+        </main>
       </div>
     </div>
   );
