@@ -2,7 +2,7 @@
  * DeviceSensorRepository.ts
  *
  * Persistencia de snapshots de sensores del navegador en la
- * hypertable `device_sensor_snapshots` — independiente de
+ * hypertable `device_sensor_snapshots` - independiente de
  * `positions` (protocolo OsmAnd/Traccar Client).
  */
 import { query } from '../config/database';
@@ -30,7 +30,7 @@ class DeviceSensorRepository {
       );
       return rows[0];
     } catch (err) {
-      console.error('❌ DeviceSensorRepository.save:', (err as Error).message);
+      console.error('DeviceSensorRepository.save:', (err as Error).message);
       throw err;
     }
   }
@@ -46,7 +46,7 @@ class DeviceSensorRepository {
       );
       return rows;
     } catch (err) {
-      console.error('❌ DeviceSensorRepository.findRecentByDevice:', (err as Error).message);
+      console.error('DeviceSensorRepository.findRecentByDevice:', (err as Error).message);
       throw err;
     }
   }

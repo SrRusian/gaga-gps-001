@@ -5,13 +5,24 @@
  * Puede activarse automáticamente por condiciones críticas
  * o manualmente por el supervisor.
  *
- * Solo el supervisor puede desactivarlo — nunca automático.
+ * Solo el supervisor puede desactivarlo - nunca automático.
  *
  * RF asociados: RF-ALR-11
  */
 
 interface SocketIoLike {
   emit(event: string, payload: unknown): void;
+}
+
+interface AlertEventRepoLike {
+  recordOrEscalate(event: {
+    alertType: 'preventive_stop';
+    severity: 'danger';
+    message?: string | null;
+    metadata?: Record<string, unknown> | null;
+    projectId: null;
+  }): Promise<unknown>;
+  resolveOpen(event: { alertType: 'preventive_stop' }): Promise<unknown>;
 }
 
 export type PreventiveStopTriggeredBy = 'auto' | 'supervisor';
@@ -23,15 +34,23 @@ export interface PreventiveStopStatus {
   reason: string | null;
 }
 
+// NOTA (multi-tenencia, Fase A): sigue siendo global a propósito -
+// escoparlo por proyecto requiere que SignalLostService (quien lo
+// dispara automáticamente) conozca el proyecto de cada dispositivo,
+// y hoy no lo rastrea. Cambiar esto sin resolver eso primero rompe
+// el contrato que ya cubre PreventiveStopService.test.ts. Queda
+// documentado como pendiente explícito, no lo cierra esta fase.
 class PreventiveStopService {
   io: SocketIoLike;
+  alertEventRepo?: AlertEventRepoLike;
   isActive: boolean;
   activatedAt: string | null;
   activatedBy: PreventiveStopTriggeredBy | null;
   activationReason: string | null;
 
-  constructor({ io }: { io: SocketIoLike }) {
+  constructor({ io, alertEventRepo }: { io: SocketIoLike; alertEventRepo?: AlertEventRepoLike }) {
     this.io = io;
+    this.alertEventRepo = alertEventRepo;
     this.isActive = false;
     this.activatedAt = null;
     this.activatedBy = null;
@@ -50,7 +69,7 @@ class PreventiveStopService {
     this.activatedBy = triggeredBy;
     this.activationReason = reason;
 
-    console.log(`🛑 PARADA PREVENTIVA COLECTIVA ACTIVADA`);
+    console.log(`PARADA PREVENTIVA COLECTIVA ACTIVADA`);
     console.log(`   Razón: ${reason}`);
     console.log(`   Activado por: ${triggeredBy}`);
 
@@ -59,7 +78,7 @@ class PreventiveStopService {
       active: true,
       reason,
       triggeredBy,
-      message: 'ALTO TOTAL — DETENGA EL VEHÍCULO INMEDIATAMENTE Y REPORTE A CENTRAL POR RADIO',
+      message: 'ALTO TOTAL - DETENGA EL VEHÍCULO INMEDIATAMENTE Y REPORTE A CENTRAL POR RADIO',
       loop: true,
       activatedAt: this.activatedAt,
       timestamp: new Date().toISOString(),
@@ -73,16 +92,26 @@ class PreventiveStopService {
       activatedAt: this.activatedAt,
       timestamp: new Date().toISOString(),
     });
+
+    this.alertEventRepo
+      ?.recordOrEscalate({
+        alertType: 'preventive_stop',
+        severity: 'danger',
+        message: reason,
+        metadata: { triggeredBy },
+        projectId: null,
+      })
+      .catch((err: Error) => console.error('PreventiveStopService.activate - alertEventRepo:', err.message));
   }
 
   /**
-   * Desactiva el protocolo — SOLO puede hacerlo el supervisor
+   * Desactiva el protocolo - SOLO puede hacerlo el supervisor
    * RF-ALR-11: no se desactiva automáticamente bajo ninguna circunstancia
    */
   deactivate(supervisorId = 'supervisor'): void {
     if (!this.isActive) return;
 
-    console.log(`✅ PARADA PREVENTIVA DESACTIVADA por ${supervisorId}`);
+    console.log(`PARADA PREVENTIVA DESACTIVADA por ${supervisorId}`);
 
     this.isActive = false;
     this.activatedAt = null;
@@ -93,7 +122,7 @@ class PreventiveStopService {
       active: false,
       deactivatedBy: supervisorId,
       message:
-        'ALERTA CANCELADA POR CENTRAL — CONFIRME POSICIÓN Y ESPERE AUTORIZACIÓN PARA CONTINUAR',
+        'ALERTA CANCELADA POR CENTRAL - CONFIRME POSICIÓN Y ESPERE AUTORIZACIÓN PARA CONTINUAR',
       timestamp: new Date().toISOString(),
     });
 
@@ -102,6 +131,10 @@ class PreventiveStopService {
       deactivatedBy: supervisorId,
       timestamp: new Date().toISOString(),
     });
+
+    this.alertEventRepo
+      ?.resolveOpen({ alertType: 'preventive_stop' })
+      .catch((err: Error) => console.error('PreventiveStopService.deactivate - alertEventRepo:', err.message));
   }
 
   /**

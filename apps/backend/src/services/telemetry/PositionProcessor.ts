@@ -2,7 +2,7 @@
  * PositionProcessor.ts
  *
  * Responsabilidad: Procesar una posición entrante del receptor
- * OsmAnd (GET /gps) — reemplaza a TraccarWsClient.js.
+ * OsmAnd (GET /gps) - reemplaza a TraccarWsClient.js.
  *
  * En lugar de recibir posiciones vía WebSocket de Traccar, este
  * servicio se invoca directamente desde telemetry.routes.js
@@ -10,7 +10,7 @@
  *
  * Flujo:
  *   1. Filtrar saltos físicamente implausibles (PositionFilterService)
- *      — glitch RTK/NTRIP; si se rechaza, se persiste como inválida
+ *      - glitch RTK/NTRIP; si se rechaza, se persiste como inválida
  *      y el flujo termina ahí
  *   2. Persistir en PostgreSQL (PositionRepository)
  *   3. Actualizar estado en memoria/Redis (FleetStateManager)
@@ -23,6 +23,7 @@ import type { Position } from '@gaga-gps/shared-types';
 import type PositionRepository from '../../repositories/PositionRepository';
 import type CollisionRiskService from '../alerts/CollisionRiskService';
 import type GeofenceAlertService from '../alerts/GeofenceAlertService';
+import type IncidentAlertService from '../alerts/IncidentAlertService';
 import type SignalLostService from '../alerts/SignalLostService';
 import type VehicleProximityService from '../alerts/VehicleProximityService';
 import type StaticEquipmentManager from '../static_equipment/StaticEquipmentManager';
@@ -33,6 +34,7 @@ import type SpeedEstimationService from './SpeedEstimationService';
 
 interface SocketServerLike {
   broadcast(event: string, payload: unknown): void;
+  broadcastToProject(projectId: number | null, event: string, payload: unknown): void;
 }
 
 export interface PositionProcessorDeps {
@@ -44,6 +46,7 @@ export interface PositionProcessorDeps {
   signalLostService?: SignalLostService;
   collisionService?: CollisionRiskService;
   proximityService?: VehicleProximityService;
+  incidentAlertService?: IncidentAlertService;
   equipmentManager?: StaticEquipmentManager;
   positionFilter?: PositionFilterService;
   speedEstimator?: SpeedEstimationService;
@@ -58,6 +61,7 @@ class PositionProcessor {
   signalLostService?: SignalLostService;
   collisionService?: CollisionRiskService;
   proximityService?: VehicleProximityService;
+  incidentAlertService?: IncidentAlertService;
   equipmentManager?: StaticEquipmentManager;
   positionFilter?: PositionFilterService;
   speedEstimator?: SpeedEstimationService;
@@ -71,6 +75,7 @@ class PositionProcessor {
     signalLostService,
     collisionService,
     proximityService,
+    incidentAlertService,
     equipmentManager,
     positionFilter,
     speedEstimator,
@@ -80,15 +85,16 @@ class PositionProcessor {
     this.socketServer = socketServer;
     this.deviceManager = deviceManager;
 
-    // Servicios de seguridad — los mismos usados antes por TraccarWsClient
+    // Servicios de seguridad - los mismos usados antes por TraccarWsClient
     this.geofenceService = geofenceService;
     this.signalLostService = signalLostService;
     this.collisionService = collisionService;
     this.proximityService = proximityService;
+    this.incidentAlertService = incidentAlertService;
     this.equipmentManager = equipmentManager;
 
     // Descarta "teletransportes" por glitch RTK/NTRIP antes de que
-    // el punto llegue a Redis/alertas/mapa — opcional, si no se
+    // el punto llegue a Redis/alertas/mapa - opcional, si no se
     // inyecta el comportamiento es idéntico al de antes.
     this.positionFilter = positionFilter;
     this.speedEstimator = speedEstimator;
@@ -99,7 +105,7 @@ class PositionProcessor {
    */
   async process(position: Position): Promise<Position> {
     try {
-      // 1. Auto-registrar dispositivo y marcarlo online — corre
+      // 1. Auto-registrar dispositivo y marcarlo online - corre
       // siempre, incluso si el fix resulta descartado más abajo:
       // el dispositivo sigue comunicándose, solo el dato de
       // posición es el que no es confiable.
@@ -110,11 +116,12 @@ class PositionProcessor {
         // Se enriquece la posición con nombre/tipo del dispositivo
         // (p. ej. "Tableta", "Excavadora") para que Operador/Supervisor
         // muestren una etiqueta correcta sin tener que consultar la
-        // API protegida de dispositivos — positionRepo.save() ignora
+        // API protegida de dispositivos - positionRepo.save() ignora
         // estos campos extra al insertar (solo lee los suyos).
         if (device) {
           position.deviceName = device.name;
           position.deviceType = device.type;
+          position.projectId = device.project_id;
         }
       }
 
@@ -122,7 +129,7 @@ class PositionProcessor {
         this.signalLostService.recordPosition(position.deviceId);
       }
 
-      // 1.5 Filtro anti-teletransporte (glitch RTK/NTRIP) — compara
+      // 1.5 Filtro anti-teletransporte (glitch RTK/NTRIP) - compara
       // contra la última posición ACEPTADA del dispositivo. Si el
       // salto es físicamente implausible, se persiste marcado como
       // inválido (auditable) pero no toca Redis/alertas/mapa.
@@ -149,7 +156,7 @@ class PositionProcessor {
           await this.positionRepo.save(position);
 
           console.warn(
-            `⚠️  Posición descartada (${verdict.reason}) — Device: ${position.deviceId} | salto: ${verdict.distanceMeters?.toFixed(1)}m | vel. implícita: ${verdict.impliedSpeedKmh?.toFixed(1)}km/h (máx. permitido ${verdict.allowedMaxKmh?.toFixed(1)}km/h)`,
+            ` Posición descartada (${verdict.reason}) - Device: ${position.deviceId} | salto: ${verdict.distanceMeters?.toFixed(1)}m | vel. implícita: ${verdict.impliedSpeedKmh?.toFixed(1)}km/h (máx. permitido ${verdict.allowedMaxKmh?.toFixed(1)}km/h)`,
           );
 
           return position;
@@ -157,12 +164,12 @@ class PositionProcessor {
 
         if (verdict.resynced) {
           console.warn(
-            `⚠️  Device ${position.deviceId} resincronizado tras varios saltos consecutivos — vel. implícita ${verdict.impliedSpeedKmh?.toFixed(1)}km/h`,
+            ` Device ${position.deviceId} resincronizado tras varios saltos consecutivos - vel. implícita ${verdict.impliedSpeedKmh?.toFixed(1)}km/h`,
           );
         }
       }
 
-      // 1.6 Velocidad suavizada — SpeedEstimationService
+      // 1.6 Velocidad suavizada - SpeedEstimationService
       if (this.speedEstimator) {
         const fixTimeMs = new Date(position.fixTime).getTime();
         const estimate = this.speedEstimator.estimate(
@@ -185,7 +192,7 @@ class PositionProcessor {
       // 3. Actualizar estado en memoria (Redis)
       await this.fleetState.update(position);
 
-      // 4. Ejecutar módulos de seguridad — NO se modifican, solo se invocan
+      // 4. Ejecutar módulos de seguridad - NO se modifican, solo se invocan
       if (this.geofenceService) {
         this.geofenceService.evaluate(position);
       }
@@ -206,23 +213,32 @@ class PositionProcessor {
         this.proximityService.evaluate(position, fleet, this.geofenceService?.activeGeofences);
       }
 
+      if (this.incidentAlertService) {
+        this.incidentAlertService.evaluate(position);
+      }
+
       if (this.equipmentManager) {
         this.equipmentManager.evaluate(position);
       }
 
-      // 5. Distribuir a clientes conectados (operador/supervisor)
-      this.socketServer.broadcast('fleet:update', {
+      // 5. Distribuir a clientes conectados (operador/supervisor) -
+      // solo a la sala del proyecto de este dispositivo (+ admins,
+      // que reciben todo). Un dispositivo sin proyecto asignado
+      // todavía (project_id null) no llega a ningún operador, solo
+      // a Admin - evita que un dispositivo "huérfano" se filtre a
+      // cualquier proyecto por accidente.
+      this.socketServer.broadcastToProject(position.projectId ?? null, 'fleet:update', {
         positions: [position],
         timestamp: new Date().toISOString(),
       });
 
       console.log(
-        `📍 Posición procesada — Device: ${position.deviceId} | Lat: ${position.latitude} | Lon: ${position.longitude}`,
+        `Posición procesada - Device: ${position.deviceId} | Lat: ${position.latitude} | Lon: ${position.longitude}`,
       );
 
       return position;
     } catch (err) {
-      console.error('❌ PositionProcessor.process:', (err as Error).message);
+      console.error('PositionProcessor.process:', (err as Error).message);
       throw err;
     }
   }

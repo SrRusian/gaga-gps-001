@@ -2,14 +2,15 @@
  * Contrato de eventos de Socket.io entre el backend y las 3 apps
  * web. Pensado para usarse con los generics propios de socket.io /
  * socket.io-client (`Server<ClientToServerEvents, ServerToClientEvents>`,
- * `Socket<ServerToClientEvents, ClientToServerEvents>`) — ver
+ * `Socket<ServerToClientEvents, ClientToServerEvents>`) - ver
  * packages/client/src/socket.ts.
  *
  * El backend nunca escucha eventos de los clientes (todas las
- * acciones van por REST) — ClientToServerEvents queda vacío a
+ * acciones van por REST) - ClientToServerEvents queda vacío a
  * propósito, no es un olvido.
  */
 import type {
+  AlertEventEntry,
   CollisionClearPayload,
   CollisionPayload,
   EquipmentApproachClearPayload,
@@ -19,6 +20,9 @@ import type {
   EquipmentVehicleApproachingPayload,
   GeofenceAlertPayload,
   GeofenceClearPayload,
+  IncidentNearbyPayload,
+  IncidentReportedPayload,
+  IncidentResolvedPayload,
   PreventiveStopActivePayload,
   PreventiveStopClearPayload,
   ProximityClearPayload,
@@ -28,6 +32,7 @@ import type {
   SignalRecoveredPayload,
   SupervisorCollisionPayload,
   SupervisorGeofenceAlertPayload,
+  SupervisorIncidentPayload,
   SupervisorPreventiveStopPayload,
   SupervisorProximityPayload,
   SupervisorSignalLostPayload,
@@ -85,6 +90,14 @@ export interface ServerToClientEvents {
   'equipment:approach_clear': (payload: EquipmentApproachClearPayload) => void;
   'equipment:vehicle_approaching': (payload: EquipmentVehicleApproachingPayload) => void;
   'equipment:status_update': (payload: EquipmentStatusUpdatePayload) => void;
+
+  'incident:reported': (payload: IncidentReportedPayload) => void;
+  'incident:resolved': (payload: IncidentResolvedPayload) => void;
+  'incident:nearby': (payload: IncidentNearbyPayload) => void;
+  'supervisor:incident': (payload: SupervisorIncidentPayload) => void;
+
+  /** Alertas "normales" (no incidente) ya abiertas al momento de conectar - ver AlertEventRepository. */
+  'alerts:snapshot': (entries: AlertEventEntry[]) => void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- el backend es receive-only, nunca escucha eventos de los clientes

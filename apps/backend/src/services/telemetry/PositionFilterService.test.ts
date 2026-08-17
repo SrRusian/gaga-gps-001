@@ -1,4 +1,4 @@
-// Test de caracterización — congela el comportamiento actual del
+// Test de caracterización - congela el comportamiento actual del
 // filtro anti-teletransporte ANTES de convertirlo a TypeScript.
 import { beforeEach, describe, expect, it } from 'vitest';
 import PositionFilterService from './PositionFilterService';
@@ -44,7 +44,7 @@ describe('PositionFilterService', () => {
   it('acepta un salto de velocidad plausible dentro del umbral adaptativo', () => {
     filter.evaluate(pos(19.35, -103.56, '2026-01-01T00:00:00Z'));
     // Sin historial previo, el umbral adaptativo cae al piso mínimo (25 km/h).
-    // ~333m en 60s ≈ 20 km/h — por debajo del piso, debe aceptarse.
+    // ~333m en 60s ≈ 20 km/h - por debajo del piso, debe aceptarse.
     const result = filter.evaluate(pos(19.353, -103.56, '2026-01-01T00:01:00Z'));
     expect(result.accepted).toBe(true);
     expect(result.impliedSpeedKmh).toBeGreaterThan(0);
@@ -53,7 +53,7 @@ describe('PositionFilterService', () => {
 
   it('rechaza un salto de velocidad implausible (teletransporte) por debajo del umbral de reintentos', () => {
     filter.evaluate(pos(19.35, -103.56, '2026-01-01T00:00:00Z'));
-    // ~11km en 1 segundo — físicamente imposible
+    // ~11km en 1 segundo - físicamente imposible
     const result = filter.evaluate(pos(19.45, -103.56, '2026-01-01T00:00:01Z'));
     expect(result.accepted).toBe(false);
     expect(result.reason).toBe('speed_jump');

@@ -1,7 +1,7 @@
 /**
  * device-sensors.routes.ts
  *
- * Receptor de snapshots de sensores del navegador (Operador) —
+ * Receptor de snapshots de sensores del navegador (Operador) -
  * canal separado de /gps (Traccar Client), porque Traccar es una
  * app nativa que no tiene acceso a las APIs del navegador.
  */
@@ -37,12 +37,12 @@ export function buildDeviceSensorsRouter({
       const saved = await sensorRepo.save(deviceId, data, resolvedSource);
       res.status(201).json({ success: true, capturedAt: saved.captured_at });
     } catch (err) {
-      console.error('❌ device-sensors.routes POST /:deviceId/sensors:', (err as Error).message);
+      console.error('device-sensors.routes POST /:deviceId/sensors:', (err as Error).message);
       res.status(500).json({ error: 'Error guardando snapshot de sensores' });
     }
   });
 
-  // Solo para verificación/diagnóstico (admin/supervisor) — no hay
+  // Solo para verificación/diagnóstico (admin/supervisor) - no hay
   // pantalla que lo consuma todavía.
   router.get(
     '/:deviceId/sensors',
@@ -54,7 +54,7 @@ export function buildDeviceSensorsRouter({
         const rows = await sensorRepo.findRecentByDevice(String(req.params.deviceId), limit);
         res.json(rows);
       } catch (err) {
-        console.error('❌ device-sensors.routes GET /:deviceId/sensors:', (err as Error).message);
+        console.error('device-sensors.routes GET /:deviceId/sensors:', (err as Error).message);
         res.status(500).json({ error: 'Error obteniendo snapshots de sensores' });
       }
     },

@@ -19,11 +19,11 @@ export const redis = new Redis({
 });
 
 redis.on('connect', () => {
-  console.log('✅ Redis — conectado');
+  console.log('Redis - conectado');
 });
 
 redis.on('error', (err: Error) => {
-  console.error('❌ Redis — error:', err.message);
+  console.error('Redis - error:', err.message);
 });
 
 export async function checkConnection(): Promise<boolean> {
@@ -31,7 +31,7 @@ export async function checkConnection(): Promise<boolean> {
     const pong = await redis.ping();
     return pong === 'PONG';
   } catch (err) {
-    console.error('❌ Redis no disponible:', (err as Error).message);
+    console.error('Redis no disponible:', (err as Error).message);
     return false;
   }
 }

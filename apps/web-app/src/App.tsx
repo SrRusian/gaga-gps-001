@@ -1,11 +1,11 @@
-import { getStoredToken, getStoredUser } from '@gaga-gps/client';
+import { getStoredToken, getStoredUser, resolveRolePath } from '@gaga-gps/client';
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { LoginScreen } from './features/auth/LoginScreen';
 import './features/auth/auth.css';
 import { ProtectedRoute } from './features/auth/ProtectedRoute';
 
-// Code-splitting por rol — React.lazy() + import() dinámico hacen
+// Code-splitting por rol - React.lazy() + import() dinámico hacen
 // que Vite genere un chunk JS (y su CSS) separado por feature. Un
 // operador que entra desde su tableta solo descarga el chunk de
 // /operator; el código de Admin (tablas, mapbox-gl-draw, etc.) ni
@@ -36,7 +36,7 @@ function LoadingScreen() {
 function Home() {
   const token = getStoredToken();
   const user = getStoredUser();
-  if (token && user) return <Navigate to={`/${user.role}`} replace />;
+  if (token && user) return <Navigate to={`/${resolveRolePath(user.role)}`} replace />;
   return <LoginScreen />;
 }
 
@@ -46,6 +46,16 @@ export default function App() {
       <Suspense fallback={<LoadingScreen />}>
         <Routes>
           <Route path="/" element={<Home />} />
+          {/* Admin y Encargado de Proyecto montan literalmente el mismo
+              componente (`AdminApp`, que a su vez usa `DashboardSection`
+              con menos alcance según el rol) - dos rutas separadas es
+              solo para que la URL refleje con qué rol se entró, nunca
+              una copia del código. Cualquier cambio a `AdminApp` aplica
+              a ambas por igual. La restricción real de acceso es
+              `ProtectedRoute` + la validación del backend en cada
+              request, no el nombre de la ruta - si alguien entra a la
+              URL del rol equivocado, `ProtectedRoute` lo rebota a "/"
+              y `Home` lo manda de vuelta a SU ruta correcta. */}
           <Route
             path="/admin/*"
             element={
@@ -55,9 +65,17 @@ export default function App() {
             }
           />
           <Route
+            path="/encargado/*"
+            element={
+              <ProtectedRoute role="project_manager">
+                <AdminApp />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/supervisor"
             element={
-              <ProtectedRoute role="supervisor">
+              <ProtectedRoute role={['supervisor', 'project_supervisor']}>
                 <SupervisorApp />
               </ProtectedRoute>
             }

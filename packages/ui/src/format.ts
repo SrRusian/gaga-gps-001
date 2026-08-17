@@ -1,7 +1,7 @@
 /**
  * format.ts
  *
- * Formato de precisión GPS/RTK — bajo 1m se muestra en centímetros
+ * Formato de precisión GPS/RTK - bajo 1m se muestra en centímetros
  * en vez de redondear a "±0 m". Con GPS puro esto casi nunca importa
  * (rara vez baja de 1m), pero con RTK en FIX real (objetivo: unos
  * pocos centímetros) redondear a metros enteros esconde exactamente

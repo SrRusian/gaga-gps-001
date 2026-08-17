@@ -1,7 +1,27 @@
 import { createSocket } from '@gaga-gps/client';
-import type { ActiveMap, Geofence, Position } from '@gaga-gps/shared-types';
+import type {
+  ActiveMap,
+  Geofence,
+  IncidentReportedPayload,
+  Position,
+  StaticEquipment,
+} from '@gaga-gps/shared-types';
+import type { EquipmentMarkerData } from '@gaga-gps/map-core';
 import { useEffect, useRef, useState } from 'react';
 import { useAlertSound } from './useAlertSound';
+
+/** Forma en memoria (StaticEquipmentManager) -> forma que espera useEquipmentLayer. */
+function toMarkerData(eq: StaticEquipment): EquipmentMarkerData {
+  return {
+    id: eq.id,
+    name: eq.name,
+    latitude: eq.lat,
+    longitude: eq.lon,
+    swingRadiusMeters: eq.swingRadius,
+    safetyRadiusMeters: eq.safetyRadius,
+    linkedDeviceId: eq.linkedDeviceId,
+  };
+}
 
 export interface AlertState {
   severity: 'warning' | 'danger' | 'info' | null;
@@ -18,7 +38,7 @@ export interface ThreatVehicle {
   distance: number;
 }
 
-// Mismos umbrales que SignalLostService.ts (backend) — mantenidos en
+// Mismos umbrales que SignalLostService.ts (backend) - mantenidos en
 // sincronía a propósito, ver comentario ahí. Estos corren en el
 // cliente porque, si el propio socket está caído, el servidor no
 // tiene forma de empujarle `signal:lost:level1/2` a este operador.
@@ -29,6 +49,7 @@ export function useOperatorSocket(deviceId: string | null) {
   const [connected, setConnected] = useState(false);
   const [fleet, setFleet] = useState<Record<string, Position>>({});
   const [geofences, setGeofences] = useState<Geofence[]>([]);
+  const [equipment, setEquipment] = useState<EquipmentMarkerData[]>([]);
   const [activeMaps, setActiveMaps] = useState<ActiveMap[]>([]);
   const [myPosition, setMyPosition] = useState<Position | null>(null);
   const [myOnline, setMyOnline] = useState(false);
@@ -36,6 +57,7 @@ export function useOperatorSocket(deviceId: string | null) {
   const [nearestVehicle, setNearestVehicle] = useState<NearestVehicle | null>(null);
   const [threat, setThreat] = useState<ThreatVehicle | null>(null);
   const [activeGeofenceId, setActiveGeofenceId] = useState<number | null>(null);
+  const [incidents, setIncidents] = useState<Record<number, IncidentReportedPayload>>({});
   const { playWarningSound, playDangerSound, stopSound } = useAlertSound();
 
   // Refs para no re-suscribir el socket cada vez que cambian (los
@@ -43,12 +65,12 @@ export function useOperatorSocket(deviceId: string | null) {
   const soundsRef = useRef({ playWarningSound, playDangerSound, stopSound });
   soundsRef.current = { playWarningSound, playDangerSound, stopSound };
 
-  // Detección local de desconexión — independiente del servidor.
+  // Detección local de desconexión - independiente del servidor.
   const disconnectedAtRef = useRef<number | null>(null);
   const localSignalLevelRef = useRef<'none' | 'level1' | 'level2'>('none');
 
   useEffect(() => {
-    // Sin vehículo registrado no hay "mi posición" ni turno posible —
+    // Sin vehículo registrado no hay "mi posición" ni turno posible -
     // ni siquiera vale la pena abrir el socket. El operador ve un
     // mapa vacío hasta que registre un vehículo (ver OperatorApp).
     if (!deviceId) return;
@@ -77,6 +99,7 @@ export function useOperatorSocket(deviceId: string | null) {
 
     socket.on('maps:active_update', ({ maps }) => setActiveMaps(maps));
     socket.on('geofences:update', (gs) => setGeofences(gs));
+    socket.on('equipment:update', (eqs: StaticEquipment[]) => setEquipment(eqs.map(toMarkerData)));
 
     socket.on('fleet:update', (data) => {
       setFleet((prev) => {
@@ -94,7 +117,7 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
 
-    // RF-ALR-02/03 — geocercas
+    // RF-ALR-02/03 - geocercas
     socket.on('alert:warning', (data) => {
       if (data.deviceId === deviceId) {
         showWarning(data.message);
@@ -109,7 +132,7 @@ export function useOperatorSocket(deviceId: string | null) {
         soundsRef.current.playDangerSound(data.loop);
       }
     });
-    // Zonas de estacionamiento — solo visual, sin sonido/sirena.
+    // Zonas de estacionamiento - solo visual, sin sonido/sirena.
     socket.on('alert:info', (data) => {
       if (data.deviceId === deviceId) {
         showInfo(data.message);
@@ -124,7 +147,7 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
 
-    // RF-ALR-05 — pérdida de señal (broadcast a toda la flota, no filtrado por deviceId)
+    // RF-ALR-05 - pérdida de señal (broadcast a toda la flota, no filtrado por deviceId)
     socket.on('signal:lost:level1', (data) => {
       showWarning(data.message);
       soundsRef.current.playWarningSound();
@@ -138,7 +161,7 @@ export function useOperatorSocket(deviceId: string | null) {
       soundsRef.current.stopSound();
     });
 
-    // RF-ALR-10 — anticolisión
+    // RF-ALR-10 - anticolisión
     socket.on('collision:proximity', (data) => {
       showWarning(data.message);
       soundsRef.current.playWarningSound();
@@ -155,7 +178,7 @@ export function useOperatorSocket(deviceId: string | null) {
       setThreat(null);
     });
 
-    // Proximidad fuera de ruta — VehicleProximityService
+    // Proximidad fuera de ruta - VehicleProximityService
     socket.on('proximity:distance_update', (data) => {
       if (data.deviceId === deviceId) {
         setNearestVehicle({ deviceId: data.nearestDeviceId, distance: data.distance });
@@ -178,13 +201,13 @@ export function useOperatorSocket(deviceId: string | null) {
       setNearestVehicle(null);
     });
 
-    // RF-ALR-12 — aproximación a equipo estático
+    // RF-ALR-12 - aproximación a equipo estático
     socket.on('equipment:approach_outer', (data) => {
       if (data.deviceId === deviceId) showWarning(data.message);
     });
     socket.on('equipment:approach_inner', (data) => {
       if (data.deviceId === deviceId) {
-        showWarning(`${data.message} — VELOCIDAD MÁXIMA 5 km/h`);
+        showWarning(`${data.message} - VELOCIDAD MÁXIMA 5 km/h`);
         soundsRef.current.playWarningSound();
       }
     });
@@ -201,7 +224,30 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
 
-    // RF-ALR-11 — parada preventiva colectiva
+    // Alertas de incidente en tiempo real (estilo Waze/Uber) -
+    // IncidentAlertService. `incident:nearby` sí se filtra por
+    // deviceId (es un aviso dirigido a quien se está acercando); los
+    // marcadores en el mapa (`incident:reported`/`resolved`) son
+    // para todos los vehículos del proyecto, sin filtrar.
+    socket.on('incident:reported', (data) => {
+      setIncidents((prev) => ({ ...prev, [data.id]: data }));
+    });
+    socket.on('incident:resolved', (data) => {
+      setIncidents((prev) => {
+        if (!(data.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[data.id];
+        return next;
+      });
+    });
+    socket.on('incident:nearby', (data) => {
+      if (data.deviceId === deviceId) {
+        showWarning(data.message);
+        soundsRef.current.playWarningSound();
+      }
+    });
+
+    // RF-ALR-11 - parada preventiva colectiva
     socket.on('fleet:preventive_stop', (data) => {
       showDanger(data.message);
       soundsRef.current.playDangerSound(data.loop);
@@ -218,7 +264,7 @@ export function useOperatorSocket(deviceId: string | null) {
     };
   }, [deviceId]);
 
-  // Detección local de desconexión prolongada — corre siempre que
+  // Detección local de desconexión prolongada - corre siempre que
   // haya un vehículo registrado, sin depender de que el socket esté
   // vivo (es justamente el caso que cubre: socket caído).
   useEffect(() => {
@@ -232,12 +278,12 @@ export function useOperatorSocket(deviceId: string | null) {
         localSignalLevelRef.current = 'level2';
         setAlert({
           severity: 'danger',
-          message: 'SIN CONEXIÓN PROLONGADA — DETÉNGASE Y REPORTE POR RADIO',
+          message: 'SIN CONEXIÓN PROLONGADA - DETÉNGASE Y REPORTE POR RADIO',
         });
         playDangerSound(true);
       } else if (elapsed >= LOCAL_DISCONNECT_LEVEL1_MS && localSignalLevelRef.current === 'none') {
         localSignalLevelRef.current = 'level1';
-        setAlert({ severity: 'warning', message: 'SIN CONEXIÓN — REDUZCA VELOCIDAD' });
+        setAlert({ severity: 'warning', message: 'SIN CONEXIÓN - REDUZCA VELOCIDAD' });
         playWarningSound();
       }
     }, 1000);
@@ -252,6 +298,7 @@ export function useOperatorSocket(deviceId: string | null) {
     connected,
     fleet,
     geofences,
+    equipment,
     activeMaps,
     myPosition,
     myOnline,
@@ -260,5 +307,6 @@ export function useOperatorSocket(deviceId: string | null) {
     nearestVehicle,
     threat,
     activeGeofenceId,
+    incidents,
   };
 }

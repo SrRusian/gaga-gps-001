@@ -28,25 +28,39 @@ export function buildFleetRouter({
       const fleet = await fleetState.getAll();
       res.json({ positions: Object.values(fleet), timestamp: new Date().toISOString() });
     } catch (err) {
-      console.error('❌ fleet.routes GET /state:', (err as Error).message);
+      console.error('fleet.routes GET /state:', (err as Error).message);
       res.status(500).json({ error: 'Error obteniendo estado de flota' });
     }
   });
 
   // Activar/desactivar la parada preventiva colectiva es una acción
-  // de seguridad crítica — antes no requería login (Supervisor era
+  // de seguridad crítica - antes no requería login (Supervisor era
   // una pantalla compartida sin cuenta); ahora que todos los roles
-  // tienen usuario y contraseña, se protege con JWT + rol.
-  router.post('/stop', authMiddleware, requireRole('supervisor', 'admin'), (req, res) => {
-    const reason = req.body?.reason;
-    preventiveStopService.activate(reason || 'Activado manualmente por supervisor', 'supervisor');
-    res.json({ success: true, status: preventiveStopService.getStatus() });
-  });
+  // tienen usuario y contraseña, se protege con JWT + rol. Roles de
+  // proyecto (Fase B) agregados aquí - se quedaron fuera cuando se
+  // crearon esos roles porque esta ruta no se tocó en esa fase,
+  // dejando a un Supervisor/Encargado de Proyecto sin poder usar el
+  // botón (403 real, reportado en campo).
+  router.post(
+    '/stop',
+    authMiddleware,
+    requireRole('supervisor', 'admin', 'project_supervisor', 'project_manager'),
+    (req, res) => {
+      const reason = req.body?.reason;
+      preventiveStopService.activate(reason || 'Activado manualmente por supervisor', 'supervisor');
+      res.json({ success: true, status: preventiveStopService.getStatus() });
+    },
+  );
 
-  router.post('/resume', authMiddleware, requireRole('supervisor', 'admin'), (req, res) => {
-    preventiveStopService.deactivate('supervisor');
-    res.json({ success: true, status: preventiveStopService.getStatus() });
-  });
+  router.post(
+    '/resume',
+    authMiddleware,
+    requireRole('supervisor', 'admin', 'project_supervisor', 'project_manager'),
+    (req, res) => {
+      preventiveStopService.deactivate('supervisor');
+      res.json({ success: true, status: preventiveStopService.getStatus() });
+    },
+  );
 
   router.get('/stop/status', (req, res) => {
     res.json(preventiveStopService.getStatus());

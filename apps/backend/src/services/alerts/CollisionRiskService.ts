@@ -4,10 +4,10 @@
  * Responsabilidad: Detectar riesgo de colisión entre
  * vehículos usando distancia actual y trayectoria proyectada.
  *
- * Umbral 1 — 80 metros con trayectorias convergentes:
+ * Umbral 1 - 80 metros con trayectorias convergentes:
  *   Alerta de proximidad en ambos dispositivos
  *
- * Umbral 2 — 40 metros con trayectorias convergentes:
+ * Umbral 2 - 40 metros con trayectorias convergentes:
  *   Alerta crítica de colisión inminente
  *
  * RF asociados: RF-ALR-10
@@ -15,6 +15,18 @@
 
 interface SocketIoLike {
   emit(event: string, payload: unknown): void;
+}
+
+interface AlertEventRepoLike {
+  recordOrEscalate(event: {
+    alertType: 'collision';
+    severity: 'warning' | 'danger';
+    deviceId: string;
+    deviceId2: string;
+    message?: string | null;
+    metadata?: Record<string, unknown> | null;
+  }): Promise<unknown>;
+  resolveOpen(event: { alertType: 'collision'; deviceId: string; deviceId2: string }): Promise<unknown>;
 }
 
 interface EvaluatedPosition {
@@ -33,21 +45,23 @@ type CollisionAlertLevel = 'none' | 'proximity' | 'critical';
 
 class CollisionRiskService {
   io: SocketIoLike;
+  alertEventRepo?: AlertEventRepoLike;
   positionHistory: Record<number, HistoryPoint[]>;
   collisionAlerts: Record<string, CollisionAlertLevel>;
   readonly THRESHOLD_1_METERS = 80;
   readonly THRESHOLD_2_METERS = 40;
-  // Histéresis de limpieza — evita parpadeo por jitter de GPS en
+  // Histéresis de limpieza - evita parpadeo por jitter de GPS en
   // vehículos casi estáticos (ver areConverging).
   readonly CLEAR_MARGIN = 1.15;
 
-  constructor({ io }: { io: SocketIoLike }) {
+  constructor({ io, alertEventRepo }: { io: SocketIoLike; alertEventRepo?: AlertEventRepoLike }) {
     this.io = io;
+    this.alertEventRepo = alertEventRepo;
 
     // Historial de posiciones por dispositivo (últimas 5)
     this.positionHistory = {};
 
-    // Estado de alerta de colisión por par — clave: IDs ordenados como texto
+    // Estado de alerta de colisión por par - clave: IDs ordenados como texto
     this.collisionAlerts = {};
   }
 
@@ -108,7 +122,7 @@ class CollisionRiskService {
    */
   evaluatePair(pos1: EvaluatedPosition, pos2: EvaluatedPosition): void {
     // deviceId es un unique_id de texto (ej. "CAMION-01") aunque el
-    // tipo diga number — Math.min/Math.max daría NaN para ambos y
+    // tipo diga number - Math.min/Math.max daría NaN para ambos y
     // colapsaría todos los pares en una sola llave.
     const pairKey = [String(pos1.deviceId), String(pos2.deviceId)].sort().join('-');
 
@@ -126,18 +140,18 @@ class CollisionRiskService {
     const currentAlert = this.collisionAlerts[pairKey] || 'none';
 
     if (distance <= this.THRESHOLD_2_METERS && converging) {
-      // Umbral 2 — Colisión inminente
+      // Umbral 2 - Colisión inminente
       if (currentAlert !== 'critical') {
         this.triggerCritical(pos1.deviceId, pos2.deviceId, distance);
       }
       this.collisionAlerts[pairKey] = 'critical';
     } else if (distance <= this.THRESHOLD_1_METERS && converging && currentAlert === 'none') {
-      // Umbral 1 — Proximidad con convergencia
+      // Umbral 1 - Proximidad con convergencia
       this.triggerProximity(pos1.deviceId, pos2.deviceId, distance);
       this.collisionAlerts[pairKey] = 'proximity';
     } else if (currentAlert !== 'none' && distance > this.THRESHOLD_1_METERS * this.CLEAR_MARGIN) {
       // Solo se limpia cuando la distancia realmente creció más allá
-      // del umbral (con margen) — no por un solo tick sin
+      // del umbral (con margen) - no por un solo tick sin
       // convergencia, que puede ser ruido de GPS.
       this.clearCollisionAlert(pos1.deviceId, pos2.deviceId);
       this.collisionAlerts[pairKey] = 'none';
@@ -152,7 +166,7 @@ class CollisionRiskService {
    * Compara la distancia actual vs la distancia hace 2 posiciones
    * Si la distancia está disminuyendo = convergentes
    *
-   * RF-ALR-10 — cálculo de trayectoria con últimas 5 posiciones
+   * RF-ALR-10 - cálculo de trayectoria con últimas 5 posiciones
    */
   areConverging(deviceId1: number, deviceId2: number): boolean {
     const history1 = this.positionHistory[deviceId1];
@@ -182,11 +196,11 @@ class CollisionRiskService {
   }
 
   /**
-   * Umbral 1 — Alerta de proximidad con convergencia
+   * Umbral 1 - Alerta de proximidad con convergencia
    */
   triggerProximity(deviceId1: number, deviceId2: number, distance: number): void {
     console.log(
-      `⚠️  PROXIMIDAD — Vehículos ${deviceId1} y ${deviceId2} a ${Math.round(distance)}m convergiendo`,
+      ` PROXIMIDAD - Vehículos ${deviceId1} y ${deviceId2} a ${Math.round(distance)}m convergiendo`,
     );
 
     const payload = {
@@ -194,7 +208,7 @@ class CollisionRiskService {
       deviceId1,
       deviceId2,
       distance: Math.round(distance),
-      message: `PRECAUCIÓN — VEHÍCULO ${deviceId2} A ${Math.round(distance)} METROS — REDUZCA VELOCIDAD`,
+      message: `PRECAUCIÓN - VEHÍCULO ${deviceId2} A ${Math.round(distance)} METROS - REDUZCA VELOCIDAD`,
       timestamp: new Date().toISOString(),
     };
 
@@ -203,14 +217,18 @@ class CollisionRiskService {
 
     // Notificar al supervisor
     this.io.emit('supervisor:collision', { ...payload, level: 1 });
+
+    this._recordAlertEvent(deviceId1, deviceId2, 'warning', payload.message, {
+      distance: payload.distance,
+    });
   }
 
   /**
-   * Umbral 2 — Colisión inminente
+   * Umbral 2 - Colisión inminente
    */
   triggerCritical(deviceId1: number, deviceId2: number, distance: number): void {
     console.log(
-      `🚨 COLISIÓN INMINENTE — Vehículos ${deviceId1} y ${deviceId2} a ${Math.round(distance)}m`,
+      `COLISIÓN INMINENTE - Vehículos ${deviceId1} y ${deviceId2} a ${Math.round(distance)}m`,
     );
 
     const payload = {
@@ -218,7 +236,7 @@ class CollisionRiskService {
       deviceId1,
       deviceId2,
       distance: Math.round(distance),
-      message: `PELIGRO — COLISIÓN INMINENTE CON VEHÍCULO — DETÉNGASE INMEDIATAMENTE`,
+      message: `PELIGRO - COLISIÓN INMINENTE CON VEHÍCULO - DETÉNGASE INMEDIATAMENTE`,
       loop: true,
       timestamp: new Date().toISOString(),
     };
@@ -228,21 +246,56 @@ class CollisionRiskService {
 
     // Notificar al supervisor
     this.io.emit('supervisor:collision', { ...payload, level: 2 });
+
+    this._recordAlertEvent(deviceId1, deviceId2, 'danger', payload.message, {
+      distance: payload.distance,
+    });
   }
 
   /**
    * Cancelar alerta de colisión cuando los vehículos se separan
    */
   clearCollisionAlert(deviceId1: number, deviceId2: number): void {
-    console.log(`✅ Vehículos ${deviceId1} y ${deviceId2} ya no están en riesgo de colisión`);
+    console.log(`Vehículos ${deviceId1} y ${deviceId2} ya no están en riesgo de colisión`);
 
     const timestamp = new Date().toISOString();
     this.io.emit('collision:clear', { deviceId1, deviceId2, timestamp });
     this.io.emit('supervisor:collision', { deviceId1, deviceId2, level: 0, timestamp });
+
+    this._resolveAlertEvent(deviceId1, deviceId2);
   }
 
   /**
-   * Fórmula de Haversine — distancia en metros
+   * Historial unificado de alertas (ver alert_events) -
+   * fire-and-forget. `deviceId1`/`deviceId2` llegan tipados `number`
+   * pero en runtime son texto ("CAMION-01") - mismo bug de tipo ya
+   * documentado en CLAUDE.md para la clave de deduplicación; se
+   * envuelven con `String(...)` aquí por la misma razón.
+   */
+  _recordAlertEvent(
+    deviceId1: number,
+    deviceId2: number,
+    severity: 'warning' | 'danger',
+    message: string,
+    metadata: Record<string, unknown>,
+  ): void {
+    if (!this.alertEventRepo) return;
+    const [a, b] = [String(deviceId1), String(deviceId2)].sort();
+    this.alertEventRepo
+      .recordOrEscalate({ alertType: 'collision', severity, deviceId: a, deviceId2: b, message, metadata })
+      .catch((err: Error) => console.error('CollisionRiskService._recordAlertEvent:', err.message));
+  }
+
+  _resolveAlertEvent(deviceId1: number, deviceId2: number): void {
+    if (!this.alertEventRepo) return;
+    const [a, b] = [String(deviceId1), String(deviceId2)].sort();
+    this.alertEventRepo
+      .resolveOpen({ alertType: 'collision', deviceId: a, deviceId2: b })
+      .catch((err: Error) => console.error('CollisionRiskService._resolveAlertEvent:', err.message));
+  }
+
+  /**
+   * Fórmula de Haversine - distancia en metros
    */
   calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371000;
@@ -260,6 +313,31 @@ class CollisionRiskService {
 
   toRad(deg: number): number {
     return deg * (Math.PI / 180);
+  }
+
+  /**
+   * Limpia el estado de un dispositivo eliminado - evita que un par
+   * con alerta activa quede fantasma en `collisionAlerts` para
+   * siempre (`evaluatePair` solo limpia cuando ambos vehículos
+   * siguen reportando posición, y uno de los dos ya no existe).
+   *
+   * `otherDeviceIds` lo arma el caller (todos los demás dispositivos
+   * conocidos en ese momento) porque `pairKey` no se puede parsear de
+   * vuelta a los dos IDs originales de forma confiable - son texto
+   * libre y pueden contener guiones (ej. "CAMION-01"), así que en vez
+   * de intentar separar el string se reconstruye el pairKey candidato
+   * contra cada otro dispositivo y se revisa si existe.
+   */
+  clearDevice(deviceId: string, otherDeviceIds: string[]): void {
+    otherDeviceIds.forEach((otherId) => {
+      const pairKey = [deviceId, otherId].sort().join('-');
+      const currentAlert = this.collisionAlerts[pairKey];
+      if (currentAlert && currentAlert !== 'none') {
+        this.clearCollisionAlert(deviceId as unknown as number, otherId as unknown as number);
+      }
+      delete this.collisionAlerts[pairKey];
+    });
+    delete this.positionHistory[deviceId as unknown as number];
   }
 }
 

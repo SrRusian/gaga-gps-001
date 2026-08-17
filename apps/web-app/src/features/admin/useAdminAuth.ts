@@ -6,7 +6,7 @@ export type AdminUser = AuthUser;
 
 /**
  * ProtectedRoute ya garantizó que hay una sesión válida con rol
- * "admin" antes de que este componente exista — aquí solo se expone
+ * "admin" antes de que este componente exista - aquí solo se expone
  * el usuario (para mostrar nombre/rol) y logout.
  */
 export function useAdminAuth() {

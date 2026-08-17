@@ -3,8 +3,8 @@
  *
  * Conversión de geocercas entre el modelo interno (fila de
  * PostgreSQL) y formatos estándar de intercambio geoespacial:
- *   - GeoJSON (RFC 7946) — formato principal, nativo en JS
- *   - KML — muy usado en topografía/minería y Google Earth
+ *   - GeoJSON (RFC 7946) - formato principal, nativo en JS
+ *   - KML - muy usado en topografía/minería y Google Earth
  *
  * Convención para círculos (GeoJSON no tiene un tipo nativo para
  * ellos): se representan como Point + propiedad `radiusMeters`,
@@ -22,9 +22,10 @@ const togeojson = require('@tmcw/togeojson');
 import type { GeofenceShapeType, GeofenceType } from '@gaga-gps/shared-types';
 import type { Feature, FeatureCollection, Geometry, LineString, Point, Polygon } from 'geojson';
 
-/** Fila cruda de la tabla `geofences` — snake_case, tal como la devuelve PostgreSQL. */
+/** Fila cruda de la tabla `geofences` - snake_case, tal como la devuelve PostgreSQL. */
 export interface GeofenceRow {
   id: number;
+  project_id: number | null;
   name: string;
   type: GeofenceType;
   shape_type: GeofenceShapeType;
@@ -120,7 +121,7 @@ ${placemarks}
 </kml>`;
 }
 
-// ── Importar — GeoJSON/KML → parámetros para GeofenceRepository.create() ─
+// ── Importar - GeoJSON/KML → parámetros para GeofenceRepository.create() ─
 
 export interface GeofenceInput {
   name: string;
@@ -155,7 +156,7 @@ function featureToGeofenceInput(feature: Feature, index: number): FeatureConvers
   if (geometry.type === 'Point') {
     const radiusMeters = Number(props.radiusMeters ?? props.radius);
     if (!radiusMeters || radiusMeters <= 0) {
-      return { error: `Feature ${index + 1} (Point "${name}"): falta radiusMeters — se omite` };
+      return { error: `Feature ${index + 1} (Point "${name}"): falta radiusMeters - se omite` };
     }
     const [lon, lat] = (geometry as Point).coordinates;
     return {
@@ -171,7 +172,7 @@ function featureToGeofenceInput(feature: Feature, index: number): FeatureConvers
     const corridorWidthMeters = Number(props.corridorWidthMeters ?? props.width);
     if (!corridorWidthMeters || corridorWidthMeters <= 0) {
       return {
-        error: `Feature ${index + 1} (LineString "${name}"): falta corridorWidthMeters — se omite`,
+        error: `Feature ${index + 1} (LineString "${name}"): falta corridorWidthMeters - se omite`,
       };
     }
     return {

@@ -36,9 +36,9 @@ async function main() {
       [email, passwordHash, name || 'Administrador'],
     );
 
-    console.log('✅ Usuario admin creado/actualizado:', rows[0]);
+    console.log('Usuario admin creado/actualizado:', rows[0]);
   } catch (err) {
-    console.error('❌ Error creando usuario admin:', (err as Error).message);
+    console.error('Error creando usuario admin:', (err as Error).message);
     process.exitCode = 1;
   } finally {
     await pool.end();

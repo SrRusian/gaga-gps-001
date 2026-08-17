@@ -6,7 +6,7 @@ export interface OperatorLoginOverlayProps {
 }
 
 /**
- * Ya no pide credenciales — el login único (gateway) ya identificó
+ * Ya no pide credenciales - el login único (gateway) ya identificó
  * a la persona antes de llegar aquí. Este paso solo declara
  * explícitamente "empiezo a operar este vehículo ahora", que es lo
  * que abre el turno en operator_sessions.

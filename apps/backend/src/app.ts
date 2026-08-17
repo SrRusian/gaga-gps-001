@@ -1,7 +1,7 @@
 /**
  * Las tabletas (Traccar Client) reportan directamente a GET /gps
  * usando el protocolo OsmAnd. Este archivo solo ensambla config,
- * repositorios, servicios y rutas — la lógica vive en cada módulo.
+ * repositorios, servicios y rutas - la lógica vive en cada módulo.
  */
 import './config/loadEnv';
 import bcrypt from 'bcryptjs';
@@ -16,18 +16,23 @@ import { db, env, redis } from './config';
 import DeviceRepository from './repositories/DeviceRepository';
 import PositionRepository from './repositories/PositionRepository';
 import DeviceSensorRepository from './repositories/DeviceSensorRepository';
+import ProjectRepository from './repositories/ProjectRepository';
 import GeofenceRepository from './repositories/GeofenceRepository';
 import GeofenceEventRepository from './repositories/GeofenceEventRepository';
 import EquipmentRepository from './repositories/EquipmentRepository';
 import UserRepository from './repositories/UserRepository';
 import OperatorSessionRepository from './repositories/OperatorSessionRepository';
 import MapRepository from './repositories/MapRepository';
+import ShiftRepository from './repositories/ShiftRepository';
+import IncidentReportRepository from './repositories/IncidentReportRepository';
+import AlertEventRepository from './repositories/AlertEventRepository';
 
-// ── Servicios de seguridad — NO se modifican, solo se integran ─
+// ── Servicios de seguridad - NO se modifican, solo se integran ─
 import GeofenceAlertService from './services/alerts/GeofenceAlertService';
 import SignalLostService from './services/alerts/SignalLostService';
 import CollisionRiskService from './services/alerts/CollisionRiskService';
 import VehicleProximityService from './services/alerts/VehicleProximityService';
+import IncidentAlertService from './services/alerts/IncidentAlertService';
 import PreventiveStopService from './services/alerts/PreventiveStopService';
 import StaticEquipmentManager from './services/static_equipment/StaticEquipmentManager';
 
@@ -37,11 +42,13 @@ import DeviceManager from './services/telemetry/DeviceManager';
 import PositionProcessor from './services/telemetry/PositionProcessor';
 import PositionFilterService from './services/telemetry/PositionFilterService';
 import SpeedEstimationService from './services/telemetry/SpeedEstimationService';
+import ShiftResolverService from './services/telemetry/ShiftResolverService';
 import FleetSocketServer from './sockets/FleetSocketServer';
 
 // ── Middleware ──────────────────────────────────────────────────
 import {
   buildAuthMiddleware,
+  buildDownloadAuthMiddleware,
   buildSocketAuthMiddleware,
   requireRole,
 } from './api/middleware/auth.middleware';
@@ -61,6 +68,10 @@ import buildReportsRouter from './api/routes/reports.routes';
 import buildUsersRouter from './api/routes/users.routes';
 import buildOperatorSessionsRouter from './api/routes/operator-sessions.routes';
 import buildDeviceSensorsRouter from './api/routes/device-sensors.routes';
+import buildProjectsRouter from './api/routes/projects.routes';
+import buildShiftsRouter from './api/routes/shifts.routes';
+import buildIncidentsRouter from './api/routes/incidents.routes';
+import buildAlertsRouter from './api/routes/alerts.routes';
 import MapPipelineService from './services/maps/MapPipelineService';
 
 const app = express();
@@ -85,23 +96,34 @@ const userRepo = new UserRepository();
 const operatorSessionRepo = new OperatorSessionRepository();
 const mapRepo = new MapRepository();
 const sensorRepo = new DeviceSensorRepository();
+const projectRepo = new ProjectRepository();
+const shiftRepo = new ShiftRepository();
+const shiftResolver = new ShiftResolverService({ shiftRepo });
+const incidentRepo = new IncidentReportRepository();
+const alertEventRepo = new AlertEventRepository();
 
 const authMiddleware = buildAuthMiddleware({ userRepo });
+const downloadAuthMiddleware = buildDownloadAuthMiddleware({ userRepo });
 io.use(buildSocketAuthMiddleware({ userRepo }));
 
 // Se crea antes que los servicios de seguridad porque SignalLostService
 // lo necesita para marcar `devices.status='offline'` en PostgreSQL en
-// cuanto se detecta pérdida de señal (ver más abajo) — antes esa
+// cuanto se detecta pérdida de señal (ver más abajo) - antes esa
 // transición nunca se persistía y el panel admin quedaba mostrando
 // "online" indefinidamente.
 const deviceManager = new DeviceManager({ deviceRepo });
 
 // ── Servicios de seguridad ──────────────────────────────────────
-const geofenceService = new GeofenceAlertService({ io, geofenceEventRepo });
-const preventiveStopService = new PreventiveStopService({ io });
-const signalLostService = new SignalLostService({ io, preventiveStopService, deviceManager });
-const collisionService = new CollisionRiskService({ io });
-const proximityService = new VehicleProximityService({ io });
+const geofenceService = new GeofenceAlertService({ io, geofenceEventRepo, alertEventRepo });
+const preventiveStopService = new PreventiveStopService({ io, alertEventRepo });
+const signalLostService = new SignalLostService({
+  io,
+  preventiveStopService,
+  deviceManager,
+  alertEventRepo,
+});
+const collisionService = new CollisionRiskService({ io, alertEventRepo });
+const proximityService = new VehicleProximityService({ io, alertEventRepo });
 const equipmentManager = new StaticEquipmentManager({ io });
 
 // ── Telemetría propia ───────────────────────────────────────────
@@ -112,9 +134,19 @@ const socketServer = new FleetSocketServer({
   geofenceService,
   preventiveStopService,
   mapRepo,
+  alertEventRepo,
+  equipmentManager,
 });
 const positionFilter = new PositionFilterService(env.positionFilter);
 const speedEstimator = new SpeedEstimationService();
+
+// Nace ya aislado por proyecto (cada incidente trae su project_id) -
+// por eso necesita socketServer.broadcastToProject, no `io` directo
+// como los demás servicios de alerta (ver comentario en la clase).
+const incidentAlertService = new IncidentAlertService({ socketServer, incidentRepo, alertEventRepo });
+// Ver comentario en FleetSocketServer.ts - no puede llegar por su
+// constructor sin crear una dependencia circular con socketServer.
+socketServer.incidentAlertService = incidentAlertService;
 
 const positionProcessor = new PositionProcessor({
   positionRepo,
@@ -125,13 +157,14 @@ const positionProcessor = new PositionProcessor({
   signalLostService,
   collisionService,
   proximityService,
+  incidentAlertService,
   equipmentManager,
   positionFilter,
   speedEstimator,
 });
 
 // ── UI estática ──────────────────────────────────────────────────
-// Una sola SPA (apps/web-app) — el login y las 3 vistas por rol
+// Una sola SPA (apps/web-app) - el login y las 3 vistas por rol
 // (/admin, /supervisor, /operator) los resuelve React Router del
 // lado del cliente, no Express. express.static intenta servir un
 // archivo real primero (JS/CSS/imágenes ya compilados); si no
@@ -141,19 +174,33 @@ const positionProcessor = new PositionProcessor({
 const webAppDir = path.join(__dirname, '../../web-app');
 app.use(express.static(webAppDir));
 
-// ── Receptor de telemetría — GET /gps (protocolo OsmAnd) ────────
+// ── Receptor de telemetría - GET /gps (protocolo OsmAnd) ────────
 app.use(telemetryLimiter, buildTelemetryRouter({ positionProcessor }));
 
 // ── Tiles MBTiles / importador de mapas satelitales ───────────────
-const resolvedMapsDir = path.join(__dirname, '../../', env.mapsDir);
-const mapsRouter = buildMapsRouter({ mapsDir: resolvedMapsDir, mapRepo });
+// `__dirname` compilado es `apps/backend/dist` - a diferencia de
+// `webAppDir` (arriba, que SÍ vive dentro de `apps/`, dos niveles
+// arriba alcanzan), `maps/` vive en la raíz del proyecto/contenedor
+// (junto a `db/`, mismo nivel que `apps/`) - hacen falta TRES niveles
+// arriba (`dist` -> `backend` -> `apps` -> raíz), no dos. Con solo dos
+// niveles esto resolvía a `apps/maps` (`/app/apps/maps` en Docker) -
+// una carpeta fuera del volumen nombrado `maps_data:/app/maps` de
+// `docker-compose.yml`, así que cualquier mapa importado se escribía
+// en la capa efímera del contenedor y parecía funcionar mientras ese
+// mismo proceso seguía vivo (mismo path al leer y escribir), pero
+// desaparecía sin dejar rastro en cuanto el contenedor se recreaba
+// (cualquier `docker compose up -d --build`) - la fila de `maps` en
+// Postgres (persistente, volumen aparte) seguía diciendo
+// `status=ready` para un archivo que ya no existía en ningún lado.
+const resolvedMapsDir = path.join(__dirname, '../../../', env.mapsDir);
+const mapsRouter = buildMapsRouter({ mapsDir: resolvedMapsDir, mapRepo, userRepo });
 const mapPipelineService = new MapPipelineService({ mapsDir: resolvedMapsDir, mapRepo });
 
 app.use('/tiles', mapsRouter);
 app.use(
   '/api/maps',
   authMiddleware,
-  requireRole('admin'),
+  requireRole('admin', 'project_manager', 'project_supervisor'),
   buildMapsAdminRouter({
     mapRepo,
     mapPipelineService,
@@ -168,25 +215,90 @@ app.use('/api/auth', authLimiter, buildAuthRouter({ userRepo }));
 
 // ── API REST protegida (panel admin) ─────────────────────────────
 app.use(
+  '/api/projects',
+  authMiddleware,
+  requireRole('admin', 'project_manager'),
+  buildProjectsRouter({
+    projectRepo,
+    mapRepo,
+    mapPipelineService,
+    mapsDir: resolvedMapsDir,
+    invalidateTilesCache: mapsRouter.invalidateCache,
+    socketServer,
+    requireRole,
+  }),
+);
+app.use(
+  '/api/shifts',
+  authMiddleware,
+  buildShiftsRouter({ shiftRepo, operatorSessionRepo, requireRole }),
+);
+app.use(
   '/api/devices',
-  buildDevicesRouter({ deviceRepo, operatorSessionRepo, authMiddleware, fleetState }),
+  buildDevicesRouter({
+    deviceRepo,
+    operatorSessionRepo,
+    authMiddleware,
+    requireRole,
+    fleetState,
+    geofenceAlertService: geofenceService,
+    signalLostService,
+    collisionRiskService: collisionService,
+    vehicleProximityService: proximityService,
+    incidentAlertService,
+    equipmentRepo,
+    equipmentManager,
+    socketServer,
+  }),
 );
 app.use(
   '/api/geofences',
-  authMiddleware,
-  buildGeofencesRouter({ geofenceRepo, geofenceService, socketServer }),
+  buildGeofencesRouter({
+    geofenceRepo,
+    geofenceService,
+    socketServer,
+    authMiddleware,
+    downloadAuthMiddleware,
+    requireRole,
+  }),
 );
 app.use(
   '/api/equipment',
   authMiddleware,
+  requireRole('admin', 'project_manager', 'project_supervisor'),
   buildEquipmentRouter({ equipmentRepo, equipmentManager, socketServer }),
 );
-app.use('/api/reports', authMiddleware, buildReportsRouter({ positionRepo, geofenceRepo }));
-app.use('/api/users', authMiddleware, requireRole('admin'), buildUsersRouter({ userRepo }));
+app.use(
+  '/api/reports',
+  authMiddleware,
+  buildReportsRouter({ positionRepo, geofenceRepo, deviceRepo, requireRole }),
+);
+app.use(
+  '/api/incidents',
+  buildIncidentsRouter({ incidentAlertService, incidentRepo, deviceRepo, authMiddleware, requireRole }),
+);
+app.use(
+  '/api/alerts',
+  authMiddleware,
+  buildAlertsRouter({ alertEventRepo, requireRole, shiftResolver }),
+);
+// El chequeo de rol ahora es por-ruta dentro del router (Admin y
+// Encargado de Proyecto pueden ver/editar; crear/eliminar sigue
+// siendo exclusivo de Admin) - ver users.routes.ts.
+app.use('/api/users', authMiddleware, buildUsersRouter({ userRepo, requireRole }));
 
 app.use(
   '/api/operator-sessions',
-  buildOperatorSessionsRouter({ operatorSessionRepo, authMiddleware, requireRole }),
+  buildOperatorSessionsRouter({
+    operatorSessionRepo,
+    deviceRepo,
+    equipmentRepo,
+    equipmentManager,
+    socketServer,
+    shiftResolver,
+    authMiddleware,
+    requireRole,
+  }),
 );
 app.use(
   '/api/devices',
@@ -213,13 +325,13 @@ app.get('/health', async (req, res) => {
 });
 
 // ── Fallback de SPA ───────────────────────────────────────────────
-// Debe ir al final, después de todas las rutas de arriba — cualquier
+// Debe ir al final, después de todas las rutas de arriba - cualquier
 // GET que no sea un archivo real (ya lo habría servido
 // express.static) ni una de las rutas anteriores (/gps, /tiles,
 // /api/*, /health) es una ruta de navegación de React Router
 // (/, /admin, /supervisor, /operator, o una sub-ruta futura) y debe
 // resolver siempre a index.html para que el router del cliente la
-// tome. Se excluye /socket.io explícitamente — Socket.io intercepta
+// tome. Se excluye /socket.io explícitamente - Socket.io intercepta
 // esas peticiones por su cuenta (vía engine.io), antes de que
 // Express decida qué hacer con ellas.
 app.get(/^\/(?!api|gps|tiles|health|socket\.io).*/, (req, res) => {
@@ -229,7 +341,7 @@ app.get(/^\/(?!api|gps|tiles|health|socket\.io).*/, (req, res) => {
 /**
  * Crea el usuario admin@gaga.com (o el que se configure vía
  * DEFAULT_ADMIN_EMAIL) con la contraseña por defecto SOLO si la
- * tabla `users` está completamente vacía — o sea, la primera vez
+ * tabla `users` está completamente vacía - o sea, la primera vez
  * que se levanta el volumen de PostgreSQL. Evita el paso manual de
  * `npm run seed:admin` en una instalación nueva; el script sigue
  * disponible para crear usuarios adicionales o resetear la
@@ -247,12 +359,12 @@ async function ensureDefaultAdmin(): Promise<void> {
     role: 'admin',
   });
 
-  console.warn('⚠️  ══════════════════════════════════════════════════════════');
+  console.warn(' ══════════════════════════════════════════════════════════');
   console.warn(
-    `⚠️  Usuario admin creado automáticamente (primera vez): ${env.defaultAdminEmail} / ${env.defaultAdminPassword}`,
+    ` Usuario admin creado automáticamente (primera vez): ${env.defaultAdminEmail} / ${env.defaultAdminPassword}`,
   );
-  console.warn('⚠️  Inicia sesión en / y CAMBIA esta contraseña de inmediato.');
-  console.warn('⚠️  ══════════════════════════════════════════════════════════');
+  console.warn(' Inicia sesión en / y CAMBIA esta contraseña de inmediato.');
+  console.warn(' ══════════════════════════════════════════════════════════');
 }
 
 async function loadPersistedState(): Promise<void> {
@@ -261,10 +373,10 @@ async function loadPersistedState(): Promise<void> {
 
     const geofences = await geofenceRepo.findAllActive();
     geofences.forEach((g) => geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(g)));
-    console.log(`✅ ${geofences.length} geocerca(s) cargada(s) desde PostgreSQL`);
+    console.log(`${geofences.length} geocerca(s) cargada(s) desde PostgreSQL`);
 
     // Recupera el reloj de "última señal" de los dispositivos que
-    // quedaron marcados online antes de este reinicio — así
+    // quedaron marcados online antes de este reinicio - así
     // SignalLostService los re-evalúa de inmediato en vez de
     // olvidarlos (ver comentario en SignalLostService.hydrate).
     const devices = await deviceRepo.findAll();
@@ -273,13 +385,14 @@ async function loadPersistedState(): Promise<void> {
       .map((d) => ({ deviceId: d.unique_id, lastSeenAt: d.last_update as Date }));
     signalLostService.hydrate(staleTrackedDevices);
     console.log(
-      `✅ ${staleTrackedDevices.length} dispositivo(s) "online" recuperado(s) para monitoreo de señal`,
+      `${staleTrackedDevices.length} dispositivo(s) "online" recuperado(s) para monitoreo de señal`,
     );
 
     const equipment = await equipmentRepo.findAll();
     equipment.forEach((eq) =>
       equipmentManager.registerEquipment({
         id: eq.id,
+        projectId: eq.project_id,
         name: eq.name,
         type: eq.type,
         lat: eq.latitude,
@@ -287,11 +400,17 @@ async function loadPersistedState(): Promise<void> {
         swingRadius: eq.swing_radius,
         safetyRadius: eq.safety_radius,
         status: eq.status,
+        linkedDeviceId: eq.linked_device_id,
       }),
     );
-    console.log(`✅ ${equipment.length} equipo(s) estático(s) cargado(s) desde PostgreSQL`);
+    console.log(`${equipment.length} equipo(s) estático(s) cargado(s) desde PostgreSQL`);
+
+    await incidentAlertService.hydrate();
+    console.log(
+      `${Object.keys(incidentAlertService.activeIncidents).length} incidente(s) abierto(s) recuperado(s) desde PostgreSQL`,
+    );
   } catch (err) {
-    console.error('❌ Error cargando estado persistido:', (err as Error).message);
+    console.error('Error cargando estado persistido:', (err as Error).message);
   }
 }
 
@@ -303,14 +422,14 @@ loadPersistedState().finally(() => {
 
   const closeStale = () => {
     operatorSessionRepo.closeStaleSessions(env.operatorSessionMaxIdleDays).catch((err: Error) => {
-      console.error('❌ Error cerrando turnos inactivos:', err.message);
+      console.error('Error cerrando turnos inactivos:', err.message);
     });
   };
   closeStale();
   setInterval(closeStale, 6 * 60 * 60 * 1000);
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Backend GAGA-GPS v2.0 (sistema propio) corriendo en puerto ${PORT}`);
+    console.log(`Backend GAGA-GPS v2.0 (sistema propio) corriendo en puerto ${PORT}`);
     console.log(`   Telemetría: GET http://localhost:${PORT}/gps`);
     console.log(
       `   Login:      http://localhost:${PORT}/ (redirige a /admin, /supervisor u /operator según el rol)`,

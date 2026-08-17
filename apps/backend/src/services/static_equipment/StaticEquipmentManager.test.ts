@@ -1,4 +1,4 @@
-// Test de caracterización — congela el comportamiento actual ANTES
+// Test de caracterización - congela el comportamiento actual ANTES
 // de convertir a TypeScript.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import StaticEquipmentManager from './StaticEquipmentManager';
@@ -17,6 +17,7 @@ function pos(deviceId: number, lat: number) {
 
 const equipment = {
   id: 1,
+  projectId: 1,
   name: 'Pala 1',
   type: 'shovel',
   lat: LAT,
@@ -24,7 +25,8 @@ const equipment = {
   swingRadius: 15,
   safetyRadius: 20,
   status: 'active_swing',
-};
+  linkedDeviceId: null,
+} as const;
 
 describe('StaticEquipmentManager', () => {
   let io: { emit: ReturnType<typeof vi.fn> };
@@ -36,17 +38,72 @@ describe('StaticEquipmentManager', () => {
     manager.registerEquipment(equipment);
   });
 
-  it('updateStatus cambia el estado y emite equipment:status_update', () => {
+  it('updateStatus cambia el estado en memoria y NO emite por socket', () => {
+    // Ya no emite aquí a propósito - antes hacía io.emit(...) a TODOS
+    // los clientes conectados sin importar su proyecto (fuga de
+    // aislamiento). Notificar por socket ahora es responsabilidad del
+    // caller (equipment.routes.ts / operator-sessions.routes.ts), que
+    // sí conoce el projectId y usa broadcastToProject.
     manager.updateStatus(1, 'active_pause');
     expect(manager.equipment[1].status).toBe('active_pause');
-    expect(io.emit).toHaveBeenCalledWith(
-      'equipment:status_update',
-      expect.objectContaining({ equipmentId: 1, status: 'active_pause' }),
-    );
+    expect(io.emit).not.toHaveBeenCalled();
   });
 
   it('updateStatus en un equipo inexistente no lanza ni emite', () => {
     expect(() => manager.updateStatus(999, 'inactive')).not.toThrow();
+    expect(io.emit).not.toHaveBeenCalled();
+  });
+
+  it('clearDeviceLink desvincula la tableta y devuelve el equipo afectado', () => {
+    manager.registerEquipment({ ...equipment, linkedDeviceId: 'TABLETA-EQ' });
+    const result = manager.clearDeviceLink('TABLETA-EQ');
+    expect(result?.id).toBe(1);
+    expect(manager.equipment[1].linkedDeviceId).toBeNull();
+  });
+
+  it('clearDeviceLink con una tableta no vinculada a nada devuelve null', () => {
+    expect(manager.clearDeviceLink('TABLETA-NADA')).toBeNull();
+  });
+
+  it('clearEquipment libera al vehículo que seguía en zona de alerta (approach_clear) y borra el equipo', () => {
+    manager.evaluate(pos(10, north(15))); // entra a "minimum"
+    io.emit.mockClear();
+    manager.clearEquipment(1);
+    // deviceId llega como STRING aquí (a diferencia de otros emits de
+    // esta clase) - clearEquipment lo reconstruye a partir de la
+    // pairKey guardada (`${deviceId}-${equipmentId}`, siempre texto),
+    // no tiene acceso al valor original de evaluate(). En producción
+    // deviceId ya es siempre string (ids reales como "CAMION-01"),
+    // así que no hay diferencia práctica - solo se nota acá porque el
+    // fixture de este archivo usa deviceId numérico por brevedad.
+    expect(io.emit).toHaveBeenCalledWith(
+      'equipment:approach_clear',
+      expect.objectContaining({ deviceId: '10', equipmentId: 1 }),
+    );
+    expect(manager.equipment[1]).toBeUndefined();
+  });
+
+  it('clearEquipment en un vehículo que ya estaba "clear" no emite approach_clear de más', () => {
+    manager.evaluate(pos(11, north(1000))); // nunca entró a ninguna zona
+    io.emit.mockClear();
+    manager.clearEquipment(1);
+    expect(io.emit).not.toHaveBeenCalledWith(
+      'equipment:approach_clear',
+      expect.objectContaining({ deviceId: 11 }),
+    );
+  });
+
+  it('clearEquipment en un equipo inexistente no lanza ni emite', () => {
+    expect(() => manager.clearEquipment(999)).not.toThrow();
+    expect(io.emit).not.toHaveBeenCalled();
+  });
+
+  it('evaluate se salta a sí mismo cuando el deviceId es la tableta vinculada del equipo', () => {
+    manager.registerEquipment({ ...equipment, linkedDeviceId: 'TABLETA-EQ' });
+    // Justo en el centro del equipo (distancia 0) - dispararía
+    // minimum_limit para cualquier otro deviceId, pero este es SU
+    // PROPIA tableta.
+    manager.evaluate({ deviceId: 'TABLETA-EQ', latitude: LAT, longitude: LON });
     expect(io.emit).not.toHaveBeenCalled();
   });
 
@@ -109,7 +166,7 @@ describe('StaticEquipmentManager', () => {
   it('active_pause reduce todos los umbrales al 60%', () => {
     manager.updateStatus(1, 'active_pause');
     io.emit.mockClear();
-    // outerZone pasa de 50 a 30 — a 40m ya no debería disparar "outer"
+    // outerZone pasa de 50 a 30 - a 40m ya no debería disparar "outer"
     manager.evaluate(pos(10, north(40)));
     expect(io.emit).not.toHaveBeenCalledWith('equipment:approach_outer', expect.anything());
 

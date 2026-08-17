@@ -2,7 +2,7 @@
   "name": "gaga-gps-001",
   "private": true,
   "version": "1.0.0",
-  "description": "GAGA-GPS — monorepo (backend + apps web + paquetes compartidos)",
+  "description": "GAGA-GPS - monorepo (backend + apps web + paquetes compartidos)",
   "workspaces": [
     "apps/*",
     "packages/*"

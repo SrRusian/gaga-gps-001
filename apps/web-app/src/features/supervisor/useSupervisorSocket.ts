@@ -5,11 +5,33 @@ import {
   getStoredToken,
   goToLogin,
 } from '@gaga-gps/client';
-import type { ActiveMap, Geofence, Position, PreventiveStopStatus } from '@gaga-gps/shared-types';
+import type {
+  ActiveMap,
+  Geofence,
+  IncidentCategory,
+  IncidentReportedPayload,
+  Position,
+  PreventiveStopStatus,
+  StaticEquipment,
+} from '@gaga-gps/shared-types';
+import type { EquipmentMarkerData } from '@gaga-gps/map-core';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 export interface FleetVehicle extends Position {
   lastSeen: number;
+}
+
+/** Forma en memoria (StaticEquipmentManager) -> forma que espera useEquipmentLayer. */
+function toMarkerData(eq: StaticEquipment): EquipmentMarkerData {
+  return {
+    id: eq.id,
+    name: eq.name,
+    latitude: eq.lat,
+    longitude: eq.lon,
+    swingRadiusMeters: eq.swingRadius,
+    safetyRadiusMeters: eq.safetyRadius,
+    linkedDeviceId: eq.linkedDeviceId,
+  };
 }
 
 export interface AlertEntry {
@@ -17,9 +39,18 @@ export interface AlertEntry {
   message: string;
   severity: 'danger' | 'warning' | 'info';
   since: string;
+  /** Solo presente en incidentes reportados por un operador - los demás tipos de alerta se resuelven solos. */
+  incidentId?: number;
 }
 
 const SEVERITY_RANK: Record<AlertEntry['severity'], number> = { danger: 0, warning: 1, info: 2 };
+
+const INCIDENT_CATEGORY_LABEL: Record<IncidentCategory, string> = {
+  obstacle: 'Objeto en el camino',
+  accident: 'Accidente',
+  traffic: 'Tráfico/bloqueo',
+  other: 'Peligro reportado',
+};
 
 const api = createApiClient({
   getToken: getStoredToken,
@@ -37,17 +68,30 @@ export function useSupervisorSocket() {
   const [connected, setConnected] = useState(false);
   const [fleet, setFleet] = useState<Record<string, FleetVehicle>>({});
   const [geofences, setGeofences] = useState<Geofence[]>([]);
+  const [equipment, setEquipment] = useState<EquipmentMarkerData[]>([]);
   const [activeMaps, setActiveMaps] = useState<ActiveMap[]>([]);
   const [activeAlerts, setActiveAlerts] = useState<Record<string, AlertEntry>>({});
+  const [incidentMarkers, setIncidentMarkers] = useState<Record<number, IncidentReportedPayload>>({});
   const [stopStatus, setStopStatus] = useState<{ active: boolean; reason?: string }>({
     active: false,
   });
 
   const upsertAlert = useCallback(
-    (key: string, message: string, severity: AlertEntry['severity']) => {
+    (
+      key: string,
+      message: string,
+      severity: AlertEntry['severity'],
+      incidentId?: number,
+    ) => {
       setActiveAlerts((prev) => ({
         ...prev,
-        [key]: { key, message, severity, since: prev[key]?.since ?? new Date().toLocaleTimeString('es-MX') },
+        [key]: {
+          key,
+          message,
+          severity,
+          incidentId,
+          since: prev[key]?.since ?? new Date().toLocaleTimeString('es-MX'),
+        },
       }));
     },
     [],
@@ -70,6 +114,7 @@ export function useSupervisorSocket() {
 
     socket.on('maps:active_update', ({ maps }) => setActiveMaps(maps));
     socket.on('geofences:update', (gs) => setGeofences(gs));
+    socket.on('equipment:update', (eqs: StaticEquipment[]) => setEquipment(eqs.map(toMarkerData)));
 
     socket.on('fleet:update', (data) => {
       setFleet((prev) => {
@@ -90,7 +135,7 @@ export function useSupervisorSocket() {
       }
       const severity =
         data.type === 'geofence_red' ? 'danger' : data.type === 'geofence_parking' ? 'info' : 'warning';
-      upsertAlert(key, `Vehículo ${data.deviceId} — ${data.geofenceName ?? 'geocerca'}`, severity);
+      upsertAlert(key, `Vehículo ${data.deviceId} - ${data.geofenceName ?? 'geocerca'}`, severity);
     });
 
     socket.on('supervisor:signal_lost', (data) => {
@@ -100,7 +145,7 @@ export function useSupervisorSocket() {
       } else if (data.level === 1) {
         upsertAlert(key, `Vehículo ${data.deviceId} sin señal (${data.elapsedSeconds}s)`, 'warning');
       } else {
-        upsertAlert(key, `Vehículo ${data.deviceId} sin señal — emergencia`, 'danger');
+        upsertAlert(key, `Vehículo ${data.deviceId} sin señal - emergencia`, 'danger');
       }
     });
 
@@ -112,7 +157,7 @@ export function useSupervisorSocket() {
       }
       upsertAlert(
         key,
-        `Colisión ${data.level === 2 ? 'inminente' : 'próxima'} — V${data.deviceId1} y V${data.deviceId2} a ${data.distance}m`,
+        `Colisión ${data.level === 2 ? 'inminente' : 'próxima'} - V${data.deviceId1} y V${data.deviceId2} a ${data.distance}m`,
         data.level === 2 ? 'danger' : 'warning',
       );
     });
@@ -125,15 +170,69 @@ export function useSupervisorSocket() {
       }
       upsertAlert(
         key,
-        `Proximidad fuera de ruta — V${data.deviceId1} y V${data.deviceId2} a ${data.distance}m`,
+        `Proximidad fuera de ruta - V${data.deviceId1} y V${data.deviceId2} a ${data.distance}m`,
         data.level === 2 ? 'danger' : 'warning',
       );
+    });
+
+    // Marcador en el mapa (posición + radio real) - independiente de
+    // la entrada en la lista de alertas, que usa supervisor:incident.
+    socket.on('incident:reported', (data) => {
+      setIncidentMarkers((prev) => ({ ...prev, [data.id]: data }));
+    });
+    socket.on('incident:resolved', (data) => {
+      setIncidentMarkers((prev) => {
+        if (!(data.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[data.id];
+        return next;
+      });
+    });
+
+    // Alertas de incidente en tiempo real (estilo Waze/Uber) - a
+    // diferencia de los demás tipos, no se resuelven solas: alguien
+    // tiene que confirmarlo (botón "Resolver" en AlertBanner, ver
+    // resolveIncident más abajo).
+    socket.on('supervisor:incident', (data) => {
+      const key = `incident:${data.id}`;
+      if (data.level === 0) {
+        resolveAlert(key);
+        return;
+      }
+      const categoryLabel = INCIDENT_CATEGORY_LABEL[data.category ?? 'other'] ?? 'Incidente';
+      upsertAlert(
+        key,
+        `${categoryLabel}${data.deviceId ? ` - reportado por V${data.deviceId}` : ''}`,
+        'warning',
+        data.id,
+      );
+    });
+
+    // Repuebla "Activas" al conectar con lo que ya estuviera abierto
+    // antes de esta conexión (geocerca/señal/colisión/proximidad/
+    // parada preventiva - incidentes se hidratan aparte, ver
+    // 'incident:reported'/'supervisor:incident' arriba). Antes esta
+    // lista se perdía por completo en cada F5.
+    socket.on('alerts:snapshot', (entries) => {
+      setActiveAlerts((prev) => {
+        const next = { ...prev };
+        entries.forEach((entry) => {
+          if (next[entry.key]) return; // ya llegó por un evento en vivo, no pisarlo
+          next[entry.key] = {
+            key: entry.key,
+            message: entry.message,
+            severity: entry.severity,
+            since: new Date(entry.triggeredAt).toLocaleTimeString('es-MX'),
+          };
+        });
+        return next;
+      });
     });
 
     socket.on('supervisor:preventive_stop', (data) => {
       const key = 'preventive_stop';
       if (data.active) {
-        upsertAlert(key, `Parada preventiva activada — ${data.reason ?? ''}`, 'danger');
+        upsertAlert(key, `Parada preventiva activada - ${data.reason ?? ''}`, 'danger');
       } else {
         resolveAlert(key);
       }
@@ -156,6 +255,7 @@ export function useSupervisorSocket() {
     [activeAlerts],
   );
   const alertCount = alerts.length;
+  const incidents = useMemo(() => Object.values(incidentMarkers), [incidentMarkers]);
 
   const activateStop = useCallback(async () => {
     await api.post<{ success: boolean; status: PreventiveStopStatus }>('/api/fleet/stop', {
@@ -169,15 +269,31 @@ export function useSupervisorSocket() {
     setStopStatus({ active: false });
   }, []);
 
+  // No espera la confirmación del servidor (`supervisor:incident`
+  // nivel 0) para quitarlo de la lista - mismo criterio que
+  // activateStop/deactivateStop: la UI responde de inmediato, el
+  // socket solo confirma lo que ya se hizo (y sincroniza a los demás
+  // supervisores conectados).
+  const resolveIncident = useCallback(
+    async (incidentId: number) => {
+      await api.post(`/api/incidents/${incidentId}/resolve`);
+      resolveAlert(`incident:${incidentId}`);
+    },
+    [resolveAlert],
+  );
+
   return {
     connected,
     fleet,
     geofences,
+    equipment,
     activeMaps,
     alerts,
     alertCount,
+    incidents,
     stopStatus,
     activateStop,
     deactivateStop,
+    resolveIncident,
   };
 }

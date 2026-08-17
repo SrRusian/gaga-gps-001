@@ -1,5 +1,5 @@
 /**
- * Forma pública de un mapa satelital/drone activo — la que consumen
+ * Forma pública de un mapa satelital/drone activo - la que consumen
  * Operador/Supervisor/Admin vía `GET /tiles/active-maps.json` y el
  * evento de Socket.io `maps:active_update`. Ver
  * apps/backend/src/services/maps/mapShape.ts (toPublicShape).

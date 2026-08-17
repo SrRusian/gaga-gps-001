@@ -2,7 +2,7 @@
   "name": "@gaga-gps/map-core",
   "version": "0.0.0",
   "private": true,
-  "description": "Única implementación de sincronización de capas satelitales y renderizado de geocercas (hooks de React sobre MapLibre GL) — reemplaza las 4 copias duplicadas en Operador/Supervisor/Admin.",
+  "description": "Única implementación de sincronización de capas satelitales y renderizado de geocercas (hooks de React sobre MapLibre GL) - reemplaza las 4 copias duplicadas en Operador/Supervisor/Admin.",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {

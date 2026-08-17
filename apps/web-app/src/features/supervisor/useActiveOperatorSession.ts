@@ -2,7 +2,7 @@ import { createApiClient, getStoredToken } from '@gaga-gps/client';
 import { useEffect, useState } from 'react';
 
 // Supervisor sí tiene sesión propia (a diferencia de useOperatorAuth,
-// que usa este mismo cliente para el turno del operador) — se adjunta
+// que usa este mismo cliente para el turno del operador) - se adjunta
 // igual por si en el futuro esta ruta deja de ser pública.
 const api = createApiClient({ getToken: getStoredToken });
 
@@ -21,7 +21,7 @@ export interface ActiveOperatorSession {
 
 /**
  * Turno activo (operador + hora de inicio) de un dispositivo, si lo
- * hay — consulta el mismo endpoint que ya usa la UI de Operador para
+ * hay - consulta el mismo endpoint que ya usa la UI de Operador para
  * saber si un vehículo ya tiene turno abierto
  * (GET /api/operator-sessions/active, pública). Se refresca cada
  * REFRESH_INTERVAL_MS mientras el panel de detalle esté abierto,

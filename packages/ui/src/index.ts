@@ -1,9 +1,11 @@
 export * from './tokens';
 export * from './format';
 export * from './Button';
+export * from './Modal';
 export * from './MapModeSelector';
 export * from './AlertBanner';
 export * from './VehicleCard';
 export * from './StatCard';
 export * from './ConnectionStatusDot';
+export * from './PanelHeader';
 import './styles.css';

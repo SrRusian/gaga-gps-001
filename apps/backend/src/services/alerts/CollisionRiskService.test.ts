@@ -1,9 +1,9 @@
-// Test de caracterización — congela el comportamiento actual ANTES
+// Test de caracterización - congela el comportamiento actual ANTES
 // de convertir a TypeScript.
 //
 // Nota clave sobre cómo funciona el módulo (para diseñar los casos):
 // evaluate(position, fleetState) actualiza el historial SOLO del
-// deviceId de `position` (el "self" de esta llamada) — el historial
+// deviceId de `position` (el "self" de esta llamada) - el historial
 // de cualquier "otherPos" en fleetState debe haberse construido en
 // llamadas anteriores donde ESE deviceId fue el "self". Por eso cada
 // caso arma primero el historial del otro vehículo con 2 llamadas
@@ -20,7 +20,7 @@ function pos(deviceId: number, lat: number, lon = LON) {
   return { deviceId, latitude: lat, longitude: lon };
 }
 
-// Punto a `meters` de distancia al norte del punto fijo (LAT, LON) —
+// Punto a `meters` de distancia al norte del punto fijo (LAT, LON) -
 // mismo longitud para que la distancia sea puramente a lo largo de
 // un meridiano (independiente del factor cos(lat) de la longitud).
 function north(meters: number) {
@@ -57,7 +57,7 @@ describe('CollisionRiskService', () => {
 
   it('detecta proximidad (<=80m, convergiendo) y emite collision:proximity + supervisor:collision nivel 1', () => {
     primeStaticDevice(2);
-    service.evaluate(pos(1, north(200)), {}); // lejos — primera entrada del historial de 1
+    service.evaluate(pos(1, north(200)), {}); // lejos - primera entrada del historial de 1
     io.emit.mockClear();
 
     service.evaluate(pos(1, north(60)), { 2: pos(2, LAT) }); // se acerca a 60m
@@ -116,7 +116,7 @@ describe('CollisionRiskService', () => {
     service.evaluate(pos(1, north(60)), { 2: pos(2, LAT) }); // dispara proximity
     io.emit.mockClear();
 
-    service.evaluate(pos(1, north(500)), { 2: pos(2, LAT) }); // se aleja — diverge
+    service.evaluate(pos(1, north(500)), { 2: pos(2, LAT) }); // se aleja - diverge
 
     expect(io.emit).toHaveBeenCalledWith(
       'collision:clear',
@@ -128,7 +128,7 @@ describe('CollisionRiskService', () => {
     );
   });
 
-  it('mantiene "critical" cuando la convergencia parpadea por ruido de GPS (fix histéresis) — sin esto, dos vehículos casi estáticos disparan/limpian la alerta sin parar', () => {
+  it('mantiene "critical" cuando la convergencia parpadea por ruido de GPS (fix histéresis) - sin esto, dos vehículos casi estáticos disparan/limpian la alerta sin parar', () => {
     primeStaticDevice(2);
     service.evaluate(pos(1, north(200)), {});
     service.evaluate(pos(1, north(30)), { 2: pos(2, LAT) }); // dispara critical
@@ -147,10 +147,10 @@ describe('CollisionRiskService', () => {
     service.evaluate(pos(1, north(30)), { 2: pos(2, LAT) }); // critical
     io.emit.mockClear();
 
-    service.evaluate(pos(1, north(85)), { 2: pos(2, LAT) }); // >40m pero dentro del margen — no limpia
+    service.evaluate(pos(1, north(85)), { 2: pos(2, LAT) }); // >40m pero dentro del margen - no limpia
     expect(io.emit).not.toHaveBeenCalledWith('collision:clear', expect.anything());
 
-    service.evaluate(pos(1, north(100)), { 2: pos(2, LAT) }); // más allá del margen (80*1.15=92) — limpia
+    service.evaluate(pos(1, north(100)), { 2: pos(2, LAT) }); // más allá del margen (80*1.15=92) - limpia
     expect(io.emit).toHaveBeenCalledWith(
       'collision:clear',
       expect.objectContaining({ deviceId1: 1, deviceId2: 2 }),
@@ -158,7 +158,7 @@ describe('CollisionRiskService', () => {
   });
 
   it('pares distintos con IDs de texto no comparten estado interno (bug corregido: Math.min con strings daba NaN para todos los pares)', () => {
-    // deviceId real es un unique_id de texto — se castea igual que
+    // deviceId real es un unique_id de texto - se castea igual que
     // PositionProcessor lo hace en producción.
     const sPos = (id: string, lat: number, lon = LON) =>
       ({ deviceId: id, latitude: lat, longitude: lon }) as unknown as ReturnType<typeof pos>;
@@ -170,7 +170,7 @@ describe('CollisionRiskService', () => {
     service.evaluate(sPos('CAMION-A', LAT), { 'CAMION-B': sPos('CAMION-B', LAT) }); // A-B crítico
     io.emit.mockClear();
 
-    // Par lejano, sin relación — no debe tocar el estado de A-B
+    // Par lejano, sin relación - no debe tocar el estado de A-B
     service.evaluate(sPos('CAMION-C', north(5000)), {});
     service.evaluate(sPos('CAMION-C', north(5000)), {});
     service.evaluate(sPos('CAMION-D', north(5100)), {});
@@ -191,7 +191,7 @@ describe('CollisionRiskService', () => {
       expect.objectContaining({ deviceId1: 5, deviceId2: 2 }),
     );
 
-    // El estado dedup interno usa la clave ordenada "2-5" — una segunda
+    // El estado dedup interno usa la clave ordenada "2-5" - una segunda
     // evaluación en el mismo nivel no debe re-disparar.
     io.emit.mockClear();
     service.evaluate(pos(5, north(28)), { 2: pos(2, LAT) });

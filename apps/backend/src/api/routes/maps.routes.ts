@@ -2,11 +2,11 @@
  * maps.routes.ts
  *
  * Distribución pública de tiles MBTiles offline (Operador/Supervisor,
- * sin autenticación individual — mismo criterio que /api/fleet/*) y
+ * sin autenticación individual - mismo criterio que /api/fleet/*) y
  * del estado actual de capas satelitales activas.
  *
  * Varios mapas pueden estar activos a la vez (ver
- * MapRepository.findActiveReady) — cada uno se sirve por su propio
+ * MapRepository.findActiveReady) - cada uno se sirve por su propio
  * id, no hay un único archivo fijo como antes.
  *
  * RF asociados: RF-MAP-01, RF-MAP-02, RF-MAP-03
@@ -14,7 +14,9 @@
 import Database from 'better-sqlite3';
 import express from 'express';
 import path from 'path';
+import { tryVerifyUser } from '../middleware/auth.middleware';
 import type MapRepository from '../../repositories/MapRepository';
+import type UserRepository from '../../repositories/UserRepository';
 import { toPublicShape } from '../../services/maps/mapShape';
 
 export { toPublicShape };
@@ -22,11 +24,12 @@ export { toPublicShape };
 export interface MapsRouterDeps {
   mapsDir: string;
   mapRepo: MapRepository;
+  userRepo: UserRepository;
 }
 
 export type MapsRouter = express.Router & { invalidateCache: (mapId: number) => void };
 
-export function buildMapsRouter({ mapsDir, mapRepo }: MapsRouterDeps): MapsRouter {
+export function buildMapsRouter({ mapsDir, mapRepo, userRepo }: MapsRouterDeps): MapsRouter {
   const router = express.Router() as MapsRouter;
   const dbCache = new Map<number, InstanceType<typeof Database>>(); // mapId → Database (readonly)
 
@@ -39,7 +42,7 @@ export function buildMapsRouter({ mapsDir, mapRepo }: MapsRouterDeps): MapsRoute
   }
 
   /**
-   * Cierra y descarta el handle SQLite cacheado de un mapa — se
+   * Cierra y descarta el handle SQLite cacheado de un mapa - se
    * llama desde maps-admin.routes.js al eliminarlo, para no dejar un
    * handle abierto apuntando a un archivo ya borrado.
    */
@@ -78,24 +81,36 @@ export function buildMapsRouter({ mapsDir, mapRepo }: MapsRouterDeps): MapsRoute
       }
     } catch (err) {
       // Archivo inexistente (mapa borrado/no listo) u otro error de
-      // lectura — no debe tumbar el request, solo faltar ese tile.
-      console.error(`❌ Error tile (mapa #${mapId}):`, (err as Error).message);
+      // lectura - no debe tumbar el request, solo faltar ese tile.
+      console.error(`Error tile (mapa #${mapId}):`, (err as Error).message);
       res.status(404).send('Mapa no disponible');
     }
   });
 
   /**
-   * Estado actual de capas satelitales activas — lo consumen
+   * Estado actual de capas satelitales activas - lo consumen
    * Operador/Supervisor al cargar (antes de que llegue cualquier
    * evento de socket) y el panel Admin. Mismo shape que el evento
    * de socket `maps:active_update` (ver maps-admin.routes.js).
+   *
+   * Sigue siendo público (sin `authMiddleware`, mismo criterio que
+   * `/api/fleet/*`) - un caller sin token sigue viendo todos los
+   * mapas activos, exactamente igual que antes de que existiera
+   * `project_id`. Si SÍ manda `Authorization: Bearer` válido, se
+   * filtra por su proyecto (`tryVerifyUser` nunca rechaza la
+   * request, solo intenta leer el token).
    */
   router.get('/active-maps.json', async (req, res) => {
     try {
-      const maps = await mapRepo.findActiveReady();
+      const header = req.headers.authorization || '';
+      const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+      const user = await tryVerifyUser(token, userRepo);
+      const projectId = user ? (user.role === 'admin' ? null : user.projectId) : null;
+
+      const maps = await mapRepo.findActiveReady(projectId);
       res.json(maps.map(toPublicShape));
     } catch (err) {
-      console.error('❌ maps.routes GET /active-maps.json:', (err as Error).message);
+      console.error('maps.routes GET /active-maps.json:', (err as Error).message);
       res.status(500).json({ error: 'Error obteniendo mapas activos' });
     }
   });

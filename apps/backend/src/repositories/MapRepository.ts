@@ -2,7 +2,7 @@
  * MapRepository.ts
  *
  * Responsabilidad: CRUD de mapas satelitales/drone importados
- * (tabla `maps`, ver db/migrations/007_maps.sql) — metadata del
+ * (tabla `maps`, ver db/migrations/007_maps.sql) - metadata del
  * pipeline TIF/TFW → MBTiles, no el archivo en sí.
  */
 import { query } from '../config/database';
@@ -19,6 +19,7 @@ export interface MapBounds {
 export interface MapRow {
   id: number;
   name: string;
+  project_id: number | null;
   uploaded_by: number | null;
   status: MapStatus;
   source_crs: string | null;
@@ -36,12 +37,19 @@ export interface MapRow {
 }
 
 class MapRepository {
-  async findAll(): Promise<MapRow[]> {
+  /** `projectId` opcional - sin filtro (Admin) trae todo, igual que geocercas/equipo. */
+  async findAll(projectId?: number | null): Promise<MapRow[]> {
     try {
-      const { rows } = await query<MapRow>('SELECT * FROM maps ORDER BY created_at DESC');
+      const { rows } =
+        projectId != null
+          ? await query<MapRow>(
+              'SELECT * FROM maps WHERE project_id = $1 ORDER BY created_at DESC',
+              [projectId],
+            )
+          : await query<MapRow>('SELECT * FROM maps ORDER BY created_at DESC');
       return rows;
     } catch (err) {
-      console.error('❌ MapRepository.findAll:', (err as Error).message);
+      console.error('MapRepository.findAll:', (err as Error).message);
       throw err;
     }
   }
@@ -51,31 +59,33 @@ class MapRepository {
       const { rows } = await query<MapRow>('SELECT * FROM maps WHERE id = $1', [id]);
       return rows[0] || null;
     } catch (err) {
-      console.error('❌ MapRepository.findById:', (err as Error).message);
+      console.error('MapRepository.findById:', (err as Error).message);
       throw err;
     }
   }
 
   /**
-   * Crea la fila antes de conocer los nombres finales de archivo —
+   * Crea la fila antes de conocer los nombres finales de archivo -
    * el id (necesario para la carpeta maps/sources/<id>/ donde se
    * guardan) solo existe después de este INSERT.
    */
   async create({
     name,
+    projectId,
     uploadedBy,
   }: {
     name: string;
+    projectId: number | null;
     uploadedBy?: number | null;
   }): Promise<MapRow> {
     try {
       const { rows } = await query<MapRow>(
-        `INSERT INTO maps (name, uploaded_by) VALUES ($1,$2) RETURNING *`,
-        [name, uploadedBy || null],
+        `INSERT INTO maps (name, project_id, uploaded_by) VALUES ($1,$2,$3) RETURNING *`,
+        [name, projectId, uploadedBy || null],
       );
       return rows[0];
     } catch (err) {
-      console.error('❌ MapRepository.create:', (err as Error).message);
+      console.error('MapRepository.create:', (err as Error).message);
       throw err;
     }
   }
@@ -95,7 +105,7 @@ class MapRepository {
       );
       return rows[0] || null;
     } catch (err) {
-      console.error('❌ MapRepository.setSourceFiles:', (err as Error).message);
+      console.error('MapRepository.setSourceFiles:', (err as Error).message);
       throw err;
     }
   }
@@ -108,13 +118,13 @@ class MapRepository {
       ]);
       return rows[0] || null;
     } catch (err) {
-      console.error('❌ MapRepository.rename:', (err as Error).message);
+      console.error('MapRepository.rename:', (err as Error).message);
       throw err;
     }
   }
 
   /**
-   * Actualiza el resultado del pipeline — a 'ready' con
+   * Actualiza el resultado del pipeline - a 'ready' con
    * bounds/mbtilesFilename/sizeMb/minZoom/maxZoom, o a 'failed' con
    * errorMessage.
    */
@@ -170,13 +180,13 @@ class MapRepository {
       );
       return rows[0] || null;
     } catch (err) {
-      console.error('❌ MapRepository.updateResult:', (err as Error).message);
+      console.error('MapRepository.updateResult:', (err as Error).message);
       throw err;
     }
   }
 
   /**
-   * Activa o desactiva un mapa como capa visible — varios mapas
+   * Activa o desactiva un mapa como capa visible - varios mapas
    * pueden estar activos a la vez (se apilan en el frontend, ver
    * findActiveReady). Ya no es exclusivo (antes solo uno podía estar
    * activo, servido en un archivo fijo).
@@ -189,24 +199,30 @@ class MapRepository {
       );
       return rows[0] || null;
     } catch (err) {
-      console.error('❌ MapRepository.setActive:', (err as Error).message);
+      console.error('MapRepository.setActive:', (err as Error).message);
       throw err;
     }
   }
 
   /**
-   * Mapas activos y listos, del más viejo al más nuevo — el
+   * Mapas activos y listos, del más viejo al más nuevo - el
    * frontend agrega las capas en este orden, así el mapa creado más
    * recientemente termina agregado al final = visualmente arriba.
    */
-  async findActiveReady(): Promise<MapRow[]> {
+  async findActiveReady(projectId?: number | null): Promise<MapRow[]> {
     try {
-      const { rows } = await query<MapRow>(
-        `SELECT * FROM maps WHERE active = TRUE AND status = 'ready' ORDER BY created_at ASC`,
-      );
+      const { rows } =
+        projectId != null
+          ? await query<MapRow>(
+              `SELECT * FROM maps WHERE active = TRUE AND status = 'ready' AND project_id = $1 ORDER BY created_at ASC`,
+              [projectId],
+            )
+          : await query<MapRow>(
+              `SELECT * FROM maps WHERE active = TRUE AND status = 'ready' ORDER BY created_at ASC`,
+            );
       return rows;
     } catch (err) {
-      console.error('❌ MapRepository.findActiveReady:', (err as Error).message);
+      console.error('MapRepository.findActiveReady:', (err as Error).message);
       throw err;
     }
   }
@@ -216,7 +232,7 @@ class MapRepository {
       await query('DELETE FROM maps WHERE id = $1', [id]);
       return true;
     } catch (err) {
-      console.error('❌ MapRepository.delete:', (err as Error).message);
+      console.error('MapRepository.delete:', (err as Error).message);
       throw err;
     }
   }

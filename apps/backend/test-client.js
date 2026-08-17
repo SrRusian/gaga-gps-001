@@ -1,4 +1,4 @@
-// Cliente de diagnóstico manual — conecta por socket y muestra en
+// Cliente de diagnóstico manual - conecta por socket y muestra en
 // consola los eventos de flota en vivo. Desde que los sockets
 // requieren login (ver auth.middleware.ts → buildSocketAuthMiddleware),
 // primero hace login por HTTP para obtener un token.
@@ -42,9 +42,9 @@ function login() {
   let token;
   try {
     token = await login();
-    console.log(`✅ Login OK (${email})`);
+    console.log(`Login OK (${email})`);
   } catch (err) {
-    console.error('❌ No se pudo hacer login:', err.message);
+    console.error('No se pudo hacer login:', err.message);
     process.exit(1);
   }
 
@@ -55,13 +55,13 @@ function login() {
   });
 
   socket.on('connect', () => {
-    console.log('✅ Cliente conectado al backend GAGA-GPS');
+    console.log('Cliente conectado al backend GAGA-GPS');
     console.log(`Socket ID: ${socket.id}`);
     console.log('Esperando posiciones de la flota...\n');
   });
 
   socket.on('connect_error', (err) => {
-    console.error('❌ Error de conexión:', err.message);
+    console.error('Error de conexión:', err.message);
   });
 
   socket.on('fleet:update', (data) => {

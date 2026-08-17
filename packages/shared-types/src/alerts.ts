@@ -1,13 +1,13 @@
 /**
  * Payloads de los eventos de alerta emitidos por los módulos de
  * seguridad (RF-ALR) vía Socket.io. Formas tomadas directamente del
- * código real de cada servicio (no especulativas) — ver
+ * código real de cada servicio (no especulativas) - ver
  * apps/backend/src/services/alerts/*.ts.
  */
 
 /**
  * Respuesta de GET /api/fleet/stop/status y del campo `status` de
- * POST /api/fleet/stop|resume — ver
+ * POST /api/fleet/stop|resume - ver
  * apps/backend/src/services/alerts/PreventiveStopService.ts (getStatus).
  */
 export interface PreventiveStopStatus {
@@ -84,7 +84,7 @@ export interface SupervisorCollisionPayload extends Partial<CollisionPayload> {
 }
 
 /**
- * Radar de proximidad fuera de ruta — VehicleProximityService.
+ * Radar de proximidad fuera de ruta - VehicleProximityService.
  * Distinto de CollisionPayload (RF-ALR-10, con heurística de
  * convergencia): este es puro por distancia, solo para vehículos
  * que no están dentro de ningún corredor (polyline) activo.
@@ -179,4 +179,78 @@ export interface EquipmentStatusUpdatePayload {
   equipmentId: number;
   status: string;
   timestamp: string;
+}
+
+/**
+ * Alertas de incidente en tiempo real estilo Waze/Uber -
+ * IncidentAlertService. A diferencia de los demás módulos de
+ * seguridad, ya nace aislado por proyecto (broadcastToProject, no
+ * `io.emit` global) - ver README "Multi-tenencia por proyecto".
+ */
+export type IncidentCategory = 'obstacle' | 'accident' | 'traffic' | 'other';
+
+export interface IncidentReportedPayload {
+  id: number;
+  deviceId: string;
+  category: IncidentCategory;
+  message: string | null;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  reportedAt: string;
+}
+
+export interface IncidentResolvedPayload {
+  id: number;
+}
+
+export interface IncidentNearbyPayload {
+  deviceId: string;
+  incidentId: number;
+  category: IncidentCategory;
+  distance: number;
+  message: string;
+}
+
+export interface SupervisorIncidentPayload extends Partial<IncidentReportedPayload> {
+  id: number;
+  level: 0 | 1;
+}
+
+/**
+ * Historial unificado de alertas - ver AlertEventRepository
+ * (backend) / apps/web-app/src/features/supervisor/useAlertHistory.ts.
+ * `AlertEventEntry` es la forma reducida que se manda al conectar
+ * (`alerts:snapshot`) para repoblar "Activas" tras un reload;
+ * `AlertHistoryRow` es la forma completa que devuelve
+ * GET /api/alerts/history (pestaña "Historial", con filtros).
+ */
+export type AlertEventType =
+  | 'geofence'
+  | 'signal_lost'
+  | 'collision'
+  | 'proximity'
+  | 'preventive_stop'
+  | 'incident';
+
+export type AlertEventSeverity = 'info' | 'warning' | 'danger';
+
+export interface AlertEventEntry {
+  key: string;
+  message: string;
+  severity: AlertEventSeverity;
+  triggeredAt: string;
+}
+
+export interface AlertHistoryRow {
+  id: number;
+  project_id: number | null;
+  alert_type: AlertEventType;
+  severity: AlertEventSeverity;
+  device_id: string | null;
+  device_id_2: string | null;
+  message: string | null;
+  metadata: Record<string, unknown> | null;
+  triggered_at: string;
+  resolved_at: string | null;
 }

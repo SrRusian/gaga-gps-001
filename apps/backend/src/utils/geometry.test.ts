@@ -1,4 +1,4 @@
-// Test de caracterización de geometry.ts — convertido a TypeScript
+// Test de caracterización de geometry.ts - convertido a TypeScript
 // en la Fase 1 del plan de migración; este archivo verifica que el
 // comportamiento no cambió, solo el lenguaje.
 import { describe, expect, it } from 'vitest';
@@ -61,7 +61,7 @@ describe('distancePointToLineMeters', () => {
 });
 
 describe('isInsideGeofence', () => {
-  it('círculo — dentro del radio', () => {
+  it('círculo - dentro del radio', () => {
     const geofence = {
       shapeType: 'circle',
       center: { lat: 19.35, lon: -103.56 },
@@ -70,7 +70,7 @@ describe('isInsideGeofence', () => {
     expect(geometry.isInsideGeofence(19.35, -103.56, geofence)).toBe(true);
   });
 
-  it('círculo — justo en el borde (<=) cuenta como dentro', () => {
+  it('círculo - justo en el borde (<=) cuenta como dentro', () => {
     // Construimos un punto a ~100m exactos hacia el norte
     const center = { lat: 19.35, lon: -103.56 };
     const geofence = { shapeType: 'circle', center, radiusMeters: 100 };
@@ -87,7 +87,7 @@ describe('isInsideGeofence', () => {
     expect(geometry.isInsideGeofence(edgePoint.lat, edgePoint.lon, geofence)).toBe(true);
   });
 
-  it('círculo — fuera del radio', () => {
+  it('círculo - fuera del radio', () => {
     const geofence = {
       shapeType: 'circle',
       center: { lat: 19.35, lon: -103.56 },
@@ -121,7 +121,7 @@ describe('isInsideGeofence', () => {
     expect(geometry.isInsideGeofence(19.35, -103.9, geofence)).toBe(false);
   });
 
-  it('polilínea — dentro del ancho del corredor cuenta como dentro', () => {
+  it('polilínea - dentro del ancho del corredor cuenta como dentro', () => {
     const geofence = {
       shapeType: 'polyline',
       corridorWidthMeters: 50,

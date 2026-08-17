@@ -1,4 +1,4 @@
-// Test de caracterización — congela el comportamiento actual ANTES
+// Test de caracterización - congela el comportamiento actual ANTES
 // de convertir a TypeScript. Usa fake timers de Vitest en vez de
 // startMonitoring() real (setInterval de 5s) para no depender de
 // tiempo real en el test.
@@ -98,7 +98,7 @@ describe('SignalLostService', () => {
     expect(io.emit).not.toHaveBeenCalled();
   });
 
-  it('deviceId se convierte con parseInt en los payloads emitidos — con un id no-numérico da NaN', () => {
+  it('deviceId se convierte con parseInt en los payloads emitidos - con un id no-numérico da NaN', () => {
     // Quirk real del código actual: el deviceId real del sistema
     // siempre es numérico (id de la tabla devices), pero si alguna
     // vez llegara un id no-numérico, esto silenciosamente emite NaN
@@ -118,7 +118,7 @@ describe('SignalLostService', () => {
     expect(() => service.stopMonitoring()).not.toThrow();
   });
 
-  it('marca el dispositivo offline en PostgreSQL (vía deviceManager) al llegar a nivel 1 — sin esto el panel admin lo muestra "online" para siempre', () => {
+  it('marca el dispositivo offline en PostgreSQL (vía deviceManager) al llegar a nivel 1 - sin esto el panel admin lo muestra "online" para siempre', () => {
     const deviceManager = { markOffline: vi.fn().mockResolvedValue(undefined) };
     const withDeviceManager = new SignalLostService({ io, preventiveStopService, deviceManager });
 
@@ -129,7 +129,7 @@ describe('SignalLostService', () => {
     expect(deviceManager.markOffline).toHaveBeenCalledWith('CAMION-01');
   });
 
-  it('funciona sin deviceManager (dependencia opcional) — no lanza al llegar a nivel 1', () => {
+  it('funciona sin deviceManager (dependencia opcional) - no lanza al llegar a nivel 1', () => {
     service.recordPosition('CAMION-01');
     vi.advanceTimersByTime(10000);
     expect(() => service.checkAllDevices()).not.toThrow();
@@ -137,7 +137,7 @@ describe('SignalLostService', () => {
 
   it('hydrate siembra lastSeen para que un dispositivo ya viejo desde antes del reinicio se re-evalúe de inmediato', () => {
     // Simula un dispositivo que ya llevaba 30s en silencio ANTES de
-    // que este proceso arrancara — sin hydrate(), checkAllDevices()
+    // que este proceso arrancara - sin hydrate(), checkAllDevices()
     // jamás lo vería porque nunca llamó recordPosition en este proceso.
     service.hydrate([{ deviceId: 'CAMION-VIEJO', lastSeenAt: new Date(Date.now() - 30000) }]);
     service.checkAllDevices();
@@ -148,7 +148,7 @@ describe('SignalLostService', () => {
     );
   });
 
-  it('marca offline también cuando un dispositivo salta directo a nivel 2 (sin pasar por nivel 1) — caso real: hydrate() de un dispositivo silencioso desde horas antes del reinicio', () => {
+  it('marca offline también cuando un dispositivo salta directo a nivel 2 (sin pasar por nivel 1) - caso real: hydrate() de un dispositivo silencioso desde horas antes del reinicio', () => {
     const deviceManager = { markOffline: vi.fn().mockResolvedValue(undefined) };
     const withDeviceManager = new SignalLostService({ io, preventiveStopService, deviceManager });
 

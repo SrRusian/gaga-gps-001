@@ -4,4 +4,6 @@ export * from './positionFilter';
 export * from './mapMode';
 export * from './satelliteLayers';
 export * from './geofenceLayer';
+export * from './incidentLayer';
+export * from './equipmentLayer';
 export * from './vehicleMarker';

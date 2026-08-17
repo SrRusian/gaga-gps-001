@@ -39,7 +39,7 @@ describe('SpeedEstimationService', () => {
     expect(estimate.speedMs * 3.6).toBeLessThan(20);
   });
 
-  it('suaviza velocidad (EMA) — un pico aislado no salta de golpe al valor nuevo', () => {
+  it('suaviza velocidad (EMA) - un pico aislado no salta de golpe al valor nuevo', () => {
     service.estimate('V1', LAT, LON, 0, 0);
     service.estimate('V1', north(1), LON, 1000, 0);
     const estimate = service.estimate('V1', north(2), LON, 2000, 100 / 3.6);
@@ -50,5 +50,27 @@ describe('SpeedEstimationService', () => {
     service.estimate('V1', LAT, LON, 0, 20 / 3.6);
     const v2 = service.estimate('V2', LAT, LON, 0, 5 / 3.6);
     expect(v2.speedMs * 3.6).toBeCloseTo(5, 0);
+  });
+
+  it('un dispositivo parado con deriva de GPS (unos decímetros de ruido por segundo, no movimiento real) reporta 0, no un piso artificial de ruido', () => {
+    // El GPS de un dispositivo quieto "tiembla" unos decímetros por
+    // fix (mismo orden de magnitud que el 0.4-0.7 km/h reportado en
+    // campo) - Haversine siempre da distancia positiva sin importar la
+    // dirección del temblor, así que sin zona muerta esto se traduciría
+    // en una "velocidad" fantasma que nunca decae a cero por más que
+    // se promedie.
+    service.estimate('V1', LAT, LON, 0, 0);
+    service.estimate('V1', north(0.2), LON, 1000, 0);
+    service.estimate('V1', north(0.5), LON, 2000, 0);
+    const estimate = service.estimate('V1', north(0.65), LON, 3000, 0);
+    expect(estimate.speedMs).toBe(0);
+  });
+
+  it('respeta un umbral personalizado de zona muerta (minSpeedKmh)', () => {
+    const strict = new SpeedEstimationService({ minSpeedKmh: 0 });
+    strict.estimate('V1', LAT, LON, 0, 0);
+    // 0.5 km/h reales de movimiento - con minSpeedKmh:0 no se filtra
+    const estimate = strict.estimate('V1', north(0.14), LON, 1000, 0.5 / 3.6);
+    expect(estimate.speedMs).toBeGreaterThan(0);
   });
 });

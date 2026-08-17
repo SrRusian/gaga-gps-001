@@ -11,7 +11,7 @@ module.exports = [
   ...tseslint.configs.recommended,
   {
     // Los scripts sueltos (config raíz, etc.) que todavía son
-    // CommonJS plano — sourceType/globals de Node para que "require"/
+    // CommonJS plano - sourceType/globals de Node para que "require"/
     // "module"/"console" no se marquen como no-definidos.
     files: ['**/*.js'],
     languageOptions: {
@@ -24,7 +24,7 @@ module.exports = [
   },
   {
     // Aplica a todo .ts/.tsx del monorepo (packages/apps con hooks de
-    // React) — inofensivo en archivos sin hooks, así que no hace
+    // React) - inofensivo en archivos sin hooks, así que no hace
     // falta acotarlo carpeta por carpeta.
     files: ['**/*.ts', '**/*.tsx'],
     plugins: { 'react-hooks': reactHooks },

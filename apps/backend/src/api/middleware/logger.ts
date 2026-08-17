@@ -24,9 +24,9 @@ export const logger = winston.createLogger({
 });
 
 /**
- * Middleware Express — registra cada request entrante
+ * Middleware Express - registra cada request entrante
  */
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {
-  logger.info(`${req.method} ${req.originalUrl} — IP: ${req.ip}`);
+  logger.info(`${req.method} ${req.originalUrl} - IP: ${req.ip}`);
   next();
 }

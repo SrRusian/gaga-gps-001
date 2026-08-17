@@ -44,7 +44,7 @@ describe('VehicleProximityService', () => {
 
   it('emite proximity:distance_update en tiempo real dentro del rango de visibilidad, sin alertar todavía', () => {
     // 120m: por debajo de VISIBILITY_METERS (150) pero por encima de
-    // WARNING_METERS (80) — solo debe actualizar el HUD, sin alerta.
+    // WARNING_METERS (80) - solo debe actualizar el HUD, sin alerta.
     service.evaluate(pos('CAMION-01', north(120)), { 'CAMION-02': pos('CAMION-02', LAT) }, []);
 
     expect(io.emit).toHaveBeenCalledWith(

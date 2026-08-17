@@ -11,6 +11,7 @@
  *
  * RF asociados: RF-ALR-02, RF-ALR-03
  */
+import type { RequestHandler } from 'express';
 import express from 'express';
 import type { LineString, Polygon } from 'geojson';
 import GeofenceRepository from '../../repositories/GeofenceRepository';
@@ -21,6 +22,7 @@ import {
   kmlToGeofenceInputs,
 } from '../../utils/geoFormats';
 import type GeofenceAlertService from '../../services/alerts/GeofenceAlertService';
+import type { UserRole } from '../../repositories/UserRepository';
 
 interface SocketServerLike {
   broadcast(event: string, payload: unknown): void;
@@ -30,26 +32,39 @@ export interface GeofencesRouterDeps {
   geofenceRepo: GeofenceRepository;
   geofenceService: GeofenceAlertService;
   socketServer: SocketServerLike;
+  authMiddleware: RequestHandler;
+  downloadAuthMiddleware: RequestHandler;
+  requireRole: (...roles: UserRole[]) => RequestHandler;
 }
 
 export function buildGeofencesRouter({
   geofenceRepo,
   geofenceService,
   socketServer,
+  authMiddleware,
+  downloadAuthMiddleware,
+  requireRole,
 }: GeofencesRouterDeps) {
   const router = express.Router();
 
-  router.get('/', async (req, res) => {
+  // Antes solo exigía sesión válida (cualquier rol autenticado,
+  // incluido operador), sin restricción real - Admin/Encargado/
+  // Supervisor de Proyecto tienen acceso completo (crear/editar/
+  // eliminar/importar/exportar) dentro de su propio proyecto; el
+  // resto de roles queda fuera.
+  const canManage = requireRole('admin', 'project_manager', 'project_supervisor');
+
+  router.get('/', authMiddleware, canManage, async (req, res) => {
     try {
-      const geofences = await geofenceRepo.findAllActive();
+      const geofences = await geofenceRepo.findAllActive(req.user?.projectId);
       res.json(geofences);
     } catch (err) {
-      console.error('❌ geofences.routes GET /:', (err as Error).message);
+      console.error('geofences.routes GET /:', (err as Error).message);
       res.status(500).json({ error: 'Error obteniendo geocercas' });
     }
   });
 
-  router.post('/', async (req, res) => {
+  router.post('/', authMiddleware, canManage, async (req, res) => {
     try {
       const {
         name,
@@ -67,6 +82,13 @@ export function buildGeofencesRouter({
         return res.status(400).json({ error: 'name y type son requeridos' });
       }
 
+      // Admin (projectId null) debe indicar a qué proyecto pertenece;
+      // un Encargado/Supervisor de proyecto no elige, siempre es el suyo.
+      const projectId = req.user!.projectId ?? req.body.projectId ?? null;
+      if (projectId === null) {
+        return res.status(400).json({ error: 'projectId es requerido' });
+      }
+
       const validationError = validateShapeFields(shapeType, {
         centerLat,
         centerLon,
@@ -80,6 +102,7 @@ export function buildGeofencesRouter({
 
       const geofence = await geofenceRepo.create({
         name,
+        projectId,
         type,
         shapeType,
         centerLat,
@@ -96,12 +119,12 @@ export function buildGeofencesRouter({
       socketServer.broadcast('geofences:update', geofenceService.activeGeofences);
       res.status(201).json(geofence);
     } catch (err) {
-      console.error('❌ geofences.routes POST /:', (err as Error).message);
+      console.error('geofences.routes POST /:', (err as Error).message);
       res.status(500).json({ error: 'Error creando geocerca' });
     }
   });
 
-  router.patch('/:id', async (req, res) => {
+  router.patch('/:id', authMiddleware, canManage, async (req, res) => {
     try {
       const {
         name,
@@ -139,26 +162,26 @@ export function buildGeofencesRouter({
 
       res.json(geofence);
     } catch (err) {
-      console.error('❌ geofences.routes PATCH /:id:', (err as Error).message);
+      console.error('geofences.routes PATCH /:id:', (err as Error).message);
       res.status(500).json({ error: 'Error actualizando geocerca' });
     }
   });
 
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', authMiddleware, canManage, async (req, res) => {
     try {
       await geofenceRepo.delete(Number(req.params.id));
-      geofenceService.removeGeofence(parseInt(req.params.id, 10));
+      geofenceService.removeGeofence(parseInt(String(req.params.id), 10));
       socketServer.broadcast('geofences:update', geofenceService.activeGeofences);
       res.json({ success: true });
     } catch (err) {
-      console.error('❌ geofences.routes DELETE /:id:', (err as Error).message);
+      console.error('geofences.routes DELETE /:id:', (err as Error).message);
       res.status(500).json({ error: 'Error eliminando geocerca' });
     }
   });
 
   // ── Exportación en formatos estándar ────────────────────────────
   // Ambas rutas aceptan ?ids=1,2,3 opcional para exportar solo un
-  // subconjunto — sin el parámetro (o vacío), exportan todas las
+  // subconjunto - sin el parámetro (o vacío), exportan todas las
   // geocercas activas, igual que antes (compatible con enlaces ya
   // existentes que usen la ruta directa sin selección).
   function resolveGeofences(req: express.Request) {
@@ -169,38 +192,48 @@ export function buildGeofencesRouter({
     return ids.length > 0 ? geofenceRepo.findByIds(ids) : geofenceRepo.findAllActive();
   }
 
-  // GeoJSON — formato principal, nativo en JS/QGIS/Leaflet/Mapbox
-  router.get('/export.geojson', async (req, res) => {
+  // GeoJSON - formato principal, nativo en JS/QGIS/Leaflet/Mapbox.
+  // `downloadAuthMiddleware` (no el `authMiddleware` estricto de las
+  // demás rutas) porque el frontend dispara esto con un `<a href>`
+  // real, no `fetch()` - un link no puede mandar un header
+  // Authorization, así que acepta el token por query string.
+  router.get('/export.geojson', downloadAuthMiddleware, canManage, async (req, res) => {
     try {
       const geofences = await resolveGeofences(req);
       res.setHeader('Content-Type', 'application/geo+json');
       res.setHeader('Content-Disposition', 'attachment; filename="geocercas.geojson"');
       res.json(geofencesToGeoJSON(geofences));
     } catch (err) {
-      console.error('❌ geofences.routes GET /export.geojson:', (err as Error).message);
+      console.error('geofences.routes GET /export.geojson:', (err as Error).message);
       res.status(500).json({ error: 'Error exportando GeoJSON' });
     }
   });
 
-  // KML — formato usado en topografía/minería y Google Earth
-  router.get('/export.kml', async (req, res) => {
+  // KML - formato usado en topografía/minería y Google Earth (mismo
+  // motivo que export.geojson para usar downloadAuthMiddleware).
+  router.get('/export.kml', downloadAuthMiddleware, canManage, async (req, res) => {
     try {
       const geofences = await resolveGeofences(req);
       res.setHeader('Content-Type', 'application/vnd.google-earth.kml+xml');
       res.setHeader('Content-Disposition', 'attachment; filename="geocercas.kml"');
       res.send(geofencesToKml(geofences));
     } catch (err) {
-      console.error('❌ geofences.routes GET /export.kml:', (err as Error).message);
+      console.error('geofences.routes GET /export.kml:', (err as Error).message);
       res.status(500).json({ error: 'Error exportando KML' });
     }
   });
 
-  // ── Importación — GeoJSON FeatureCollection o texto KML ─────────
+  // ── Importación - GeoJSON FeatureCollection o texto KML ─────────
   // Body: { format: 'geojson', data: <FeatureCollection> } o
   //       { format: 'kml', data: '<contenido del archivo .kml>' }
-  router.post('/import', async (req, res) => {
+  router.post('/import', authMiddleware, canManage, async (req, res) => {
     try {
       const { format, data } = req.body;
+
+      const projectId = req.user!.projectId ?? req.body.projectId ?? null;
+      if (projectId === null) {
+        return res.status(400).json({ error: 'projectId es requerido' });
+      }
 
       let inputs, errors;
       if (format === 'geojson') {
@@ -213,7 +246,7 @@ export function buildGeofencesRouter({
 
       const created = [];
       for (const input of inputs) {
-        const geofence = await geofenceRepo.create(input);
+        const geofence = await geofenceRepo.create({ ...input, projectId });
         geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(geofence));
         created.push(geofence);
       }
@@ -229,10 +262,10 @@ export function buildGeofencesRouter({
         geofences: created,
       });
     } catch (err) {
-      console.error('❌ geofences.routes POST /import:', (err as Error).message);
+      console.error('geofences.routes POST /import:', (err as Error).message);
       res
         .status(500)
-        .json({ error: 'Error importando geocercas — verifique el formato del archivo' });
+        .json({ error: 'Error importando geocercas - verifique el formato del archivo' });
     }
   });
 
@@ -248,7 +281,7 @@ interface ShapeFields {
 }
 
 /**
- * Validación mínima de los campos requeridos según la forma —
+ * Validación mínima de los campos requeridos según la forma -
  * evita persistir geometría malformada que rompería geometry.ts
  * al evaluarse en tiempo real contra las posiciones entrantes.
  */

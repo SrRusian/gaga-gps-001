@@ -1,7 +1,7 @@
 /**
  * geometry.ts
  *
- * Distancia entre dos puntos — Haversine, misma fórmula que ya usa
+ * Distancia entre dos puntos - Haversine, misma fórmula que ya usa
  * el backend (utils/geometry.ts) pero del lado del cliente, para
  * cálculos instantáneos sin ida y vuelta al servidor (p. ej. "vehículo
  * más cercano" recalculado con la posición local del propio operador).

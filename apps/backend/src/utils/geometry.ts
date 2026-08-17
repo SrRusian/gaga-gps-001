@@ -5,7 +5,7 @@
  * cualquier forma (círculo, polígono, ruta/corredor) y para cruzar
  * el historial de posiciones contra zonas autorizadas.
  *
- * No depende de PostGIS — todo se calcula en JavaScript sobre
+ * No depende de PostGIS - todo se calcula en JavaScript sobre
  * coordenadas WGS84 decimal, consistente con el resto del sistema.
  */
 import type { CorridorSeverity, Geofence, PolygonGeofence } from '@gaga-gps/shared-types';
@@ -18,9 +18,9 @@ function toRad(deg: number): number {
 }
 
 /**
- * Distancia en metros entre dos coordenadas — fórmula de Haversine.
+ * Distancia en metros entre dos coordenadas - fórmula de Haversine.
  * (Idéntica a la ya usada en GeofenceAlertService/CollisionRiskService/
- * StaticEquipmentManager — centralizada aquí para nuevas funciones
+ * StaticEquipmentManager - centralizada aquí para nuevas funciones
  * que la necesitan, sin duplicar código).
  */
 export function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -35,8 +35,8 @@ export function haversineDistance(lat1: number, lon1: number, lat2: number, lon2
 
 /**
  * Determina si un punto (lat, lon) está dentro de un polígono
- * GeoJSON — algoritmo ray casting sobre el anillo exterior.
- * No soporta huecos (anillos interiores) — no se requieren para
+ * GeoJSON - algoritmo ray casting sobre el anillo exterior.
+ * No soporta huecos (anillos interiores) - no se requieren para
  * geocercas de zona autorizada.
  */
 export function isPointInPolygon(lat: number, lon: number, polygonGeometry: Polygon): boolean {
@@ -57,8 +57,8 @@ export function isPointInPolygon(lat: number, lon: number, polygonGeometry: Poly
 
 /**
  * Distancia mínima en metros de un punto a un segmento de línea
- * (aproximación planar válida para distancias cortas — cientos de
- * metros a pocos kilómetros — típicas de un sitio minero).
+ * (aproximación planar válida para distancias cortas - cientos de
+ * metros a pocos kilómetros - típicas de un sitio minero).
  */
 export function distancePointToSegmentMeters(
   lat: number,
@@ -120,7 +120,7 @@ export function distancePointToLineMeters(
 
 /**
  * Evalúa si una posición está dentro de una geocerca, sin importar
- * su forma — punto único de verdad usado tanto por
+ * su forma - punto único de verdad usado tanto por
  * GeofenceAlertService (tiempo real) como por el cruce de
  * historial contra zonas (route-zone-crossref).
  */
@@ -142,7 +142,7 @@ export function isInsideGeofence(lat: number, lon: number, geofence: Geofence): 
 }
 
 /**
- * Severidad progresiva para rutas/corredores — a diferencia de
+ * Severidad progresiva para rutas/corredores - a diferencia de
  * círculo/polígono (dentro/fuera binario), una ruta autorizada
  * necesita advertir ANTES de salirse por completo:
  *   distancia <= corridorWidthMeters                      → null (dentro, sin alerta)

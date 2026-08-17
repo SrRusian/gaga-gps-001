@@ -1,10 +1,27 @@
 /**
- * DTOs tal como los devuelve la API del panel Admin — filas crudas
+ * DTOs tal como los devuelve la API del panel Admin - filas crudas
  * de PostgreSQL (snake_case), distintas de las formas normalizadas
  * de @gaga-gps/shared-types que usan Operador/Supervisor en tiempo
  * real. Ver los repositorios correspondientes en apps/backend.
  */
 import type { LineString, Polygon } from 'geojson';
+
+export interface ProjectRow {
+  id: number;
+  name: string;
+  active: boolean;
+  created_at: string;
+}
+
+export interface ShiftRow {
+  id: number;
+  project_id: number;
+  name: string;
+  start_time: string;
+  end_time: string;
+  supervisor_user_id: number | null;
+  active: boolean;
+}
 
 export interface DeviceRow {
   id: number;
@@ -12,6 +29,7 @@ export interface DeviceRow {
   name: string;
   type: string;
   status: string;
+  project_id: number | null;
   last_update: string | null;
 }
 
@@ -23,6 +41,7 @@ export interface GeofenceRow {
   type: 'warning' | 'danger' | 'parking';
   shape_type: GeofenceShapeType;
   active: boolean;
+  project_id: number | null;
   center_lat: number | null;
   center_lon: number | null;
   radius_meters: number | null;
@@ -35,11 +54,13 @@ export interface EquipmentRow {
   id: number;
   name: string;
   type: string;
+  project_id: number | null;
   latitude: number;
   longitude: number;
   swing_radius: number;
   safety_radius: number;
   status: 'active_swing' | 'active_pause' | 'inactive';
+  linked_device_id: string | null;
 }
 
 export type MapStatus = 'processing' | 'ready' | 'failed';
@@ -47,9 +68,13 @@ export type MapStatus = 'processing' | 'ready' | 'failed';
 export interface MapRow {
   id: number;
   name: string;
+  project_id: number | null;
   status: MapStatus;
   source_crs: string | null;
   crs_auto_detected: boolean | null;
+  bounds: { minLat: number; minLon: number; maxLat: number; maxLon: number } | null;
+  min_zoom: number | null;
+  max_zoom: number | null;
   size_mb: number | null;
   error_message: string | null;
   active: boolean;
@@ -60,7 +85,8 @@ export interface UserRow {
   id: number;
   email: string;
   name: string;
-  role: 'operator' | 'supervisor' | 'admin';
+  role: string;
+  project_id: number | null;
   active: boolean;
 }
 
@@ -69,6 +95,10 @@ export interface HistoryPoint {
   latitude: number;
   longitude: number;
   speed: number;
+  course: number;
+  altitude: number;
+  accuracy: number;
+  battery: number | null;
   zones: { id: number; name: string; type: string }[];
 }
 

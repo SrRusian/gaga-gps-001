@@ -3,25 +3,37 @@
  *
  * Responsabilidad: radar de proximidad por distancia entre vehículos
  * que están FUERA de cualquier corredor/ruta autorizada (geocerca
- * tipo polyline) — patios, zonas de maniobra y áreas abiertas sin
+ * tipo polyline) - patios, zonas de maniobra y áreas abiertas sin
  * ruta definida.
  *
  * A diferencia de CollisionRiskService (RF-ALR-10, todos-contra-todos
  * con heurística de trayectorias convergentes), este servicio es
- * puro por distancia — no exige convergencia, porque en zonas sin
+ * puro por distancia - no exige convergencia, porque en zonas sin
  * ruta definida esa heurística es poco confiable. Es un servicio
  * nuevo y separado deliberadamente: CollisionRiskService tiene un
  * bug conocido y documentado (dedupe de pares vía Math.min sobre
- * deviceId string, que da NaN) que no se toca — este servicio nace
+ * deviceId string, que da NaN) que no se toca - este servicio nace
  * con una clave de par correcta desde el día uno.
  *
- * RF asociados: extensión de seguridad — sin RF-ALR asignado aún.
+ * RF asociados: extensión de seguridad - sin RF-ALR asignado aún.
  */
 import type { Geofence } from '@gaga-gps/shared-types';
 import { isInsideGeofence } from '../../utils/geometry';
 
 interface SocketIoLike {
   emit(event: string, payload: unknown): void;
+}
+
+interface AlertEventRepoLike {
+  recordOrEscalate(event: {
+    alertType: 'proximity';
+    severity: 'warning' | 'danger';
+    deviceId: string;
+    deviceId2: string;
+    message?: string | null;
+    metadata?: Record<string, unknown> | null;
+  }): Promise<unknown>;
+  resolveOpen(event: { alertType: 'proximity'; deviceId: string; deviceId2: string }): Promise<unknown>;
 }
 
 interface EvaluatedPosition {
@@ -34,14 +46,16 @@ type ProximityAlertLevel = 'none' | 'warning' | 'critical';
 
 class VehicleProximityService {
   io: SocketIoLike;
+  alertEventRepo?: AlertEventRepoLike;
   proximityAlerts: Record<string, ProximityAlertLevel>;
   readonly VISIBILITY_METERS = 150;
   readonly WARNING_METERS = 80;
   readonly CRITICAL_METERS = 35;
 
-  constructor({ io }: { io: SocketIoLike }) {
+  constructor({ io, alertEventRepo }: { io: SocketIoLike; alertEventRepo?: AlertEventRepoLike }) {
     this.io = io;
-    // Estado de alerta por par de vehículos — clave: ids ordenados
+    this.alertEventRepo = alertEventRepo;
+    // Estado de alerta por par de vehículos - clave: ids ordenados
     // alfabéticamente como string, nunca Math.min/Math.max numérico
     // (deviceId es un string, p. ej. "CAMION-01").
     this.proximityAlerts = {};
@@ -60,7 +74,7 @@ class VehicleProximityService {
   ): void {
     const { deviceId } = position;
     if (this.isInsideAnyRoute(position, activeGeofences)) {
-      // Dentro de una ruta autorizada — este radar no aplica aquí,
+      // Dentro de una ruta autorizada - este radar no aplica aquí,
       // el carril ya acota la separación entre vehículos.
       return;
     }
@@ -129,7 +143,7 @@ class VehicleProximityService {
 
   triggerWarning(deviceId1: string, deviceId2: string, distance: number): void {
     console.log(
-      `⚠️  PROXIMIDAD FUERA DE RUTA — Vehículos ${deviceId1} y ${deviceId2} a ${Math.round(distance)}m`,
+      ` PROXIMIDAD FUERA DE RUTA - Vehículos ${deviceId1} y ${deviceId2} a ${Math.round(distance)}m`,
     );
 
     const payload = {
@@ -137,17 +151,21 @@ class VehicleProximityService {
       deviceId1,
       deviceId2,
       distance: Math.round(distance),
-      message: `PRECAUCIÓN — VEHÍCULO A ${Math.round(distance)} METROS — FUERA DE RUTA`,
+      message: `PRECAUCIÓN - VEHÍCULO A ${Math.round(distance)} METROS - FUERA DE RUTA`,
       timestamp: new Date().toISOString(),
     };
 
     this.io.emit('proximity:warning', payload);
     this.io.emit('supervisor:proximity', { ...payload, level: 1 });
+
+    this._recordAlertEvent(deviceId1, deviceId2, 'warning', payload.message, {
+      distance: payload.distance,
+    });
   }
 
   triggerCritical(deviceId1: string, deviceId2: string, distance: number): void {
     console.log(
-      `🚨 PROXIMIDAD CRÍTICA FUERA DE RUTA — Vehículos ${deviceId1} y ${deviceId2} a ${Math.round(distance)}m`,
+      `PROXIMIDAD CRÍTICA FUERA DE RUTA - Vehículos ${deviceId1} y ${deviceId2} a ${Math.round(distance)}m`,
     );
 
     const payload = {
@@ -155,24 +173,53 @@ class VehicleProximityService {
       deviceId1,
       deviceId2,
       distance: Math.round(distance),
-      message: 'PELIGRO — VEHÍCULO MUY CERCA FUERA DE RUTA — REDUZCA VELOCIDAD',
+      message: 'PELIGRO - VEHÍCULO MUY CERCA FUERA DE RUTA - REDUZCA VELOCIDAD',
       loop: true,
       timestamp: new Date().toISOString(),
     };
 
     this.io.emit('proximity:critical', payload);
     this.io.emit('supervisor:proximity', { ...payload, level: 2 });
+
+    this._recordAlertEvent(deviceId1, deviceId2, 'danger', payload.message, {
+      distance: payload.distance,
+    });
   }
 
   clearAlert(deviceId1: string, deviceId2: string): void {
-    console.log(`✅ Vehículos ${deviceId1} y ${deviceId2} ya no están en riesgo de proximidad`);
+    console.log(`Vehículos ${deviceId1} y ${deviceId2} ya no están en riesgo de proximidad`);
 
     const timestamp = new Date().toISOString();
     this.io.emit('proximity:clear', { deviceId1, deviceId2, timestamp });
     this.io.emit('supervisor:proximity', { deviceId1, deviceId2, level: 0, timestamp });
+
+    this._resolveAlertEvent(deviceId1, deviceId2);
   }
 
-  /** Haversine — distancia en metros. Misma fórmula usada en el resto del sistema. */
+  /** Historial unificado de alertas (ver alert_events) - fire-and-forget. */
+  _recordAlertEvent(
+    deviceId1: string,
+    deviceId2: string,
+    severity: 'warning' | 'danger',
+    message: string,
+    metadata: Record<string, unknown>,
+  ): void {
+    if (!this.alertEventRepo) return;
+    const [a, b] = [deviceId1, deviceId2].sort();
+    this.alertEventRepo
+      .recordOrEscalate({ alertType: 'proximity', severity, deviceId: a, deviceId2: b, message, metadata })
+      .catch((err: Error) => console.error('VehicleProximityService._recordAlertEvent:', err.message));
+  }
+
+  _resolveAlertEvent(deviceId1: string, deviceId2: string): void {
+    if (!this.alertEventRepo) return;
+    const [a, b] = [deviceId1, deviceId2].sort();
+    this.alertEventRepo
+      .resolveOpen({ alertType: 'proximity', deviceId: a, deviceId2: b })
+      .catch((err: Error) => console.error('VehicleProximityService._resolveAlertEvent:', err.message));
+  }
+
+  /** Haversine - distancia en metros. Misma fórmula usada en el resto del sistema. */
   calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371000;
     const dLat = this.toRad(lat2 - lat1);
@@ -189,6 +236,24 @@ class VehicleProximityService {
 
   toRad(deg: number): number {
     return deg * (Math.PI / 180);
+  }
+
+  /**
+   * Limpia el estado de un dispositivo eliminado - mismo criterio y
+   * misma razón que `CollisionRiskService.clearDevice` (par fantasma
+   * en `proximityAlerts` si no se limpia, `pairKey` no se puede
+   * parsear de vuelta de forma confiable así que se reconstruye
+   * contra cada dispositivo conocido).
+   */
+  clearDevice(deviceId: string, otherDeviceIds: string[]): void {
+    otherDeviceIds.forEach((otherId) => {
+      const pairKey = [deviceId, otherId].sort().join('-');
+      const currentAlert = this.proximityAlerts[pairKey];
+      if (currentAlert && currentAlert !== 'none') {
+        this.clearAlert(deviceId, otherId);
+      }
+      delete this.proximityAlerts[pairKey];
+    });
   }
 }
 

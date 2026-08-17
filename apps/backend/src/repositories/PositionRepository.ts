@@ -67,7 +67,7 @@ class PositionRepository {
       );
       return rows[0];
     } catch (err) {
-      console.error('❌ PositionRepository.save:', (err as Error).message);
+      console.error('PositionRepository.save:', (err as Error).message);
       throw err;
     }
   }
@@ -84,13 +84,13 @@ class PositionRepository {
       );
       return rows[0] || null;
     } catch (err) {
-      console.error('❌ PositionRepository.findLatestByDevice:', (err as Error).message);
+      console.error('PositionRepository.findLatestByDevice:', (err as Error).message);
       throw err;
     }
   }
 
   /**
-   * Última posición conocida de cada dispositivo — usado para
+   * Última posición conocida de cada dispositivo - usado para
    * reconstruir el estado de flota al arrancar el backend.
    */
   async findLatestPerDevice(): Promise<PositionRow[]> {
@@ -103,7 +103,7 @@ class PositionRepository {
       );
       return rows;
     } catch (err) {
-      console.error('❌ PositionRepository.findLatestPerDevice:', (err as Error).message);
+      console.error('PositionRepository.findLatestPerDevice:', (err as Error).message);
       throw err;
     }
   }
@@ -111,7 +111,7 @@ class PositionRepository {
   /**
    * Historial de posiciones para reportes / replay (RF panel admin).
    * Excluye posiciones descartadas por PositionFilterService
-   * (valid=false) — nunca deben verse en mapa, historial ni CSV.
+   * (valid=false) - nunca deben verse en mapa, historial ni CSV.
    */
   async findHistory({
     deviceId,
@@ -134,7 +134,7 @@ class PositionRepository {
       );
       return rows;
     } catch (err) {
-      console.error('❌ PositionRepository.findHistory:', (err as Error).message);
+      console.error('PositionRepository.findHistory:', (err as Error).message);
       throw err;
     }
   }

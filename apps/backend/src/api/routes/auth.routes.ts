@@ -32,7 +32,7 @@ export function buildAuthRouter({ userRepo }: { userRepo: UserRepository }) {
       }
 
       // La duración del token depende del rol, no de un flag que
-      // mande el cliente — un operador (tableta fija en el vehículo)
+      // mande el cliente - un operador (tableta fija en el vehículo)
       // necesita que el turno persista varios días sin forzar
       // re-login constante; el resto de roles usa la expiración
       // corta de siempre (env.jwtExpiresIn).
@@ -40,21 +40,33 @@ export function buildAuthRouter({ userRepo }: { userRepo: UserRepository }) {
         user.role === 'operator' ? env.operatorJwtExpiresIn : env.jwtExpiresIn;
 
       const token = jwt.sign(
-        { id: user.id, email: user.email, name: user.name, role: user.role },
+        {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          projectId: user.project_id,
+        },
         env.jwtSecret,
         {
           expiresIn,
         } as jwt.SignOptions,
       );
 
-      console.log(`✅ Login exitoso: ${user.email} (${user.role})`);
+      console.log(`Login exitoso: ${user.email} (${user.role})`);
 
       res.json({
         token,
-        user: { id: user.id, email: user.email, name: user.name, role: user.role },
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          projectId: user.project_id,
+        },
       });
     } catch (err) {
-      console.error('❌ auth.routes /login:', (err as Error).message);
+      console.error('auth.routes /login:', (err as Error).message);
       res.status(500).json({ error: 'Error interno de autenticación' });
     }
   });

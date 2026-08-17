@@ -2,7 +2,7 @@
  * geofenceLayer.ts
  *
  * ÚNICA implementación del renderizado de geocercas (círculo,
- * polígono, polilínea/corredor) sobre MapLibre — antes duplicada 4
+ * polígono, polilínea/corredor) sobre MapLibre - antes duplicada 4
  * veces. circleToPolygon/lineToBufferPolygon se exportan sueltas
  * porque Admin también las necesita para la previsualización en vivo
  * mientras se dibuja una geocerca nueva.
@@ -55,10 +55,16 @@ export function lineToBufferPolygon(lineGeometry: LineString, halfWidthMeters: n
   return { type: 'Polygon', coordinates: [[...left, ...right.reverse(), left[0]]] };
 }
 
+// Colores saturados a propósito, no pastel - deben leerse
+// distintivos a simple vista sobre calles Y sobre satelital, con
+// suficiente opacidad para seguir viendo el terreno debajo (ver
+// fill-opacity en renderGeofences). Un tono demasiado claro/pálido se
+// pierde contra imagen satelital clara; estos son intencionalmente
+// más intensos que un simple amarillo/rojo/azul de manual de estilo.
 function colorForGeofence(g: Geofence): string {
-  if (g.type === 'danger') return '#ff4444';
-  if (g.type === 'parking') return '#3399ff';
-  return '#ffcc00';
+  if (g.type === 'danger') return '#ff1f3d';
+  if (g.type === 'parking') return '#2979ff';
+  return '#ffb300';
 }
 
 function buildGeofenceFeatures(geofences: Geofence[], highlightedId?: number | null): Feature[] {
@@ -82,13 +88,13 @@ function buildGeofenceFeatures(geofences: Geofence[], highlightedId?: number | n
         if (margin) {
           features.push({
             type: 'Feature',
-            properties: { color: '#ffcc00', highlighted: false },
+            properties: { color: '#ffb300', highlighted: false },
             geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters + margin),
           });
         }
         features.push({
           type: 'Feature',
-          properties: { color: '#00ff88', highlighted },
+          properties: { color: '#00e676', highlighted },
           geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters),
         });
         break;
@@ -127,15 +133,18 @@ function renderGeofences(map: MaplibreMap, geofences: Geofence[], highlightedId?
       id: 'geofences-fill',
       type: 'fill',
       source: 'geofences-preview',
-      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.25 },
+      // Relleno translúcido (se sigue viendo el terreno debajo) pero
+      // con un borde grueso y 100% opaco - el contorno es lo que debe
+      // leerse "distintivo a la distancia", el relleno solo refuerza.
+      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.3 },
     });
     map.addLayer({
       id: 'geofences-line',
       type: 'line',
       source: 'geofences-preview',
-      paint: { 'line-color': ['get', 'color'], 'line-width': 2 },
+      paint: { 'line-color': ['get', 'color'], 'line-width': 3, 'line-opacity': 1 },
     });
-    // Capa aparte para el pulso de "geocerca con alerta activa" — se
+    // Capa aparte para el pulso de "geocerca con alerta activa" - se
     // anima variando line-width/line-opacity desde useGeofenceLayer,
     // sin tocar la capa base (evita redibujar todas las geocercas en
     // cada tick de la animación).
@@ -162,7 +171,7 @@ export function useGeofenceLayer(
     renderGeofences(map, geofences, highlightedGeofenceId);
   }, [map, mapLoaded, geofences, highlightedGeofenceId]);
 
-  // Pulso de opacidad/grosor en la geocerca resaltada — puramente
+  // Pulso de opacidad/grosor en la geocerca resaltada - puramente
   // visual, no vuelve a calcular geometría (la capa ya está filtrada
   // por `highlighted` en renderGeofences).
   useEffect(() => {

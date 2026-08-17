@@ -4,7 +4,7 @@
  * Responsabilidad: Exponer un pool de conexiones a PostgreSQL
  * (con PostGIS + TimescaleDB) y utilidades básicas de consulta.
  *
- * Reemplaza la base de datos de Traccar — toda la persistencia
+ * Reemplaza la base de datos de Traccar - toda la persistencia
  * de dispositivos, posiciones, geocercas y usuarios vive aquí.
  */
 import { Pool, type QueryResult, type QueryResultRow } from 'pg';
@@ -21,11 +21,11 @@ export const pool = new Pool({
 });
 
 pool.on('connect', () => {
-  console.log('✅ PostgreSQL — nueva conexión establecida');
+  console.log('PostgreSQL - nueva conexión establecida');
 });
 
 pool.on('error', (err: Error) => {
-  console.error('❌ PostgreSQL — error inesperado en cliente inactivo:', err.message);
+  console.error('PostgreSQL - error inesperado en cliente inactivo:', err.message);
 });
 
 /**
@@ -38,20 +38,20 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   try {
     return await pool.query<T>(text, params);
   } catch (err) {
-    console.error(`❌ Error en query PostgreSQL: ${(err as Error).message}`);
+    console.error(`Error en query PostgreSQL: ${(err as Error).message}`);
     throw err;
   }
 }
 
 /**
- * Verifica conectividad — usado por el health check
+ * Verifica conectividad - usado por el health check
  */
 export async function checkConnection(): Promise<boolean> {
   try {
     await pool.query('SELECT 1');
     return true;
   } catch (err) {
-    console.error('❌ PostgreSQL no disponible:', (err as Error).message);
+    console.error('PostgreSQL no disponible:', (err as Error).message);
     return false;
   }
 }

@@ -1,43 +1,108 @@
-import { clearSession, getStoredUser } from '@gaga-gps/client';
+import { clearSession, getStoredUser, roleLabel } from '@gaga-gps/client';
 import { useMapMode } from '@gaga-gps/map-core';
+import type { AlertEventType } from '@gaga-gps/shared-types';
 import {
   AlertBanner,
   Button,
   ConnectionStatusDot,
   formatAccuracy,
   MapModeSelector,
+  PanelHeader,
   StatCard,
   VehicleCard,
 } from '@gaga-gps/ui';
+import maplibregl from 'maplibre-gl';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './supervisor.css';
+import { GeoManagementPanel, type GeoManagementPanelHandle } from './GeoManagementPanel';
 import { MapView, type MapViewHandle } from './MapView';
 import { useActiveOperatorSession } from './useActiveOperatorSession';
+import { EMPTY_FILTERS, useAlertHistory } from './useAlertHistory';
+import { useMyShift } from './useMyShift';
 import { useSupervisorSocket } from './useSupervisorSocket';
 
 const OFFLINE_THRESHOLD_MS = 45000;
 
+const ALERT_TYPE_LABEL: Record<AlertEventType, string> = {
+  geofence: 'Geocerca',
+  signal_lost: 'Señal perdida',
+  collision: 'Colisión',
+  proximity: 'Proximidad',
+  preventive_stop: 'Parada preventiva',
+  incident: 'Incidente',
+};
+
+const SEVERITY_LABEL = { info: 'Info', warning: 'Precaución', danger: 'Peligro' } as const;
+
+function formatDuration(from: string, to: string): string {
+  const seconds = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 // ProtectedRoute (features/auth) ya garantizó una sesión válida con
-// rol "supervisor" antes de montar este componente.
+// rol "supervisor" o "project_supervisor" antes de montar este
+// componente.
 export default function SupervisorApp() {
   const navigate = useNavigate();
   const user = getStoredUser()!;
+  const isProjectSupervisor = user.role === 'project_supervisor';
   const {
     connected,
-    fleet,
+    fleet: fullFleet,
     geofences,
+    equipment,
     activeMaps,
     alerts,
     alertCount,
+    incidents,
     stopStatus,
     activateStop,
     deactivateStop,
+    resolveIncident,
   } = useSupervisorSocket();
   const [mapMode, setMapMode] = useMapMode('gaga_supervisor_map_mode');
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const mapRef = useRef<MapViewHandle>(null);
+  // Geocercas/Equipo estático/Mapas - acceso completo del Supervisor
+  // de Proyecto dentro de su propio proyecto (GeoManagementPanel).
+  // `rawMap` es la instancia real de maplibregl que MapView entrega
+  // una sola vez lista (`onMapReady`) - MapView sigue sin saber nada
+  // de dibujo/CRUD, solo la comparte con su hermano.
+  const [rawMap, setRawMap] = useState<maplibregl.Map | null>(null);
+  const geoManagementRef = useRef<GeoManagementPanelHandle>(null);
+
+  const [alertsView, setAlertsView] = useState<'active' | 'history'>('active');
+  const [historyFilters, setHistoryFilters] = useState(EMPTY_FILTERS);
+  const { rows: historyRows, loading: historyLoading, error: historyError, search: searchHistory, exportCsv } =
+    useAlertHistory();
+
+  function openHistory() {
+    setAlertsView('history');
+    searchHistory(historyFilters);
+  }
+
+  // Un Supervisor de Proyecto solo ve el mapa/lista de vehículos de
+  // su propio turno asignado por el Encargado - no todos los turnos
+  // del proyecto (eso es lo que sí ve el Encargado, sin este filtro).
+  // `null` para el Supervisor "clásico" - ahí no se filtra nada,
+  // comportamiento de siempre. Las alertas activas (`alerts`) NO se
+  // filtran aquí a propósito: los servicios que las generan
+  // (colisión/proximidad/geocercas) todavía no distinguen ni
+  // proyecto ni turno internamente (gap ya documentado en README/
+  // CLAUDE.md desde la Fase A) - filtrarlas solo en este componente
+  // daría una falsa sensación de aislamiento que no existe de verdad.
+  const myShiftDeviceIds = useMyShift(isProjectSupervisor);
+  const fleet = useMemo(() => {
+    if (!myShiftDeviceIds) return fullFleet;
+    return Object.fromEntries(
+      Object.entries(fullFleet).filter(([deviceId]) => myShiftDeviceIds.has(deviceId)),
+    );
+  }, [fullFleet, myShiftDeviceIds]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(new Date()), 1000);
@@ -49,6 +114,7 @@ export default function SupervisorApp() {
     navigate('/', { replace: true });
   }
 
+  const hasMaps = activeMaps.length > 0;
   const vehicles = useMemo(() => Object.values(fleet), [fleet]);
   const offlineCount = vehicles.filter(
     (v) => now.getTime() - v.lastSeen > OFFLINE_THRESHOLD_MS,
@@ -87,31 +153,30 @@ export default function SupervisorApp() {
 
   return (
     <div className="sup-app">
-      <header className="sup-header">
-        <h1>GAGA GPS — Panel de Supervisión</h1>
-        <div className="sup-header-right">
-          <span>{now.toLocaleTimeString('es-MX')}</span>
-          <div className="sup-connection">
-            <ConnectionStatusDot connected={connected} />
-            <span>{connected ? 'Conectado' : 'Desconectado'}</span>
-          </div>
-          <span>{user.name}</span>
-          <button className="sup-logout-btn" onClick={logout}>
-            Salir
-          </button>
+      <PanelHeader
+        connected={connected}
+        userName={user.name}
+        userRoleLabel={roleLabel(user.role)}
+        onLogout={logout}
+      />{/* Sin children a propósito - Supervisor es una sola vista, sin secciones a las que navegar (a diferencia del nav Dashboard/Reportes/Sistema de Admin/Encargado). */}
+
+      <main className="sup-float-main">
+        <div className="sup-map-bg">
+          <MapView
+            ref={mapRef}
+            fleet={fleet}
+            geofences={geofences}
+            incidents={incidents}
+            equipment={equipment}
+            activeMaps={activeMaps}
+            mapMode={mapMode}
+            onVehicleClick={selectVehicle}
+            onMapReady={setRawMap}
+          />
         </div>
-      </header>
 
-      <div className="sup-main">
-        <aside className="sup-left-panel">
-          <div className="sup-dashboard">
-            <StatCard label="Total" value={vehicles.length} />
-            <StatCard label="En línea" value={onlineCount} />
-            <StatCard label="Alertas" value={alertCount} variant="alert" />
-            <StatCard label="Sin señal" value={offlineCount} variant="warning" />
-          </div>
-
-          <div className="sup-stop-section">
+        <div className="sup-left-stack">
+          <div className="sup-stop-section sup-glass">
             {!stopStatus.active ? (
               <Button variant="danger" className="sup-stop-btn" onClick={handleActivateStop}>
                 Parada preventiva colectiva
@@ -123,66 +188,214 @@ export default function SupervisorApp() {
             )}
             <div className={`sup-stop-status${stopStatus.active ? ' active' : ''}`}>
               {stopStatus.active
-                ? `Activa${stopStatus.reason ? ` — ${stopStatus.reason}` : ''}`
+                ? `Activa${stopStatus.reason ? ` - ${stopStatus.reason}` : ''}`
                 : 'Sistema en operación normal'}
             </div>
           </div>
 
-          <div className="sup-alerts-section">
-            <div className="sup-section-header">
-              Alertas activas{alertCount > 0 ? ` (${alertCount})` : ''}
+          {/* Acceso completo dentro de su propio proyecto - un
+              Supervisor de Proyecto nunca crea/edita/elimina
+              dispositivos ni usuarios, nunca ve historial de
+              recorridos ni Reportes/Sistema (esas opciones
+              simplemente no existen en este panel), pero sí
+              administra Geocercas/Equipo estático/Mapas por completo.
+              Supervisor "clásico" (sin proyecto) no ve este menú -
+              mismo criterio de visibilidad que el resto de este
+              panel. */}
+          {isProjectSupervisor && (
+            <div className="sup-menu-panel sup-glass">
+              <button className="sup-menu-btn" onClick={() => geoManagementRef.current?.open('geofences')}>
+                Geocercas
+              </button>
+              <button className="sup-menu-btn" onClick={() => geoManagementRef.current?.open('equipment')}>
+                Equipo estático
+              </button>
+              <button className="sup-menu-btn" onClick={() => geoManagementRef.current?.open('maps')}>
+                Mapas
+              </button>
             </div>
-            <div className="sup-alerts-list">
-              {alerts.length === 0 ? (
-                <div className="sup-alerts-empty">Sin alertas activas</div>
-              ) : (
-                alerts.map((a) => (
-                  <AlertBanner
-                    key={a.key}
-                    severity={a.severity}
-                    message={a.message}
-                    time={`Desde ${a.since}`}
+          )}
+
+          <div className="sup-alerts-section sup-glass">
+            <div className="sup-section-header sup-alerts-header">
+              <span>Alertas{alertsView === 'active' && alertCount > 0 ? ` (${alertCount})` : ''}</span>
+              <div className="sup-alerts-toggle">
+                <button
+                  className={alertsView === 'active' ? 'active' : ''}
+                  onClick={() => setAlertsView('active')}
+                >
+                  Activas
+                </button>
+                <button className={alertsView === 'history' ? 'active' : ''} onClick={openHistory}>
+                  Historial
+                </button>
+              </div>
+            </div>
+
+            {alertsView === 'active' ? (
+              <div className="sup-alerts-list">
+                {alerts.length === 0 ? (
+                  <div className="sup-alerts-empty">Sin alertas activas</div>
+                ) : (
+                  alerts.map((a) => (
+                    <AlertBanner
+                      key={a.key}
+                      severity={a.severity}
+                      message={a.message}
+                      time={`Desde ${a.since}`}
+                      onResolve={
+                        a.incidentId !== undefined ? () => resolveIncident(a.incidentId!) : undefined
+                      }
+                    />
+                  ))
+                )}
+              </div>
+            ) : (
+              <div className="sup-history-panel">
+                <div className="sup-history-filters">
+                  <select
+                    value={historyFilters.type}
+                    onChange={(e) =>
+                      setHistoryFilters({ ...historyFilters, type: e.target.value as AlertEventType | '' })
+                    }
+                  >
+                    <option value="">Todos los tipos</option>
+                    {Object.entries(ALERT_TYPE_LABEL).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={historyFilters.severity}
+                    onChange={(e) =>
+                      setHistoryFilters({
+                        ...historyFilters,
+                        severity: e.target.value as 'info' | 'warning' | 'danger' | '',
+                      })
+                    }
+                  >
+                    <option value="">Toda severidad</option>
+                    <option value="danger">Peligro</option>
+                    <option value="warning">Precaución</option>
+                    <option value="info">Info</option>
+                  </select>
+                  <input
+                    placeholder="ID dispositivo"
+                    value={historyFilters.deviceId}
+                    onChange={(e) => setHistoryFilters({ ...historyFilters, deviceId: e.target.value })}
                   />
-                ))
-              )}
+                  <input
+                    type="datetime-local"
+                    value={historyFilters.from}
+                    onChange={(e) => setHistoryFilters({ ...historyFilters, from: e.target.value })}
+                  />
+                  <input
+                    type="datetime-local"
+                    value={historyFilters.to}
+                    onChange={(e) => setHistoryFilters({ ...historyFilters, to: e.target.value })}
+                  />
+                  <button className="sup-history-btn" onClick={() => searchHistory(historyFilters)}>
+                    Buscar
+                  </button>
+                  <button className="sup-history-btn" onClick={() => exportCsv(historyFilters)}>
+                    Exportar CSV
+                  </button>
+                </div>
+
+                {historyError && <div className="sup-alerts-empty">{historyError}</div>}
+
+                <div className="sup-history-table-wrap">
+                  <table className="sup-history-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Tipo</th>
+                        <th>Severidad</th>
+                        <th>Dispositivo</th>
+                        <th>Mensaje</th>
+                        <th>Duración</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historyLoading ? (
+                        <tr>
+                          <td colSpan={6}>Cargando…</td>
+                        </tr>
+                      ) : historyRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={6}>Sin resultados</td>
+                        </tr>
+                      ) : (
+                        historyRows.map((r) => (
+                          <tr key={r.id}>
+                            <td>{new Date(r.triggered_at).toLocaleString('es-MX')}</td>
+                            <td>{ALERT_TYPE_LABEL[r.alert_type]}</td>
+                            <td className={`sup-severity-${r.severity}`}>{SEVERITY_LABEL[r.severity]}</td>
+                            <td>{[r.device_id, r.device_id_2].filter(Boolean).join(' / ') || '-'}</td>
+                            <td>{r.message ?? '-'}</td>
+                            <td>
+                              {r.resolved_at ? formatDuration(r.triggered_at, r.resolved_at) : 'Activa'}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="sup-right-stack">
+          <MapModeSelector mode={mapMode} onChange={setMapMode} satelliteAvailable={hasMaps} />
+
+          {!hasMaps && (
+            <div className="gg-no-maps-banner">
+              <span>
+                No hay ningún mapa satelital importado todavía para tu proyecto - los modos
+                Satelital/Mixto no mostrarán nada (Calles sigue disponible).
+              </span>
+            </div>
+          )}
+
+          <div className="sup-vehicle-panel sup-glass">
+            <div className="sup-section-header">Vehículos registrados</div>
+            <div className="sup-vehicle-list">
+              {vehicles.map((v) => {
+                const isOffline = now.getTime() - v.lastSeen > OFFLINE_THRESHOLD_MS;
+                return (
+                  <VehicleCard
+                    key={v.deviceId}
+                    name={v.deviceName || `Vehículo ${v.deviceId}`}
+                    type={v.deviceType}
+                    status={isOffline ? 'offline' : 'online'}
+                    hasAlert={isOffline}
+                    info={`${v.speed ? Math.round(v.speed * 3.6) : 0} km/h  |  ${v.latitude?.toFixed(5)}, ${v.longitude?.toFixed(5)}`}
+                    onClick={() => selectVehicle(v.deviceId)}
+                  />
+                );
+              })}
             </div>
           </div>
 
-          <div className="sup-section-header">Vehículos registrados</div>
-          <div className="sup-vehicle-list">
-            {vehicles.map((v) => {
-              const isOffline = now.getTime() - v.lastSeen > OFFLINE_THRESHOLD_MS;
-              return (
-                <VehicleCard
-                  key={v.deviceId}
-                  name={v.deviceName || `Vehículo ${v.deviceId}`}
-                  type={v.deviceType}
-                  status={isOffline ? 'offline' : 'online'}
-                  hasAlert={isOffline}
-                  info={`${v.speed ? Math.round(v.speed * 3.6) : 0} km/h  |  ${v.latitude?.toFixed(5)}, ${v.longitude?.toFixed(5)}`}
-                  onClick={() => selectVehicle(v.deviceId)}
-                />
-              );
-            })}
+          {isProjectSupervisor && (
+            <GeoManagementPanel ref={geoManagementRef} map={rawMap} geofences={geofences} />
+          )}
+        </div>
+
+        <div className="sup-bottom-left-stack">
+          <div className="sup-stats sup-glass">
+            <StatCard label="Total" value={vehicles.length} />
+            <StatCard label="En línea" value={onlineCount} />
+            <StatCard label="Alertas" value={alertCount} variant="alert" />
+            <StatCard label="Sin señal" value={offlineCount} variant="warning" />
           </div>
-        </aside>
+        </div>
 
-        <div className="sup-map-container">
-          <div className="sup-map-mode-selector-wrap">
-            <MapModeSelector mode={mapMode} onChange={setMapMode} />
-          </div>
-
-          <MapView
-            ref={mapRef}
-            fleet={fleet}
-            geofences={geofences}
-            activeMaps={activeMaps}
-            mapMode={mapMode}
-            onVehicleClick={selectVehicle}
-          />
-
-          {detail && (
-            <div className="sup-vehicle-detail">
+        {detail && (
+            <div className="sup-vehicle-detail sup-glass">
               <div className="sup-detail-title">
                 <span>
                   {detail.deviceName
@@ -190,7 +403,7 @@ export default function SupervisorApp() {
                     : `Vehículo ${detail.deviceId}`}
                 </span>
                 <button className="sup-btn-close" onClick={() => setSelectedVehicle(null)}>
-                  ✕
+                  X
                 </button>
               </div>
               <div className="sup-detail-row">
@@ -259,9 +472,8 @@ export default function SupervisorApp() {
                 </span>
               </div>
             </div>
-          )}
-        </div>
-      </div>
+        )}
+      </main>
     </div>
   );
 }

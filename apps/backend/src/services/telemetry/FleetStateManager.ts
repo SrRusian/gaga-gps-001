@@ -27,7 +27,7 @@ class FleetStateManager {
     try {
       await this.redis.hset(FLEET_KEY, String(position.deviceId), JSON.stringify(position));
     } catch (err) {
-      console.error('❌ FleetStateManager.update:', (err as Error).message);
+      console.error('FleetStateManager.update:', (err as Error).message);
     }
   }
 
@@ -39,7 +39,7 @@ class FleetStateManager {
       const raw = await this.redis.hget(FLEET_KEY, String(deviceId));
       return raw ? JSON.parse(raw) : null;
     } catch (err) {
-      console.error('❌ FleetStateManager.get:', (err as Error).message);
+      console.error('FleetStateManager.get:', (err as Error).message);
       return null;
     }
   }
@@ -62,7 +62,7 @@ class FleetStateManager {
       }
       return fleet;
     } catch (err) {
-      console.error('❌ FleetStateManager.getAll:', (err as Error).message);
+      console.error('FleetStateManager.getAll:', (err as Error).message);
       return {};
     }
   }
@@ -74,7 +74,7 @@ class FleetStateManager {
     try {
       await this.redis.hdel(FLEET_KEY, String(deviceId));
     } catch (err) {
-      console.error('❌ FleetStateManager.remove:', (err as Error).message);
+      console.error('FleetStateManager.remove:', (err as Error).message);
     }
   }
 }

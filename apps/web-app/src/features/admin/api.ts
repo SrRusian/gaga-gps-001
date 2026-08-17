@@ -10,7 +10,7 @@ export const adminApi = createApiClient({
   getToken: getStoredToken,
   onUnauthorized: () => {
     // Token vencido o revocado a media sesión (ej. un admin
-    // desactivó a este usuario) — vuelve al login único.
+    // desactivó a este usuario) - vuelve al login único.
     clearSession();
     goToLogin();
   },

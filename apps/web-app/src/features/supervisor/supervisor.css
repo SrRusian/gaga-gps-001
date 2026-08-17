@@ -9,6 +9,7 @@
   --sup-danger: #e5484d;
   --sup-warning: #f0a83c;
   --sup-info: #4f8ff0;
+  --sup-header-h: 52px;
 
   height: 100vh;
   display: flex;
@@ -18,109 +19,99 @@
   color: var(--sup-text);
 }
 
-.sup-header {
-  min-height: 56px;
-  background: var(--sup-surface);
-  border-bottom: 1px solid var(--sup-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 24px;
-  flex-shrink: 0;
-}
-.sup-header h1 {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  color: var(--sup-text);
-}
-.sup-header-right {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  color: var(--sup-text-muted);
-}
-.sup-connection {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.sup-app .gg-connection-dot {
-  background: var(--sup-danger);
-}
-.sup-app .gg-connection-dot.connected {
-  background: var(--sup-accent);
-}
-.sup-logout-btn {
-  background: none;
-  border: 1px solid var(--sup-border);
-  color: var(--sup-text-muted);
-  padding: 6px 14px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-}
-.sup-logout-btn:hover {
-  border-color: var(--sup-danger);
-  color: var(--sup-danger);
-}
-
-.sup-main {
-  display: flex;
-  flex: 1;
+/* ── Shell flotante estilo Traccar - idéntico en técnica al de Admin,
+   header (`.gg-panel-header`, compartido de verdad, ver
+   `packages/ui`) - el mapa es el fondo de TODA la ventana
+   (`.sup-map-bg`, position:fixed, detrás inclusive del header
+   flotante); todo lo demás flota encima agrupado en columnas fijas
+   (`.sup-left-stack`/`.sup-right-stack`/`.sup-bottom-left-stack`),
+   nunca como una barra lateral en el flujo normal del documento.
+   `--sup-header-h` sigue viviendo aquí (no en el componente
+   compartido, CSS no permite que un hijo exponga una variable hacia
+   su ancestro) - la usan los paneles flotantes para no quedar tapados
+   debajo del header; su valor debe coincidir con la altura real de
+   `.gg-panel-header` en `packages/ui/src/styles.css` (52px / 92px en
+   ≤860px). ── */
+.sup-float-main {
+  position: fixed;
+  inset: 0;
+  padding-top: var(--sup-header-h);
   overflow: hidden;
 }
+.sup-map-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+#sup-map {
+  width: 100%;
+  height: 100%;
+}
 
-/* Ancho fluido, no fijo — deja más mapa disponible en pantallas
-   angostas y no desperdicia espacio de más en monitores anchos. */
-.sup-left-panel {
-  width: clamp(300px, 26vw, 380px);
-  background: var(--sup-surface);
-  border-right: 1px solid var(--sup-border);
+/* Panel de vidrio esmerilado - base visual compartida de todos los
+   flotantes (parada preventiva, menú, alertas, selector de modo,
+   vehículos, detalle) - mismos valores que `.dash-glass` en Admin,
+   para que ambos paneles se sientan la misma familia visual. */
+.sup-glass {
+  background: rgba(20, 23, 28, 0.9);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--sup-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* El contenedor flex en sí no debe capturar clics/movimiento - su
+   caja (column + gap) es más grande que los paneles visibles que
+   contiene, y sin pointer-events:none el espacio "en blanco" entre
+   ellos intercepta el mouse, bloqueando el mapa debajo aunque no se
+   vea nada ahí (mismo bug ya documentado y corregido en Admin). Cada
+   hijo directo (los paneles reales) recupera pointer-events:auto. */
+.sup-left-stack {
+  position: fixed;
+  top: calc(var(--sup-header-h) + 12px);
+  left: 16px;
+  z-index: 20;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.sup-dashboard {
-  padding: 16px;
-  border-bottom: 1px solid var(--sup-border);
-  display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 10px;
+  /* Ancho explícito (no shrink-to-fit como el menú de Admin) - a
+     diferencia de un menú de botones cortos, esta columna aloja
+     contenido denso y de longitud variable (lista de alertas, tabla
+     de historial con filtros) que necesita un ancho legible estable. */
+  width: min(340px, calc(100vw - 400px));
+  max-height: calc(100vh - var(--sup-header-h) - 24px);
+  overflow: hidden;
+  pointer-events: none;
 }
-.sup-app .gg-stat-card {
-  background: var(--sup-surface-2);
-  border: 1px solid var(--sup-border);
+.sup-right-stack {
+  position: fixed;
+  top: calc(var(--sup-header-h) + 12px);
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
 }
-.sup-app .gg-stat-card__value {
-  color: var(--sup-text);
+.sup-bottom-left-stack {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 20;
+  pointer-events: none;
 }
-.sup-app .gg-stat-card__value--alert {
-  color: var(--sup-danger);
-}
-.sup-app .gg-stat-card__value--warning {
-  color: var(--sup-warning);
+.sup-left-stack > *,
+.sup-right-stack > *,
+.sup-bottom-left-stack > * {
+  pointer-events: auto;
 }
 
+/* ── Columna izquierda: parada preventiva → menú de gestión → alertas ── */
 .sup-stop-section {
+  flex-shrink: 0;
   padding: 16px;
-  border-bottom: 1px solid var(--sup-border);
-}
-.sup-app .gg-button--primary {
-  background: var(--sup-accent);
-  color: #0b0d10;
-}
-.sup-app .gg-button--primary:hover {
-  background: #3f7cd6;
-}
-.sup-app .gg-button--danger {
-  background: var(--sup-danger);
 }
 .sup-stop-btn {
   width: 100%;
@@ -140,6 +131,34 @@
   font-weight: 600;
 }
 
+/* Menú de Geocercas/Equipo estático/Mapas - mismo lenguaje "ghost
+   button, resalta al pasar el mouse" ya establecido en el menú
+   vertical de Admin (`.dash-actions .btn`/`.dash-menu-btn`), en vez
+   de botones sólidos azules repitiendo la misma atención. */
+.sup-menu-panel {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+}
+.sup-menu-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--sup-text-muted);
+  text-align: center;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.sup-menu-btn:hover {
+  background: var(--sup-surface-2);
+  color: var(--sup-text);
+  border-color: var(--sup-border);
+}
+
 .sup-section-header {
   padding: 12px 16px;
   font-size: 11px;
@@ -151,12 +170,15 @@
   flex-shrink: 0;
 }
 
+/* Miembro flexible/scrolleable de .sup-left-stack - mismo
+   comportamiento de flex-grow que ya tenía como sección de la barra
+   lateral vieja, solo cambió el contenedor externo que lo posiciona
+   (fixed-stack en vez de sidebar en flujo normal). */
 .sup-alerts-section {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 220px;
-  border-bottom: 1px solid var(--sup-border);
   overflow: hidden;
 }
 .sup-alerts-list {
@@ -168,6 +190,107 @@
   color: var(--sup-text-muted);
   font-size: 12px;
   padding: 8px 4px;
+}
+
+.sup-alerts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sup-alerts-toggle {
+  display: flex;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--sup-border);
+}
+.sup-alerts-toggle button {
+  background: none;
+  border: none;
+  color: var(--sup-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.sup-alerts-toggle button.active {
+  background: var(--sup-accent);
+  color: #0b0d10;
+}
+
+.sup-history-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.sup-history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--sup-border);
+  flex-shrink: 0;
+}
+.sup-history-filters input,
+.sup-history-filters select {
+  background: var(--sup-bg);
+  border: 1px solid var(--sup-border);
+  color: var(--sup-text);
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.sup-history-btn {
+  background: var(--sup-accent);
+  border: none;
+  color: #0b0d10;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.sup-history-btn:hover {
+  background: #3f7cd6;
+}
+.sup-history-table-wrap {
+  overflow: auto;
+  flex: 1;
+}
+.sup-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.sup-history-table th,
+.sup-history-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--sup-border);
+  white-space: nowrap;
+}
+.sup-history-table th {
+  color: var(--sup-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  position: sticky;
+  top: 0;
+  background: var(--sup-surface);
+}
+.sup-severity-danger {
+  color: var(--sup-danger);
+}
+.sup-severity-warning {
+  color: var(--sup-warning);
+}
+.sup-severity-info {
+  color: var(--sup-text-muted);
 }
 .sup-app .gg-alert-banner {
   background: var(--sup-surface-2);
@@ -190,6 +313,20 @@
   color: var(--sup-text-muted);
 }
 
+/* ── Columna derecha: selector de modo → vehículos → panel de crear
+   geocerca/equipo (GeoManagementPanel, condicional) ── */
+.gg-no-maps-banner {
+  max-width: 320px;
+}
+
+.sup-vehicle-panel {
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - var(--sup-header-h) - 100px);
+  overflow: hidden;
+}
 .sup-vehicle-list {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -218,45 +355,44 @@
   color: #fff;
 }
 
-.sup-map-container {
-  flex: 1;
-  position: relative;
+/* ── Columna inferior-izquierda: métricas ── */
+.sup-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 12px 16px;
 }
-#sup-map {
-  width: 100%;
-  height: 100%;
+.sup-stats .gg-stat-card {
+  min-width: 90px;
 }
-
-.sup-map-mode-selector-wrap {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  z-index: 10;
-}
-.sup-app .gg-map-mode-selector {
-  background: rgba(20, 23, 28, 0.92);
-  border-color: var(--sup-border);
-}
-.sup-app .gg-map-mode-btn {
-  color: var(--sup-text-muted);
-}
-.sup-app .gg-map-mode-btn.active {
-  background: var(--sup-accent);
-  color: #0b0d10;
-}
-
-.sup-vehicle-detail {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  width: min(300px, calc(100vw - 32px));
-  max-height: calc(100% - 32px);
-  overflow-y: auto;
-  background: rgba(20, 23, 28, 0.97);
+.sup-app .gg-stat-card {
+  background: var(--sup-surface-2);
   border: 1px solid var(--sup-border);
-  border-radius: 8px;
+}
+.sup-app .gg-stat-card__value {
+  color: var(--sup-text);
+}
+.sup-app .gg-stat-card__value--alert {
+  color: var(--sup-danger);
+}
+.sup-app .gg-stat-card__value--warning {
+  color: var(--sup-warning);
+}
+
+/* ── Detalle de vehículo seleccionado - panel fijo independiente,
+   NO parte de .sup-right-stack a propósito: si viviera ahí junto con
+   la lista de vehículos y el panel de crear geocerca, los tres
+   podrían apilarse más allá del alto de la pantalla al mismo tiempo -
+   cada esquina queda con su propio límite de altura independiente. ── */
+.sup-vehicle-detail {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 30;
+  width: min(300px, calc(100vw - 32px));
+  max-height: calc(100vh - var(--sup-header-h) - 48px);
+  overflow-y: auto;
   padding: 16px;
-  z-index: 100;
 }
 .sup-detail-title {
   font-size: 14px;
@@ -316,36 +452,180 @@
   cursor: pointer;
 }
 
-/* ── Adaptativo — pantalla angosta (tableta): el panel lateral pasa
-   de columna a franja superior con su propio scroll, el mapa ocupa
-   el resto. Nada se oculta — sigue siendo toda la misma información,
-   solo cambia de columna a fila. ── */
+/* ── Geocercas/Equipo estático/Mapas (GeoManagementPanel.tsx) -
+   acceso completo del Supervisor dentro de su propio proyecto.
+   Entrada vía .sup-menu-panel (columna izquierda); panel de crear/
+   editar como hijo normal de .sup-right-stack (ya no necesita su
+   propio position:absolute - flota por vivir dentro de un stack ya
+   posicionado, igual que `.dash-float-panel` en Admin); tablas de
+   gestión dentro de los overlays Modal. ── */
+.sup-app .btn {
+  background: var(--sup-accent);
+  border: none;
+  color: #0b0d10;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.sup-app .btn:hover {
+  background: #3f7cd6;
+}
+.sup-app .btn-sm {
+  padding: 7px 12px;
+  font-size: 12px;
+}
+.sup-app .btn-danger {
+  background: var(--sup-danger);
+  color: #fff;
+}
+.sup-app .btn-danger:hover {
+  background: #c93b40;
+}
+.sup-app .btn.active {
+  background: var(--sup-accent);
+  color: #0b0d10;
+}
+
+.sup-float-panel {
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - var(--sup-header-h) - 40px);
+  overflow-y: auto;
+}
+.sup-float-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--sup-border);
+}
+.sup-float-panel-header h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sup-text);
+}
+.sup-float-panel-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sup-float-panel-body input,
+.sup-float-panel-body select {
+  background: var(--sup-bg);
+  border: 1px solid var(--sup-border);
+  color: var(--sup-text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  width: 100%;
+}
+.sup-float-panel-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.sup-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  margin-top: 2px;
+  border-top: 1px solid var(--sup-border);
+}
+.sup-field-group:first-child {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: none;
+}
+.sup-field-group-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--sup-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sup-hint {
+  font-size: 11px;
+  color: var(--sup-text-muted);
+}
+
+.sup-overlay-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.sup-org-empty {
+  color: var(--sup-text-muted);
+  font-size: 13px;
+  padding: 8px 2px;
+}
+.sup-org-row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.sup-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--sup-surface-2);
+  border: 1px solid var(--sup-accent);
+  color: var(--sup-accent);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+}
+.sup-manage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.sup-manage-table th,
+.sup-manage-table td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--sup-border);
+}
+.sup-manage-table th {
+  color: var(--sup-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.sup-manage-table tbody tr:hover {
+  background: var(--sup-surface-2);
+}
+
+/* ── Adaptativo - pantalla angosta (tableta): mismo criterio que
+   Admin - los stacks pierden su ancho fijo y se estiran de borde a
+   borde, el header pasa a dos filas. Nada se oculta, solo cambia de
+   columnas fijas a franjas apiladas de ancho completo. ── */
 @media (max-width: 860px) {
-  .sup-main {
-    flex-direction: column;
+  .sup-app {
+    --sup-header-h: 92px;
   }
-  .sup-left-panel {
+  .sup-left-stack,
+  .sup-right-stack,
+  .sup-bottom-left-stack {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+    align-items: stretch;
+  }
+  .sup-vehicle-panel,
+  .sup-vehicle-detail,
+  .sup-float-panel {
     width: 100%;
-    max-height: 46vh;
-    overflow-y: auto;
-    border-right: none;
-    border-bottom: 1px solid var(--sup-border);
-  }
-  /* Dentro del panel apilado, que sea el panel completo el que
-     scrollea como una sola unidad — no cada sección peleando por una
-     porción fija de un espacio ya reducido (42vh). */
-  .sup-alerts-section {
-    flex: none;
-    min-height: 0;
-  }
-  .sup-vehicle-list {
-    flex: none;
-    min-height: 0;
-  }
-  .sup-alerts-list {
-    max-height: 200px;
-  }
-  .sup-vehicle-detail {
-    width: min(280px, calc(100vw - 24px));
+    max-width: none;
   }
 }

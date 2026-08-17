@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 
 const api = createApiClient({ getToken: getStoredToken });
 
-// Batería/red/movimiento sí varían minuto a minuto — 30s les alcanza
+// Batería/red/movimiento sí varían minuto a minuto - 30s les alcanza
 // de sobra sin inflar el almacenamiento. userAgent/plataforma/núcleos
 // de CPU no cambian nunca en una misma sesión, por eso van en un
 // perfil aparte que se manda una sola vez (ver reportProfile más abajo).
@@ -50,7 +50,7 @@ async function post(deviceId: string, data: Record<string, unknown>, source: str
   }
 }
 
-// Datos fijos por sesión — una sola vez al montar, no en cada ciclo.
+// Datos fijos por sesión - una sola vez al montar, no en cada ciclo.
 function collectProfile(): Record<string, unknown> {
   const nav = navigator as ExtendedNavigator;
   return {
@@ -63,7 +63,7 @@ function collectProfile(): Record<string, unknown> {
   };
 }
 
-// Datos que sí cambian con el tiempo — batería, red, pantalla,
+// Datos que sí cambian con el tiempo - batería, red, pantalla,
 // movimiento/orientación, almacenamiento. La posición (lat/lon/
 // precisión/altitud/rumbo/velocidad) NO va aquí: ya la cubre
 // `positions` a la frecuencia real del GPS/RTK (Traccar Client);
@@ -107,7 +107,7 @@ async function collectDynamicSnapshot(
           : null,
       };
     } catch {
-      // Sin soporte real en este dispositivo — se omite, no es crítico.
+      // Sin soporte real en este dispositivo - se omite, no es crítico.
     }
   }
 
@@ -116,7 +116,7 @@ async function collectDynamicSnapshot(
       const estimate = await navigator.storage.estimate();
       snapshot.storage = { usageBytes: estimate.usage ?? null, quotaBytes: estimate.quota ?? null };
     } catch {
-      // Idem — algunos navegadores exponen la API pero la rechazan en ciertos contextos.
+      // Idem - algunos navegadores exponen la API pero la rechazan en ciertos contextos.
     }
   }
 
@@ -126,7 +126,7 @@ async function collectDynamicSnapshot(
   return snapshot;
 }
 
-// Canal separado de Traccar Client (app nativa) — todo lo que solo
+// Canal separado de Traccar Client (app nativa) - todo lo que solo
 // el navegador puede ver. Perfil fijo una vez por sesión, snapshot
 // variable cada DYNAMIC_REPORT_INTERVAL_MS mientras la pantalla del
 // operador esté abierta.

@@ -1,11 +1,11 @@
 /**
  * GeofenceRepository.ts
  *
- * Responsabilidad: CRUD de geocercas en PostgreSQL — soporta tres
+ * Responsabilidad: CRUD de geocercas en PostgreSQL - soporta tres
  * formas: círculo (compatibilidad original), polígono y polilínea
  * (ruta/corredor autorizado). Ver db/migrations/003_geofence_shapes.sql.
  *
- * Sustituye la gestión en memoria — GeofenceAlertService sigue
+ * Sustituye la gestión en memoria - GeofenceAlertService sigue
  * evaluando en memoria, pero su lista se hidrata desde aquí.
  */
 import type { Geofence, GeofenceShapeType, GeofenceType } from '@gaga-gps/shared-types';
@@ -15,6 +15,7 @@ import type { GeofenceRow } from '../utils/geoFormats';
 
 export interface CreateGeofenceParams {
   name: string;
+  projectId: number | null;
   type: GeofenceType;
   shapeType?: GeofenceShapeType;
   centerLat?: number;
@@ -38,31 +39,42 @@ export interface UpdateGeofenceParams {
 }
 
 class GeofenceRepository {
-  async findAllActive(): Promise<GeofenceRow[]> {
+  /** `projectId = null` (admin) devuelve todas, sin filtrar. */
+  async findAllActive(projectId?: number | null): Promise<GeofenceRow[]> {
     try {
-      const { rows } = await query<GeofenceRow>(
-        'SELECT * FROM geofences WHERE active = TRUE ORDER BY id ASC',
-      );
+      const { rows } =
+        projectId != null
+          ? await query<GeofenceRow>(
+              'SELECT * FROM geofences WHERE active = TRUE AND project_id = $1 ORDER BY id ASC',
+              [projectId],
+            )
+          : await query<GeofenceRow>('SELECT * FROM geofences WHERE active = TRUE ORDER BY id ASC');
       return rows;
     } catch (err) {
-      console.error('❌ GeofenceRepository.findAllActive:', (err as Error).message);
+      console.error('GeofenceRepository.findAllActive:', (err as Error).message);
       throw err;
     }
   }
 
   /**
-   * Subconjunto de geocercas por id — usado por la exportación
+   * Subconjunto de geocercas por id - usado por la exportación
    * selectiva de GeoJSON/KML (ver geofences.routes.js).
    */
-  async findByIds(ids: number[]): Promise<GeofenceRow[]> {
+  async findByIds(ids: number[], projectId?: number | null): Promise<GeofenceRow[]> {
     try {
-      const { rows } = await query<GeofenceRow>(
-        'SELECT * FROM geofences WHERE active = TRUE AND id = ANY($1) ORDER BY id ASC',
-        [ids],
-      );
+      const { rows } =
+        projectId != null
+          ? await query<GeofenceRow>(
+              'SELECT * FROM geofences WHERE active = TRUE AND id = ANY($1) AND project_id = $2 ORDER BY id ASC',
+              [ids, projectId],
+            )
+          : await query<GeofenceRow>(
+              'SELECT * FROM geofences WHERE active = TRUE AND id = ANY($1) ORDER BY id ASC',
+              [ids],
+            );
       return rows;
     } catch (err) {
-      console.error('❌ GeofenceRepository.findByIds:', (err as Error).message);
+      console.error('GeofenceRepository.findByIds:', (err as Error).message);
       throw err;
     }
   }
@@ -72,7 +84,7 @@ class GeofenceRepository {
       const { rows } = await query<GeofenceRow>('SELECT * FROM geofences WHERE id = $1', [id]);
       return rows[0] || null;
     } catch (err) {
-      console.error('❌ GeofenceRepository.findById:', (err as Error).message);
+      console.error('GeofenceRepository.findById:', (err as Error).message);
       throw err;
     }
   }
@@ -83,10 +95,11 @@ class GeofenceRepository {
    *   - circle: centerLat, centerLon, radiusMeters
    *   - polygon: geometry (GeoJSON Polygon)
    *   - polyline: geometry (GeoJSON LineString), corridorWidthMeters,
-   *     corridorDangerMarginMeters (opcional — ver getCorridorSeverity)
+   *     corridorDangerMarginMeters (opcional - ver getCorridorSeverity)
    */
   async create({
     name,
+    projectId,
     type,
     shapeType = 'circle',
     centerLat,
@@ -99,11 +112,12 @@ class GeofenceRepository {
     try {
       const { rows } = await query<GeofenceRow>(
         `INSERT INTO geofences
-           (name, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, corridor_danger_margin_meters)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+           (name, project_id, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, corridor_danger_margin_meters)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
          RETURNING *`,
         [
           name,
+          projectId,
           type,
           shapeType,
           centerLat ?? null,
@@ -116,13 +130,13 @@ class GeofenceRepository {
       );
       return rows[0];
     } catch (err) {
-      console.error('❌ GeofenceRepository.create:', (err as Error).message);
+      console.error('GeofenceRepository.create:', (err as Error).message);
       throw err;
     }
   }
 
   /**
-   * Edita una geocerca existente — no cambia su forma (shape_type),
+   * Edita una geocerca existente - no cambia su forma (shape_type),
    * solo sus parámetros: nombre/tipo/estado siempre, y según la
    * forma: radio y centro (círculo), geometría (polígono/ruta),
    * ancho y margen de peligro (ruta).
@@ -167,7 +181,7 @@ class GeofenceRepository {
       );
       return rows[0] || null;
     } catch (err) {
-      console.error('❌ GeofenceRepository.update:', (err as Error).message);
+      console.error('GeofenceRepository.update:', (err as Error).message);
       throw err;
     }
   }
@@ -177,14 +191,14 @@ class GeofenceRepository {
       await query('DELETE FROM geofences WHERE id = $1', [id]);
       return true;
     } catch (err) {
-      console.error('❌ GeofenceRepository.delete:', (err as Error).message);
+      console.error('GeofenceRepository.delete:', (err as Error).message);
       throw err;
     }
   }
 
   /**
    * Convierte una fila de PostgreSQL al formato en memoria que
-   * espera GeofenceAlertService.addGeofence() — un único lugar
+   * espera GeofenceAlertService.addGeofence() - un único lugar
    * para esta conversión, usado tanto al hidratar al arrancar
    * (app.js) como al crear una geocerca vía API (geofences.routes.js).
    */

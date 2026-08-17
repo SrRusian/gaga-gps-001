@@ -1,4 +1,4 @@
-// Test de caracterización — congela el comportamiento actual ANTES
+// Test de caracterización - congela el comportamiento actual ANTES
 // de convertir a TypeScript.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import GeofenceAlertService from './GeofenceAlertService';

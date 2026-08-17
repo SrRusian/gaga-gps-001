@@ -3,7 +3,7 @@
  *
  * Carga el único `.env` del proyecto (raíz del repo), sin importar
  * desde dónde se arranque el proceso. `dotenv/config` por sí solo
- * resuelve `.env` relativo a `process.cwd()` — con npm workspaces,
+ * resuelve `.env` relativo a `process.cwd()` - con npm workspaces,
  * eso cambia según cómo se invoque (`npm run dev:backend` corre con
  * cwd = apps/backend, no la raíz), lo que antes obligaba a mantener
  * un `.env` duplicado dentro de apps/backend solo para ese caso.

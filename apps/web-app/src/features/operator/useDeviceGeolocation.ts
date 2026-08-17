@@ -24,14 +24,14 @@ const ERROR_CODE_LABEL: Record<number, string> = {
 };
 
 // Misma clave interna para las dos instancias del filtro (backend y
-// este hook) — cada uno corre en su propio proceso/dispositivo, no
+// este hook) - cada uno corre en su propio proceso/dispositivo, no
 // comparten estado, solo la lógica.
 const LOCAL_FILTER_DEVICE_KEY = 'local-device';
 
-// Sensor local del dispositivo — funciona sin conexión al servidor.
+// Sensor local del dispositivo - funciona sin conexión al servidor.
 // Pasa por la misma lógica anti-teletransporte que usa el backend
 // para Traccar Client (PositionFilterService, copia en
-// @gaga-gps/map-core — ver comentario ahí) — sin esto, un salto de
+// @gaga-gps/map-core - ver comentario ahí) - sin esto, un salto de
 // fix/float del RTK que el servidor ya descarta para lo que ve el
 // supervisor seguiría mostrándose, sin
 // filtrar, en la pantalla del propio operador.
@@ -56,7 +56,7 @@ export function useDeviceGeolocation() {
           fixTime: pos.timestamp,
         });
 
-        // Salto físicamente implausible (glitch fix/float del RTK) —
+        // Salto físicamente implausible (glitch fix/float del RTK) -
         // se ignora y se mantiene la última posición aceptada en
         // pantalla, igual que hace el backend con lo que ve el resto
         // de la flota.
@@ -74,7 +74,7 @@ export function useDeviceGeolocation() {
       },
       (err) => {
         const label = ERROR_CODE_LABEL[err.code] ?? `Código ${err.code}`;
-        setError(`${label}${err.message ? ` — ${err.message}` : ''}`);
+        setError(`${label}${err.message ? ` - ${err.message}` : ''}`);
       },
       WATCH_OPTIONS,
     );

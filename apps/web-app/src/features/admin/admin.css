@@ -31,115 +31,76 @@
   background: #3f7cd6;
 }
 
-.ad-header {
-  height: 52px;
-  background: var(--ad-surface);
-  border-bottom: 1px solid var(--ad-border);
+/* ── Shell flotante estilo Traccar - el header (`.gg-panel-header`,
+   compartido de verdad con Supervisor, ver `packages/ui`) es una
+   barra semi-transparente fija encima de TODO. Ya no hay barra
+   lateral de navegación fija: los 4 destinos viven como pills dentro
+   del mismo header (pasados como `children` a `PanelHeader`), no en
+   una columna aparte compitiendo por ancho con el contenido.
+   `--ad-header-h` sigue viviendo aquí (no en el componente
+   compartido) porque CSS no permite que un hijo exponga una variable
+   hacia su ancestro - la usan los paneles flotantes de Dashboard para
+   no quedar tapados debajo del header; su valor debe coincidir con la
+   altura real de `.gg-panel-header` en `packages/ui/src/styles.css`
+   (52px / 92px en ≤860px). ── */
+.ad-app {
+  --ad-header-h: 52px;
+}
+.ad-float-nav {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  flex-shrink: 0;
+  gap: 4px;
 }
-.ad-header h1 {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  color: var(--ad-text);
-}
-.ad-header-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  font-size: 13px;
-  color: var(--ad-text);
-}
-.ad-user-role {
-  color: var(--ad-text-muted);
-}
-.ad-logout-btn {
+.ad-float-nav button {
   background: none;
-  border: 1px solid var(--ad-border);
+  border: 1px solid transparent;
   color: var(--ad-text-muted);
-  padding: 6px 14px;
+  padding: 7px 14px;
   border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-}
-.ad-logout-btn:hover {
-  border-color: var(--ad-danger);
-  color: var(--ad-danger);
-}
-
-.ad-body {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
-
-/* ── Nav — barra lateral vertical en pantallas anchas; se convierte
-   en tira horizontal con scroll en pantallas angostas (tableta) para
-   no competir por espacio con el contenido. ── */
-.ad-nav {
-  width: 200px;
-  flex-shrink: 0;
-  background: var(--ad-surface);
-  border-right: 1px solid var(--ad-border);
-  display: flex;
-  flex-direction: column;
-  padding: 10px 0;
-  overflow-y: auto;
-}
-.ad-nav button {
-  background: none;
-  border: none;
-  border-left: 3px solid transparent;
-  color: var(--ad-text-muted);
-  text-align: left;
-  padding: 11px 20px;
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
 }
-.ad-nav button:hover {
+.ad-float-nav button:hover {
   background: var(--ad-surface-2);
   color: var(--ad-text);
 }
-.ad-nav button.active {
+.ad-float-nav button.active {
   color: var(--ad-accent);
-  border-left-color: var(--ad-accent);
   background: var(--ad-surface-2);
+  border-color: var(--ad-border);
   font-weight: 600;
 }
 
-.ad-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
+/* Dashboard: transparente y sin scroll propio - su mapa de fondo es
+   `position:fixed` y sus controles son paneles flotantes, así que
+   este contenedor no necesita ni fondo ni overflow visible. Las
+   demás secciones (sin mapa) usan el modificador `--solid` para
+   recuperar un fondo sólido + scroll normal debajo del header. */
+.ad-float-main {
+  position: fixed;
+  inset: 0;
+  padding-top: var(--ad-header-h);
+  overflow: hidden;
 }
-.ad-content h3 {
+.ad-float-main--solid {
+  background: var(--ad-bg);
+  overflow-y: auto;
+  padding: calc(var(--ad-header-h) + 20px) 20px 20px;
+}
+.ad-float-main--solid h3 {
   font-size: 13px;
   font-weight: 600;
   color: var(--ad-text);
   margin-bottom: 12px;
 }
 
-/* ── Tarjetas — contenedor genérico para formularios/tablas ── */
+/* ── Tarjetas - contenedor genérico para formularios/tablas ── */
 .card {
   background: var(--ad-surface);
   border: 1px solid var(--ad-border);
   border-radius: 8px;
   padding: 16px 18px;
   margin-bottom: 16px;
-}
-
-/* Caso especial: una tarjeta cuyo contenido son métricas del
-   dashboard — se acomodan en grid en vez de inline-block (que deja
-   huecos de espacio en blanco irregulares al envolver). */
-.card:has(.metric) {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
 }
 
 table {
@@ -198,82 +159,13 @@ tbody tr:hover {
   background: #c93b40;
 }
 
-#ad-map,
-#ad-hist-map {
-  border-radius: 8px;
-  margin-bottom: 16px;
-  position: relative;
-  border: 1px solid var(--ad-border);
-}
-#ad-map {
-  height: calc(100vh - 320px);
-  min-height: 420px;
-}
-#ad-hist-map {
-  height: 400px;
-}
-
-.map-mode-selector {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 10;
-  display: flex;
-  background: rgba(20, 23, 28, 0.92);
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid var(--ad-border);
-}
-.map-mode-btn {
-  background: none;
-  border: none;
-  color: var(--ad-text-muted);
-  font-size: 11px;
-  padding: 8px 12px;
-  cursor: pointer;
-}
-.map-mode-btn.active {
-  background: var(--ad-accent);
-  color: #0b0d10;
-  font-weight: 600;
-}
-.map-mode-btn:disabled {
-  color: #454b55;
-  cursor: not-allowed;
-}
-
-.no-maps-banner {
-  display: flex;
-  background: var(--ad-surface-2);
-  border: 1px solid var(--ad-warning);
-  color: var(--ad-warning);
-  border-radius: 6px;
-  padding: 8px 12px;
-  font-size: 12px;
-  margin-bottom: 8px;
-  align-items: center;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.metric {
-  background: var(--ad-surface-2);
-  border: 1px solid var(--ad-border);
-  border-radius: 8px;
-  padding: 14px 16px;
-}
-.metric .value {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--ad-accent);
-}
-.metric .label {
-  font-size: 11px;
-  color: var(--ad-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  margin-top: 2px;
-}
+/* El selector Calles/Satelital/Mixto en sí ahora es el componente
+   compartido `MapModeSelector` (@gaga-gps/ui, clases `gg-map-mode-*`)
+   - se renderiza directo como miembro de `.dash-right-stack`, sin
+   ningún wrapper propio: ya trae su fondo/borde/radio completos
+   (mismos valores que tenía la versión hecha a mano de Admin), un
+   wrapper `dash-glass` alrededor solo lo habría metido dentro de una
+   segunda caja (glass sobre glass) que el original nunca tuvo. */
 
 .status-online,
 .status-ready {
@@ -294,6 +186,66 @@ tbody tr:hover {
   color: var(--ad-text-muted);
 }
 
+/* ── Organización - Proyectos + Turnos + Usuarios en una sola vista
+   lineal: se elige un proyecto arriba y las secciones de abajo se
+   acotan a ese proyecto, en vez de 3 pestañas sueltas sin relación
+   visible entre sí. ── */
+.org-row {
+  cursor: pointer;
+}
+.org-row:hover {
+  background: var(--ad-surface-2);
+}
+.org-row.selected {
+  background: var(--ad-surface-2);
+  box-shadow: inset 3px 0 0 var(--ad-accent);
+}
+.org-row td:first-child {
+  font-weight: 600;
+}
+.org-row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.org-empty {
+  color: var(--ad-text-muted);
+  font-size: 13px;
+  padding: 8px 2px;
+}
+
+/* Encabezado de columna con explicación adicional al pasar el mouse -
+   el ícono deja visible que hay más información, en vez de depender
+   de un title invisible sobre el texto plano. Círculo dibujado con
+   CSS + una "i" simple (sin símbolo Unicode de información, mismo
+   criterio ya usado para la X ascii del botón de cerrar) para no
+   introducir un glifo pictográfico nuevo. */
+.dash-th-with-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.dash-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--ad-text-muted);
+  color: var(--ad-text-muted);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-style: italic;
+  font-weight: 700;
+  font-size: 10px;
+  line-height: 1;
+  cursor: help;
+}
+.dash-info-icon:hover {
+  border-color: var(--ad-accent);
+  color: var(--ad-accent);
+}
 .ad-badge {
   display: inline-block;
   margin-left: 8px;
@@ -309,36 +261,588 @@ tbody tr:hover {
   vertical-align: middle;
 }
 
-/* ── Adaptativo — tableta/pantalla angosta: la barra lateral se
-   convierte en una tira horizontal con scroll, para no robarle
-   ancho al contenido. ── */
+/* ── Dashboard estilo Traccar - el mapa es el fondo de toda la
+   ventana (`.dash-map-bg`, `position:fixed`, `z-index:0`, detrás
+   inclusive del header flotante); todo lo demás flota encima como
+   paneles independientes agrupados en dos columnas fijas
+   (`.dash-left-stack` para el picker de alcance + acciones,
+   `.dash-right-stack` para métricas + modo de mapa + creación),
+   nunca como tarjetas apiladas en el flujo normal del documento.
+   Turnos/Dispositivos/Usuarios/Geocercas/Equipo/Mapas se administran
+   en overlays (Modal size="large"), abiertos bajo demanda desde los
+   botones de `.dash-actions`. ── */
+.dash-map-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+/* Panel de vidrio esmerilado - base compartida de todos los
+   flotantes (toolbar, stats, selector de modo, aviso, panel de
+   creación) para que se sientan como una sola familia visual sobre
+   el mapa, en vez de cada uno con su propio tratamiento. */
+.dash-glass {
+  background: rgba(20, 23, 28, 0.9);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--ad-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* El contenedor flex en sí no debe capturar clics/movimiento - su
+   caja (column + gap) es más grande que los paneles visibles que
+   contiene, y sin pointer-events:none el espacio "en blanco" entre
+   ellos (donde no hay ningún .dash-glass pintado) igual intercepta el
+   mouse, bloqueando el mapa/mapbox-gl-draw debajo aunque no se vea
+   nada ahí. Cada hijo directo (los paneles reales) recupera
+   pointer-events:auto explícitamente. */
+.dash-left-stack {
+  position: fixed;
+  top: calc(var(--ad-header-h) + 12px);
+  left: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Antes calc(100vw - 32px) - casi sin límite, así que la barra de
+     herramientas (picker + botones de Dispositivos/Usuarios/Geocercas/
+     Equipo estático/Mapas) crecía lo suficiente para meterse debajo de
+     .dash-right-stack (métricas + selector de modo, ~450px de ancho
+     fijo en la esquina derecha) en vez de envolver sus propios botones
+     a una segunda línea. 480px reserva ese espacio a propósito - el
+     `flex-wrap: wrap` que ya tiene .dash-toolbar/.dash-actions hace el
+     resto. */
+  max-width: calc(100vw - 480px);
+  pointer-events: none;
+}
+.dash-right-stack {
+  position: fixed;
+  top: calc(var(--ad-header-h) + 12px);
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+/* Métricas (Dispositivos/En línea/Geocercas/Equipo estático) - antes
+   arriba a la derecha, junto al selector de modo; movidas aquí a
+   pedido explícito del usuario, esquina inferior izquierda, separadas
+   del menú de accesos de arriba para que cada grupo se lea como su
+   propia unidad. */
+.dash-bottom-left-stack {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 20;
+  pointer-events: none;
+}
+.dash-left-stack > *,
+.dash-right-stack > *,
+.dash-bottom-left-stack > * {
+  pointer-events: auto;
+}
+
+/* De arriba hacia abajo a propósito - picker de proyecto arriba,
+   lista de accesos (Dispositivos/Usuarios/Geocercas/Equipo estático/
+   Mapas) debajo, como un menú vertical - en vez de una fila horizontal
+   que crecía sin límite hasta meterse debajo de .dash-right-stack.
+   Contenido centrado y con jerarquía visual clara: el <select> y
+   "+ Proyecto" (única acción de "crear") se quedan con el tratamiento
+   sólido de `.btn` - todo lo demás (navegación: "Gestionar
+   proyectos" y cada acceso de `.dash-actions`) usa `.dash-menu-btn`,
+   el mismo lenguaje ya establecido en `.ad-float-nav` (la barra
+   superior Dashboard/Historial/Reportes/Sistema) - fondo transparente
+   en reposo, resalta al pasar el mouse, en vez de botones sólidos
+   azules repetidos que compiten todos por la misma atención. */
+.dash-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  padding: 16px;
+}
+.dash-scope-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.dash-scope-picker select {
+  background: var(--ad-bg);
+  border: 1px solid var(--ad-border);
+  color: var(--ad-text);
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  width: 100%;
+  text-align: center;
+  text-align-last: center;
+}
+.dash-scope-picker select:focus {
+  outline: none;
+  border-color: var(--ad-accent);
+}
+.dash-scope-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ad-text);
+  text-align: center;
+}
+.dash-scope-picker .btn {
+  text-align: center;
+}
+/* "Gestionar proyectos" es siempre el último <button> del picker -
+   es navegación/gestión, no la acción de crear, así que no compite
+   visualmente con "+ Proyecto" (que se queda sólido, es el único CTA
+   real de este grupo). */
+.dash-scope-picker button:last-of-type {
+  background: none;
+  border: 1px solid var(--ad-border);
+  color: var(--ad-text-muted);
+  font-weight: 600;
+}
+.dash-scope-picker button:last-of-type:hover {
+  background: var(--ad-surface-2);
+  color: var(--ad-text);
+  border-color: var(--ad-accent);
+}
+
+.dash-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ad-border);
+}
+.dash-actions .btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--ad-text-muted);
+  text-align: center;
+  padding: 10px 14px;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.dash-actions .btn:hover {
+  background: var(--ad-surface-2);
+  color: var(--ad-text);
+  border-color: var(--ad-border);
+}
+
+/* Historial - herramienta aparte de la lista de accesos de arriba,
+   mismo separador (border-top) que ya distingue el picker de proyecto
+   de .dash-actions - refuerza que es distinta, no un CRUD más. Mismo
+   estilo "menú" en reposo/hover; .active la resalta sólida cuando el
+   modo está encendido, mismo lenguaje que el resto del panel
+   (gg-map-mode-btn.active, .ad-float-nav button.active). */
+.dash-tools {
+  padding-top: 10px;
+  border-top: 1px solid var(--ad-border);
+}
+.dash-tools .btn {
+  width: 100%;
+  background: none;
+  border: 1px solid var(--ad-border);
+  color: var(--ad-text-muted);
+  text-align: center;
+  padding: 10px 14px;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.dash-tools .btn:hover {
+  background: var(--ad-surface-2);
+  color: var(--ad-text);
+}
+.dash-tools .btn.active {
+  background: var(--ad-accent);
+  color: #0b0d10;
+  border-color: var(--ad-accent);
+}
+
+/* flex-wrap: wrap - a diferencia de .dash-left-stack/.dash-right-stack,
+   `.dash-bottom-left-stack` (el contenedor de afuera) no es un flex
+   container, así que su hijo `.dash-stats` nunca se estira a su ancho
+   ni se le respeta un límite - sin wrap, en una pantalla angosta las 4
+   tarjetas (90px mínimo cada una, ~400px en total) se salen del
+   viewport hacia la derecha en vez de acomodarse. Con wrap, sea cual
+   sea el ancho disponible, las tarjetas que no caben bajan a una
+   segunda fila en su lugar. */
+.dash-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 12px 16px;
+}
+.dash-stats .gg-stat-card {
+  min-width: 90px;
+}
+
+.gg-no-maps-banner {
+  max-width: 320px;
+}
+
+/* Panel flotante de creación de geocerca/equipo - vive ENCIMA del
+   mapa (no en un Modal) a propósito: crear una geocerca/equipo
+   necesita clic/dibujo directo sobre el mapa real, que un backdrop de
+   modal taparía. */
+.dash-float-panel {
+  width: 340px;
+  max-height: calc(100vh - var(--ad-header-h) - 40px);
+  overflow-y: auto;
+}
+.dash-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  margin-top: 2px;
+  border-top: 1px solid var(--ad-border);
+}
+.dash-field-group:first-child {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: none;
+}
+.dash-field-group-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ad-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.dash-float-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ad-border);
+}
+.dash-float-panel-header h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.dash-float-panel-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dash-float-panel-body input,
+.dash-float-panel-body select {
+  background: var(--ad-bg);
+  border: 1px solid var(--ad-border);
+  color: var(--ad-text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  width: 100%;
+}
+.dash-float-panel-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.dash-field-label {
+  font-size: 11px;
+  color: var(--ad-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.dash-hint {
+  font-size: 11px;
+  color: var(--ad-text-muted);
+}
+
+/* Barra de filtro de Historial - fila horizontal arriba, pegada al
+   borde del menú izquierdo (no centrada, no estirada al ancho
+   disponible - `right` sin definir, el ancho lo da el propio
+   contenido, mismo criterio "shrink-to-fit" que ya usan los demás
+   paneles flotantes). 236px = 16px de margen del menú + su ancho
+   aproximado + un espacio angosto, no los ~100px que quedaban antes. */
+.dash-history-filter-bar {
+  position: fixed;
+  top: calc(var(--ad-header-h) + 12px);
+  left: 236px;
+  z-index: 21;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px 14px;
+}
+.dash-history-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.dash-history-filter-field select,
+.dash-history-filter-field input {
+  background: var(--ad-bg);
+  border: 1px solid var(--ad-border);
+  color: var(--ad-text);
+  padding: 7px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.dash-history-filter-field select {
+  width: 190px;
+}
+.dash-history-filter-field input[type='datetime-local'] {
+  width: 150px;
+  /* El ícono nativo del selector de fecha se dibuja negro por
+     defecto - invisible/feo sobre el fondo oscuro del panel - se
+     invierte a blanco, mismo criterio "que se vea bien en tema
+     oscuro" que ya aplica al resto del panel. */
+  color-scheme: dark;
+}
+.dash-history-filter-field input[type='datetime-local']::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
+.dash-history-filter-field select:focus,
+.dash-history-filter-field input:focus {
+  outline: none;
+  border-color: var(--ad-accent);
+}
+
+/* ── Historial de recorridos - barra de reproducción (abajo, pegada
+   al borde derecho de las métricas y estirada hasta el borde derecho
+   de la pantalla) y panel deslizable de detalle (borde derecho) -
+   ambos solo visibles en modo Historial, ver DashboardSection.tsx.
+   500px = 16px de margen de .dash-bottom-left-stack + ~434px de ancho
+   de las 4 tarjetas de métricas + un espacio más generoso antes de
+   empezar (antes 470px, todavía se pegaba un poco). `bottom` más alto
+   que el de las métricas (16px) a propósito - las tarjetas son más
+   altas que esta barra, compartir el mismo borde inferior la hacía
+   verse "colgando" más abajo que ellas; con esto sus centros quedan
+   más parejos. ── */
+.dash-history-playback {
+  position: fixed;
+  bottom: 40px;
+  left: 500px;
+  right: 16px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+}
+.dash-history-playback input[type='range'] {
+  flex: 1;
+  accent-color: var(--ad-accent);
+}
+.dash-history-playback-readout {
+  font-size: 12px;
+  color: var(--ad-text-muted);
+  white-space: nowrap;
+  min-width: 170px;
+  text-align: right;
+}
+
+/* Oculto fuera de la pantalla a la derecha por defecto (translateX
+   100% + su propio margen) - .visible lo trae a su posición final.
+   pointer-events se apaga mientras está oculto para no bloquear clics
+   sobre el mapa en esa franja, mismo criterio ya usado en los demás
+   stacks flotantes.
+
+   `top`/`bottom` acotados a propósito (no toda la altura de la
+   ventana) - antes ocupaba de punta a punta y tapaba/competía con el
+   aviso de "sin mapa satelital" + selector de modo (arriba, en
+   .dash-right-stack) y con la barra de reproducción (abajo). Ahora
+   arranca justo debajo de esos dos y termina antes de la barra -
+   nada se mueve ni se superpone, cada uno en su propia franja. */
+.dash-history-detail {
+  position: fixed;
+  top: calc(var(--ad-header-h) + 140px);
+  right: 16px;
+  bottom: 130px;
+  /* Sin límite angosto a propósito - se puede esconder por completo
+     con la pestaña, así que mientras está visible conviene que quepa
+     toda la tabla (fecha/lat/lon/vel/rumbo/altitud/precisión/batería/
+     zona) sin amontonarse ni forzar scroll horizontal. */
+  width: 640px;
+  max-width: calc(100vw - 32px);
+  z-index: 24;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateX(calc(100% + 16px));
+  transition: transform 0.25s ease;
+  pointer-events: none;
+}
+.dash-history-detail.visible {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+/* Pestaña pegada al borde del panel deslizable, no un botón suelto en
+   la barra de reproducción - se mueve con el panel: con el panel
+   abierto queda justo en su borde izquierdo (right: 16px de margen +
+   420px de ancho); con el panel oculto, la pestaña se queda pegada al
+   borde de la pantalla (right: 0), como un tirador siempre visible
+   para volver a abrirlo. `right` transiciona igual que el propio
+   panel, así se sienten como una sola pieza moviéndose junta. */
+.dash-history-toggle {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 26;
+  width: 26px;
+  height: 56px;
+  border: 1px solid var(--ad-border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  background: rgba(20, 23, 28, 0.9);
+  backdrop-filter: blur(8px);
+  color: var(--ad-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  padding: 0;
+  transition: right 0.25s ease, color 0.15s ease;
+}
+.dash-history-toggle:hover {
+  color: var(--ad-text);
+}
+.dash-history-toggle--open {
+  right: 656px;
+}
+.dash-history-toggle--closed {
+  right: 0;
+}
+.dash-history-detail-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--ad-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.dash-history-detail-header h4 {
+  margin: 0;
+  font-size: 14px;
+}
+.dash-history-detail-body {
+  overflow-y: auto;
+  padding: 6px 12px 12px;
+}
+/* table-layout: fixed obliga a respetar los anchos del <colgroup>
+   (suman 100%) en vez de crecer según el contenido de cada celda -
+   sin esto, `width:100%` es solo una sugerencia y una celda ancha
+   (la fecha, la lista de zonas) sigue empujando la tabla más allá del
+   panel, forzando scroll horizontal por unos pixeles de más. Con
+   columnas fijas, la tabla nunca puede exceder el ancho del panel. */
+.dash-history-detail-body table {
+  font-size: 12px;
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.dash-history-detail-body th,
+.dash-history-detail-body td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 8px 6px;
+  text-align: center;
+}
+.dash-history-detail-body tr {
+  cursor: pointer;
+}
+
+.dash-overlay-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.dash-overlay-toolbar input {
+  background: var(--ad-bg);
+  border: 1px solid var(--ad-border);
+  color: var(--ad-text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  min-width: 200px;
+}
+.dash-overlay-toolbar input:focus {
+  outline: none;
+  border-color: var(--ad-accent);
+}
+
+/* Círculo fijo (mismo tratamiento que .sup-vehicle-marker en
+   Supervisor) - antes era un ancho automático por el texto
+   (border-radius:10px + padding, sin width/height) que con un
+   deviceId real (`TABLETA-02`, no un número corto) se deformaba en
+   una píldora larga en vez de un círculo. El texto ahora es
+   `shortVehicleLabel()` (el número de la tableta), que sí cabe. */
+.dash-vehicle-marker {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--ad-accent);
+  color: #0b0d10;
+  font-size: 11px;
+  font-weight: 700;
+  border: 2px solid #0b0d10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn.active {
+  background: var(--ad-accent);
+  color: #0b0d10;
+}
+
+/* ── Adaptativo - tableta/pantalla angosta: el header flotante pasa a
+   dos filas (título+logout arriba, nav abajo con scroll horizontal)
+   en vez de comprimir todo en una sola fila angosta. ── */
 @media (max-width: 860px) {
-  .ad-body {
-    flex-direction: column;
+  .ad-app {
+    --ad-header-h: 92px;
   }
-  .ad-nav {
-    width: 100%;
-    flex-direction: row;
+  .ad-float-nav {
     overflow-x: auto;
-    overflow-y: visible;
-    border-right: none;
-    border-bottom: 1px solid var(--ad-border);
-    padding: 6px 8px;
   }
-  .ad-nav button {
-    border-left: none;
-    border-bottom: 3px solid transparent;
-    padding: 8px 14px;
+  .ad-float-main--solid {
+    padding: calc(var(--ad-header-h) + 14px) 14px 14px;
   }
-  .ad-nav button.active {
-    border-left-color: transparent;
-    border-bottom-color: var(--ad-accent);
+  .dash-left-stack,
+  .dash-right-stack,
+  .dash-bottom-left-stack {
+    left: 12px;
+    right: 12px;
+    max-width: none;
+    align-items: stretch;
   }
-  .ad-content {
-    padding: 14px;
+  .dash-float-panel {
+    width: 100%;
   }
-  #ad-map {
-    height: 60vh;
-    min-height: 320px;
+  .dash-history-filter-bar {
+    left: 12px;
+    right: 12px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .dash-history-playback {
+    width: calc(100vw - 24px);
+    left: 12px;
+    right: 12px;
+    transform: none;
+  }
+  .dash-history-detail {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+  }
+  .dash-history-toggle--open {
+    right: 12px;
   }
 }

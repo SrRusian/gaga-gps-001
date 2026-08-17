@@ -15,7 +15,7 @@ export function DeviceSetupOverlay({ onSave, onClose, error, verifying }: Device
       <div className="op-overlay-card">
         {onClose && (
           <button className="op-overlay-close" onClick={onClose} aria-label="Cerrar" title="Cerrar">
-            ✕
+            X
           </button>
         )}
         <h2>Configuración de dispositivo</h2>

@@ -2,7 +2,7 @@
   "name": "@gaga-gps/web-app",
   "version": "0.0.0",
   "private": true,
-  "description": "App única (login + Admin + Supervisor + Operador) — arquitectura feature-driven con React Router y code-splitting por rol. Reemplaza los 4 proyectos separados (web-gateway/web-admin/web-supervisor/web-operator).",
+  "description": "App única (login + Admin + Supervisor + Operador) - arquitectura feature-driven con React Router y code-splitting por rol. Reemplaza los 4 proyectos separados (web-gateway/web-admin/web-supervisor/web-operator).",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -18,7 +18,7 @@ class DeviceManager {
   /**
    * Garantiza que el dispositivo exista en PostgreSQL.
    * Si es la primera vez que se ve ese unique_id, lo crea
-   * automáticamente — no requiere alta manual previa.
+   * automáticamente - no requiere alta manual previa.
    */
   async ensureRegistered(uniqueId: string): Promise<DeviceRow> {
     return this.deviceRepo.findOrCreate(uniqueId);

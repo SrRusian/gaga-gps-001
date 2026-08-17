@@ -7,7 +7,7 @@ interface NavigatorWithBattery extends Navigator {
   getBattery?: () => Promise<BatteryManager>;
 }
 
-// Battery Status API — soporte parcial/deprecado en algunos navegadores, feature-detect.
+// Battery Status API - soporte parcial/deprecado en algunos navegadores, feature-detect.
 export function useBatteryLevel() {
   const [level, setLevel] = useState<number | null>(null);
 

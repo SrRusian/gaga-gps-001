@@ -2,12 +2,12 @@
  * telemetry.routes.ts
  *
  * Receptor propio del protocolo OsmAnd, compatible 100% con lo
- * que ya envía Traccar Client desde las tabletas — solo cambia
+ * que ya envía Traccar Client desde las tabletas - solo cambia
  * la URL del servidor, no se toca la app de las tabletas.
  *
  * Traccar Client (protocolo OsmAnd) envía estos parámetros, y
  * según la versión/plataforma de la app pueden llegar de tres
- * formas distintas — por eso se combinan query string y body
+ * formas distintas - por eso se combinan query string y body
  * (form-urlencoded o JSON) en un solo objeto de parámetros:
  *   - GET con query string (?id=...&lat=...)
  *   - POST con los mismos parámetros en la URL (query string)
@@ -18,13 +18,13 @@
  *   altitude   → metros (opcional)
  *   speed      → metros/segundo, Traccar lo reporta así (se
  *                convierte a km/h únicamente en la capa de
- *                presentación — ver reports.routes.js y ui-admin)
+ *                presentación - ver reports.routes.js y ui-admin)
  *   bearing    → curso en grados (opcional)
  *   accuracy   → precisión en metros (opcional)
  *   batt       → nivel de batería % (opcional)
  *   key        → clave compartida (RF de seguridad, ver env.telemetrySharedSecret).
  *                Traccar Client permite fijar la "Server URL" con un query
- *                string propio (p. ej. https://host/gps?key=SECRETO) — el
+ *                string propio (p. ej. https://host/gps?key=SECRETO) - el
  *                cliente simplemente añade sus parámetros a continuación,
  *                sin sobreescribirlo (aplica solo cuando usa query string).
  *
@@ -44,11 +44,11 @@ export function buildTelemetryRouter({
 
   async function handleGps(req: Request, res: Response) {
     try {
-      // Combina query string y body — distintas versiones de
+      // Combina query string y body - distintas versiones de
       // Traccar Client envían los parámetros en uno u otro.
       const params: Record<string, unknown> = { ...req.query, ...req.body };
 
-      // Clave compartida — mitiga spoofing/inyección de posiciones
+      // Clave compartida - mitiga spoofing/inyección de posiciones
       // falsas por terceros que alcancen este endpoint público.
       if (env.telemetrySharedSecret && !isValidSharedSecret(params.key)) {
         return res.status(401).send('Clave de telemetría inválida');
@@ -68,7 +68,7 @@ export function buildTelemetryRouter({
         return res.status(400).send('lat/lon inválidos');
       }
 
-      // Rango físicamente válido — evita persistir coordenadas
+      // Rango físicamente válido - evita persistir coordenadas
       // corruptas que romperían GeofenceAlertService/CollisionRiskService
       // (cálculos de Haversine) o el renderizado del mapa.
       if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
@@ -97,12 +97,12 @@ export function buildTelemetryRouter({
       // OsmAnd/Traccar Client espera un 200 simple como confirmación
       res.status(200).send('OK');
     } catch (err) {
-      console.error('❌ telemetry.routes /gps:', (err as Error).message);
+      console.error('telemetry.routes /gps:', (err as Error).message);
       res.status(500).send('Error procesando posición');
     }
   }
 
-  // GET y POST — algunas versiones de Traccar Client envían POST
+  // GET y POST - algunas versiones de Traccar Client envían POST
   // con los parámetros en el body en vez del query string.
   router.get('/gps', handleGps);
   router.post('/gps', handleGps);

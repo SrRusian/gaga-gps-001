@@ -10,7 +10,7 @@ interface DeviceLookupResponse {
 }
 
 /**
- * Identidad del vehículo — fija por configuración de kiosco, NO por
+ * Identidad del vehículo - fija por configuración de kiosco, NO por
  * login. Se lee de ?device= en la URL (configurado una sola vez por
  * el técnico que instala la tableta) o, si falta, del valor guardado
  * en un arranque anterior.
@@ -47,21 +47,21 @@ export function useDeviceId() {
 
       if (!data.exists) {
         setError(
-          `"${trimmed}" no existe en el sistema — verifica que coincida exactamente con el Device Identifier configurado en Traccar Client, y que la tableta ya haya enviado al menos una posición GPS.`,
+          `"${trimmed}" no existe en el sistema - verifica que coincida exactamente con el Device Identifier configurado en Traccar Client, y que la tableta ya haya enviado al menos una posición GPS.`,
         );
         return;
       }
 
       if (data.activeSession) {
         const proceed = confirm(
-          `⚠️ "${trimmed}" (${data.name}) ya tiene un turno activo con ${data.activeSession.userName} desde ${new Date(data.activeSession.startedAt).toLocaleString()}.\n\n` +
-            `Si esta es una tableta DISTINTA a la que normalmente usa ese vehículo, probablemente hay un identificador duplicado — verifica con el administrador antes de continuar.\n\n` +
+          `"${trimmed}" (${data.name}) ya tiene un turno activo con ${data.activeSession.userName} desde ${new Date(data.activeSession.startedAt).toLocaleString()}.\n\n` +
+            `Si esta es una tableta DISTINTA a la que normalmente usa ese vehículo, probablemente hay un identificador duplicado - verifica con el administrador antes de continuar.\n\n` +
             `¿Continuar de todos modos?`,
         );
         if (!proceed) return;
       }
     } catch {
-      setError('No se pudo verificar el dispositivo — revisa la conexión con el servidor');
+      setError('No se pudo verificar el dispositivo - revisa la conexión con el servidor');
       return;
     } finally {
       setVerifying(false);

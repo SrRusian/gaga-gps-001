@@ -3,9 +3,9 @@
  *
  * Extraído de maps.routes.js durante la migración a TypeScript
  * (antes, sockets/FleetSocketServer.js importaba esta función desde
- * un archivo de rutas — una dependencia cruzada ruta→socket que no
+ * un archivo de rutas - una dependencia cruzada ruta→socket que no
  * hacía falta). Único lugar que normaliza una fila de `maps` a lo
- * que necesita el frontend para agregar la capa en MapLibre — lo usan
+ * que necesita el frontend para agregar la capa en MapLibre - lo usan
  * tanto `GET /tiles/active-maps.json` como el broadcast de socket
  * `maps:active_update`.
  */

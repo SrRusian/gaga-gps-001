@@ -5,7 +5,7 @@ import type { GeofenceRow } from './types';
 /**
  * Convierte una fila cruda de /api/geofences (snake_case) a la forma
  * normalizada que espera @gaga-gps/map-core (mismo mapeo que
- * GeofenceRepository.toMemoryFormat en el backend) — así Admin
+ * GeofenceRepository.toMemoryFormat en el backend) - así Admin
  * reutiliza el mismo hook de renderizado que Operador/Supervisor en
  * vez de tener su propia cuarta copia.
  */
