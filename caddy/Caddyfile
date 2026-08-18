@@ -1,7 +1,8 @@
+#Configura el servidor web Caddy para redirigir el tráfico al subdominio principal y actuar como proxy inverso seguro hacia el backend.
 gaga-maquinaria.com {
 	redir https://app.{host}{uri}
 }
 
 app.gaga-maquinaria.com {
-    reverse_proxy gaga-backend:3001
+	reverse_proxy gaga-backend:3001
 }

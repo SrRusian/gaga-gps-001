@@ -1,3 +1,4 @@
+//Centraliza la configuración base del compilador de TypeScript para transformar código moderno en JavaScript estructurado y seguro.
 {
   "compilerOptions": {
     "target": "ES2022",

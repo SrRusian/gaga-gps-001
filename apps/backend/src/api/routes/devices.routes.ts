@@ -223,7 +223,7 @@ export function buildDevicesRouter({
       // Supervisor ya conectado seguiría viendo una alerta activa de
       // un vehículo que ya no existe.
       if (device) {
-        geofenceAlertService?.clearDevice(device.unique_id);
+        geofenceAlertService?.clearDevice(device.unique_id, device.project_id);
         signalLostService?.clearDevice(device.unique_id);
         collisionRiskService?.clearDevice(device.unique_id, otherDeviceIds);
         vehicleProximityService?.clearDevice(device.unique_id, otherDeviceIds);

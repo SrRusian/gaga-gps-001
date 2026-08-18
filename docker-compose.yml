@@ -1,3 +1,4 @@
+#Orquesta el entorno de infraestructura (servidores, base de datos, caché y proxy) en contenedores Docker interconectados y seguros.
 name: gaga-gps-001
 
 networks:
@@ -42,12 +43,6 @@ services:
       DB_USER: gaga_app
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      # Operación de un solo sitio (Colima) - sin esto, el proceso de
-      # Node corre en UTC (default de la imagen base) y cualquier
-      # lógica que compare "hora del día" (turnos, Fase B) quedaría
-      # desfasada 6h contra lo que el Encargado configura pensando en
-      # hora local. Mismo criterio ya aplicado a la zona horaria de
-      # PostgreSQL (ver db/migrations/001_init.sql).
       TZ: America/Mexico_City
     volumes:
       - maps_data:/app/maps

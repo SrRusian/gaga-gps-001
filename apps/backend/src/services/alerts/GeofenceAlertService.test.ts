@@ -1,43 +1,76 @@
-// Test de caracterización - congela el comportamiento actual ANTES
-// de convertir a TypeScript.
+// Test de caracterización - congela el comportamiento actual.
+//
+// Desde la migración a PostGIS, `evaluate()` ya no recorre
+// `activeGeofences` en JS - delega el match geométrico a
+// `geofenceRepo.findMatchingSpatial()` (SQL real, cubierto por
+// GeofenceRepository.integration.test.ts). Estos tests cubren la
+// lógica que SÍ sigue viviendo aquí: prioridad de severidad
+// (danger > warning > info), detección de cambio de estado
+// (entra/sale/escala), severidad progresiva de corredor a partir de
+// una distancia ya resuelta, y el aislamiento por proyecto de cada
+// emisión - con un `geofenceRepo` fake que devuelve filas ya
+// armadas, sin necesitar Postgres.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import GeofenceAlertService from './GeofenceAlertService';
 
-const dangerCircle = {
+const dangerCircleRow = {
   id: 1,
   name: 'Zona Roja',
-  type: 'danger',
-  center: { lat: 19.35, lon: -103.56 },
-  radiusMeters: 50,
+  type: 'danger' as const,
+  shape_type: 'circle' as const,
+  corridor_width_meters: null,
+  corridor_danger_margin_meters: null,
+  distance_meters: 10,
 };
 
-const warningCircle = {
+const warningCircleRow = {
   id: 2,
   name: 'Zona Amarilla',
-  type: 'warning',
-  center: { lat: 19.4, lon: -103.6 },
-  radiusMeters: 50,
+  type: 'warning' as const,
+  shape_type: 'circle' as const,
+  corridor_width_meters: null,
+  corridor_danger_margin_meters: null,
+  distance_meters: 10,
 };
 
-const parkingCircle = {
+const parkingCircleRow = {
   id: 5,
   name: 'Estacionamiento Norte',
-  type: 'parking',
-  center: { lat: 19.5, lon: -103.7 },
-  radiusMeters: 50,
+  type: 'parking' as const,
+  shape_type: 'circle' as const,
+  corridor_width_meters: null,
+  corridor_danger_margin_meters: null,
+  distance_meters: 10,
 };
 
-function pos(lat: number, lon: number, deviceId = 'V1') {
-  return { deviceId, latitude: lat, longitude: lon };
+function corridorRow(distanceMeters: number, corridorDangerMarginMeters: number | null = null) {
+  return {
+    id: 4,
+    name: 'Ruta autorizada',
+    type: 'warning' as const,
+    shape_type: 'polyline' as const,
+    corridor_width_meters: 20,
+    corridor_danger_margin_meters: corridorDangerMarginMeters,
+    distance_meters: distanceMeters,
+  };
+}
+
+function pos(deviceId = 'V1', projectId: number | null = 7) {
+  return { deviceId, latitude: 19.35, longitude: -103.56, projectId };
 }
 
 describe('GeofenceAlertService', () => {
-  let io: { emit: ReturnType<typeof vi.fn> };
+  let socketServer: { broadcastToProject: ReturnType<typeof vi.fn> };
+  let findMatchingSpatial: ReturnType<typeof vi.fn>;
   let service: InstanceType<typeof GeofenceAlertService>;
 
   beforeEach(() => {
-    io = { emit: vi.fn() };
-    service = new GeofenceAlertService({ io });
+    socketServer = { broadcastToProject: vi.fn() };
+    findMatchingSpatial = vi.fn().mockResolvedValue([]);
+    service = new GeofenceAlertService({
+      geofenceRepo: { findMatchingSpatial },
+      socketServer,
+    });
   });
 
   it('addGeofence normaliza shapeType a "circle" por default', () => {
@@ -45,6 +78,7 @@ describe('GeofenceAlertService', () => {
       id: 1,
       name: 'X',
       type: 'warning',
+      projectId: 7,
       center: { lat: 0, lon: 0 },
       radiusMeters: 10,
     });
@@ -52,6 +86,15 @@ describe('GeofenceAlertService', () => {
   });
 
   it('addGeofence reemplaza una geocerca existente con el mismo id en vez de duplicarla', () => {
+    const dangerCircle = {
+      id: 1,
+      name: 'Zona Roja',
+      type: 'danger' as const,
+      projectId: 7,
+      shapeType: 'circle' as const,
+      center: { lat: 19.35, lon: -103.56 },
+      radiusMeters: 50,
+    };
     service.addGeofence(dangerCircle);
     service.addGeofence({ ...dangerCircle, name: 'Renombrada' });
     expect(service.activeGeofences).toHaveLength(1);
@@ -59,157 +102,219 @@ describe('GeofenceAlertService', () => {
   });
 
   it('removeGeofence la quita de las activas', () => {
-    service.addGeofence(dangerCircle);
-    service.removeGeofence(dangerCircle.id);
+    service.addGeofence({
+      id: 1,
+      name: 'Zona Roja',
+      type: 'danger',
+      projectId: 7,
+      shapeType: 'circle',
+      center: { lat: 19.35, lon: -103.56 },
+      radiusMeters: 50,
+    });
+    service.removeGeofence(1);
     expect(service.activeGeofences).toHaveLength(0);
   });
 
-  it('no emite nada mientras el vehículo está fuera de todas las geocercas', () => {
-    service.addGeofence(dangerCircle);
-    service.evaluate(pos(0, 0));
-    expect(io.emit).not.toHaveBeenCalled();
+  it('consulta findMatchingSpatial con el proyecto y las coordenadas de la posición', async () => {
+    await service.evaluate(pos('V1', 7));
+    expect(findMatchingSpatial).toHaveBeenCalledWith({
+      projectId: 7,
+      latitude: 19.35,
+      longitude: -103.56,
+    });
   });
 
-  it('emite alert:critical + supervisor:alert al entrar en una geocerca "danger"', () => {
-    service.addGeofence(dangerCircle);
-    service.evaluate(pos(19.35, -103.56));
+  it('no emite nada mientras el vehículo está fuera de todas las geocercas', async () => {
+    findMatchingSpatial.mockResolvedValue([]);
+    await service.evaluate(pos());
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
+  });
 
-    expect(io.emit).toHaveBeenCalledWith(
+  it('emite alert:critical + supervisor:alert al entrar en una geocerca "danger"', async () => {
+    findMatchingSpatial.mockResolvedValue([dangerCircleRow]);
+    await service.evaluate(pos());
+
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+      7,
       'alert:critical',
       expect.objectContaining({ type: 'geofence_red', deviceId: 'V1', loop: true }),
     );
-    expect(io.emit).toHaveBeenCalledWith(
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+      7,
       'supervisor:alert',
       expect.objectContaining({ action: 'entered', type: 'geofence_red' }),
     );
   });
 
-  it('emite alert:warning (no critical) al entrar en una geocerca "warning"', () => {
-    service.addGeofence(warningCircle);
-    service.evaluate(pos(19.4, -103.6));
+  it('emite alert:warning (no critical) al entrar en una geocerca "warning"', async () => {
+    findMatchingSpatial.mockResolvedValue([warningCircleRow]);
+    await service.evaluate(pos());
 
-    expect(io.emit).toHaveBeenCalledWith(
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+      7,
       'alert:warning',
       expect.objectContaining({ type: 'geofence_yellow' }),
     );
-    expect(io.emit).not.toHaveBeenCalledWith('alert:critical', expect.anything());
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalledWith(
+      7,
+      'alert:critical',
+      expect.anything(),
+    );
   });
 
-  it('no re-emite mientras el vehículo permanece en la misma severidad (sin cambio de estado)', () => {
-    service.addGeofence(dangerCircle);
-    service.evaluate(pos(19.35, -103.56));
-    io.emit.mockClear();
-    service.evaluate(pos(19.35, -103.56)); // sigue dentro, misma severidad
-    expect(io.emit).not.toHaveBeenCalled();
+  it('no re-emite mientras el vehículo permanece en la misma severidad (sin cambio de estado)', async () => {
+    findMatchingSpatial.mockResolvedValue([dangerCircleRow]);
+    await service.evaluate(pos());
+    socketServer.broadcastToProject.mockClear();
+    await service.evaluate(pos()); // sigue dentro, misma severidad
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
   });
 
-  it('emite alert:clear al salir de la geocerca', () => {
-    service.addGeofence(dangerCircle);
-    service.evaluate(pos(19.35, -103.56));
-    io.emit.mockClear();
-    service.evaluate(pos(0, 0));
+  it('emite alert:clear al salir de la geocerca', async () => {
+    findMatchingSpatial.mockResolvedValue([dangerCircleRow]);
+    await service.evaluate(pos());
+    socketServer.broadcastToProject.mockClear();
+    findMatchingSpatial.mockResolvedValue([]);
+    await service.evaluate(pos());
 
-    expect(io.emit).toHaveBeenCalledWith(
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+      7,
       'alert:clear',
       expect.objectContaining({ deviceId: 'V1' }),
     );
-    expect(io.emit).toHaveBeenCalledWith(
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+      7,
       'supervisor:alert',
       expect.objectContaining({ action: 'exited' }),
     );
   });
 
-  it('danger tiene prioridad sobre warning cuando el vehículo está en ambas a la vez', () => {
-    service.addGeofence(warningCircle);
-    service.addGeofence({ ...dangerCircle, id: 3, center: warningCircle.center, radiusMeters: 50 });
-    service.evaluate(pos(19.4, -103.6));
+  it('danger tiene prioridad sobre warning cuando el vehículo está en ambas a la vez', async () => {
+    findMatchingSpatial.mockResolvedValue([warningCircleRow, { ...dangerCircleRow, id: 3 }]);
+    await service.evaluate(pos());
 
-    expect(io.emit).toHaveBeenCalledWith('alert:critical', expect.anything());
-    expect(io.emit).not.toHaveBeenCalledWith('alert:warning', expect.anything());
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(7, 'alert:critical', expect.anything());
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalledWith(
+      7,
+      'alert:warning',
+      expect.anything(),
+    );
   });
 
-  it('polilínea: severidad progresiva vía getCorridorSeverity, no el binario dentro/fuera', () => {
-    const corridor = {
-      id: 4,
-      name: 'Ruta autorizada',
-      type: 'warning',
-      shapeType: 'polyline',
-      corridorWidthMeters: 20,
-      geometry: {
-        type: 'LineString',
-        coordinates: [
-          [-103.6, 19.3],
-          [-103.5, 19.3],
-        ],
-      },
-    };
-    service.addGeofence(corridor);
-    // Dentro del corredor -> sin alerta
-    service.evaluate(pos(19.3, -103.55));
-    expect(io.emit).not.toHaveBeenCalled();
+  it('polilínea: severidad progresiva por distancia, no el binario dentro/fuera', async () => {
+    // Dentro del corredor (distancia <= corridorWidthMeters) -> sin alerta
+    findMatchingSpatial.mockResolvedValue([corridorRow(5)]);
+    await service.evaluate(pos());
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
 
     // Lejos del eje -> warning (sin corridorDangerMarginMeters, nunca escala a danger)
-    const oneDegLat = 111320;
-    service.evaluate(pos(19.3 + 500 / oneDegLat, -103.55));
-    expect(io.emit).toHaveBeenCalledWith('alert:warning', expect.anything());
+    findMatchingSpatial.mockResolvedValue([corridorRow(500)]);
+    await service.evaluate(pos());
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(7, 'alert:warning', expect.anything());
+  });
+
+  it('polilínea: escala a danger al superar el margen configurado', async () => {
+    findMatchingSpatial.mockResolvedValue([corridorRow(500, 100)]);
+    await service.evaluate(pos());
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(7, 'alert:critical', expect.anything());
   });
 
   it('_persistEvent es fire-and-forget vía geofenceEventRepo si se provee', async () => {
     const record = vi.fn().mockResolvedValue(undefined);
-    const withRepo = new GeofenceAlertService({ io, geofenceEventRepo: { record } });
-    withRepo.addGeofence(dangerCircle);
-    withRepo.evaluate(pos(19.35, -103.56));
+    const withRepo = new GeofenceAlertService({
+      geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([dangerCircleRow]) },
+      socketServer,
+      geofenceEventRepo: { record },
+    });
+    await withRepo.evaluate(pos());
 
     expect(record).toHaveBeenCalledWith(
       expect.objectContaining({
         deviceId: 'V1',
-        geofenceId: dangerCircle.id,
+        geofenceId: dangerCircleRow.id,
         eventType: 'enter',
         severity: 'danger',
       }),
     );
   });
 
-  it('emite alert:info (sin loop) al entrar en una geocerca "parking", sin sonar como warning/danger', () => {
-    service.addGeofence(parkingCircle);
-    service.evaluate(pos(19.5, -103.7));
+  it('emite alert:info (sin loop) al entrar en una geocerca "parking", sin sonar como warning/danger', async () => {
+    findMatchingSpatial.mockResolvedValue([parkingCircleRow]);
+    await service.evaluate(pos());
 
-    expect(io.emit).toHaveBeenCalledWith(
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+      7,
       'alert:info',
       expect.objectContaining({
         type: 'geofence_parking',
-        geofenceId: parkingCircle.id,
+        geofenceId: parkingCircleRow.id,
         message: 'ZONA DE ESTACIONAMIENTO',
         loop: false,
       }),
     );
-    expect(io.emit).not.toHaveBeenCalledWith('alert:warning', expect.anything());
-    expect(io.emit).not.toHaveBeenCalledWith('alert:critical', expect.anything());
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalledWith(
+      7,
+      'alert:warning',
+      expect.anything(),
+    );
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalledWith(
+      7,
+      'alert:critical',
+      expect.anything(),
+    );
   });
 
-  it('warning tiene prioridad sobre "parking" cuando el vehículo está en ambas a la vez', () => {
-    service.addGeofence({ ...parkingCircle, center: warningCircle.center });
-    service.addGeofence(warningCircle);
-    service.evaluate(pos(19.4, -103.6));
+  it('warning tiene prioridad sobre "parking" cuando el vehículo está en ambas a la vez', async () => {
+    findMatchingSpatial.mockResolvedValue([{ ...parkingCircleRow, id: 6 }, warningCircleRow]);
+    await service.evaluate(pos());
 
-    expect(io.emit).toHaveBeenCalledWith('alert:warning', expect.anything());
-    expect(io.emit).not.toHaveBeenCalledWith('alert:info', expect.anything());
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(7, 'alert:warning', expect.anything());
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalledWith(
+      7,
+      'alert:info',
+      expect.anything(),
+    );
   });
 
   it('_persistEvent registra severity "info" para geocercas de estacionamiento', async () => {
     const record = vi.fn().mockResolvedValue(undefined);
-    const withRepo = new GeofenceAlertService({ io, geofenceEventRepo: { record } });
-    withRepo.addGeofence(parkingCircle);
-    withRepo.evaluate(pos(19.5, -103.7));
+    const withRepo = new GeofenceAlertService({
+      geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([parkingCircleRow]) },
+      socketServer,
+      geofenceEventRepo: { record },
+    });
+    await withRepo.evaluate(pos());
 
     expect(record).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: 'enter', severity: 'info' }),
     );
   });
 
-  it('getActiveAlerts refleja el estado actual por dispositivo', () => {
-    service.addGeofence(dangerCircle);
-    service.evaluate(pos(19.35, -103.56));
+  it('getActiveAlerts refleja el estado actual por dispositivo', async () => {
+    findMatchingSpatial.mockResolvedValue([dangerCircleRow]);
+    await service.evaluate(pos());
     expect(service.getActiveAlerts()).toEqual({ V1: 'danger' });
+  });
+
+  it('clearDevice limpia una alerta activa y notifica al proyecto correspondiente', async () => {
+    findMatchingSpatial.mockResolvedValue([dangerCircleRow]);
+    await service.evaluate(pos('V1', 9));
+    socketServer.broadcastToProject.mockClear();
+
+    service.clearDevice('V1', 9);
+
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+      9,
+      'alert:clear',
+      expect.objectContaining({ deviceId: 'V1' }),
+    );
+    expect(service.getActiveAlerts().V1).toBeUndefined();
+  });
+
+  it('no emite nada si socketServer todavía no se asignó (dependencia circular con FleetSocketServer)', async () => {
+    const withoutSocket = new GeofenceAlertService({
+      geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([dangerCircleRow]) },
+    });
+    await expect(withoutSocket.evaluate(pos())).resolves.not.toThrow();
   });
 });

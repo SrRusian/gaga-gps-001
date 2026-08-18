@@ -6,18 +6,26 @@
  * correspondiente y al panel de supervisor.
  *
  * Soporta 3 formas de geocerca (círculo, polígono, polilínea/
- * corredor) - la evaluación geométrica se delega a
- * backend/src/utils/geometry.ts. El comportamiento para geocercas
- * circulares es idéntico al original (misma fórmula de Haversine,
- * mismo resultado) - no se modificó esa lógica, solo se generalizó
- * para aceptar también polígonos y rutas.
+ * corredor). La evaluación en sí (¿qué geocercas matchean este
+ * punto?) se delega a PostGIS vía `GeofenceRepository.findMatchingSpatial()`
+ * (índice GiST, un solo query por posición) - antes se recorría
+ * `activeGeofences` en JS con Haversine/ray-casting a mano
+ * (`utils/geometry.ts`, que sigue existiendo para `reports.routes.ts`,
+ * el cruce histórico fuera del camino caliente). `activeGeofences`
+ * también se conserva - lo sigue usando `VehicleProximityService`
+ * (exclusión por corredor) y la hidratación de sockets para que los
+ * 3 paneles dibujen las geocercas en el mapa.
+ *
+ * Aislado por proyecto desde esta ronda: `evaluate()` solo matchea
+ * geocercas del mismo proyecto que el dispositivo (antes evaluaba
+ * contra las de TODOS los proyectos), y toda emisión usa
+ * `socketServer.broadcastToProject()` en vez de un `io.emit` global.
  *
  * RF asociados: RF-ALR-02 (zona amarilla)
  *               RF-ALR-03 (zona roja)
  *               RF-ALR-04 (notificación a supervisor)
  */
-import type { Geofence } from '@gaga-gps/shared-types';
-import { getCorridorSeverity, isInsideGeofence } from '../../utils/geometry';
+import type { Geofence, GeofenceShapeType, GeofenceType } from '@gaga-gps/shared-types';
 
 type Severity = 'warning' | 'danger' | 'info' | null;
 
@@ -25,6 +33,26 @@ interface EvaluatedPosition {
   deviceId: string;
   latitude: number;
   longitude: number;
+  projectId: number | null;
+}
+
+/** Fila devuelta por GeofenceRepository.findMatchingSpatial() - ver ese archivo. */
+interface GeofenceMatchRow {
+  id: number;
+  name: string;
+  type: GeofenceType;
+  shape_type: GeofenceShapeType;
+  corridor_width_meters: number | null;
+  corridor_danger_margin_meters: number | null;
+  distance_meters: number;
+}
+
+interface GeofenceRepoLike {
+  findMatchingSpatial(params: {
+    projectId: number | null;
+    latitude: number;
+    longitude: number;
+  }): Promise<GeofenceMatchRow[]>;
 }
 
 interface GeofenceEventRepoLike {
@@ -47,29 +75,58 @@ interface AlertEventRepoLike {
   resolveOpen(event: { alertType: 'geofence'; deviceId: string }): Promise<unknown>;
 }
 
-interface SocketIoLike {
-  emit(event: string, payload: unknown): void;
+interface SocketServerLike {
+  broadcastToProject(projectId: number | null, event: string, payload: unknown): void;
+}
+
+/**
+ * Severidad progresiva para un corredor a partir de una distancia YA
+ * calculada por PostGIS (`ST_Distance`) - misma semántica de 3
+ * niveles que tenía `getCorridorSeverity` en utils/geometry.ts, solo
+ * que ahí la distancia se calculaba en JS y aquí llega resuelta.
+ */
+function corridorSeverityFromDistance(
+  distanceMeters: number,
+  corridorWidthMeters: number,
+  corridorDangerMarginMeters: number | null,
+): Severity {
+  if (distanceMeters <= corridorWidthMeters) return null;
+  if (corridorDangerMarginMeters && distanceMeters > corridorWidthMeters + corridorDangerMarginMeters) {
+    return 'danger';
+  }
+  return 'warning';
 }
 
 class GeofenceAlertService {
-  io: SocketIoLike;
+  geofenceRepo: GeofenceRepoLike;
+  socketServer: SocketServerLike | null;
   activeGeofences: Geofence[];
   activeAlerts: Record<string, Severity>;
   geofenceEventRepo: GeofenceEventRepoLike | null;
   alertEventRepo: AlertEventRepoLike | null;
 
   constructor({
-    io,
+    geofenceRepo,
+    socketServer,
     geofenceEventRepo,
     alertEventRepo,
   }: {
-    io: SocketIoLike;
+    geofenceRepo: GeofenceRepoLike;
+    // Opcional al construir - FleetSocketServer necesita a
+    // geofenceService como su propia dependencia (para hidratar
+    // activeGeofences a clientes nuevos), así que este servicio se
+    // construye ANTES que el socket server exista - se asigna después
+    // (ver app.ts), mismo patrón ya usado para
+    // `socketServer.incidentAlertService`.
+    socketServer?: SocketServerLike;
     geofenceEventRepo?: GeofenceEventRepoLike;
     alertEventRepo?: AlertEventRepoLike;
   }) {
-    this.io = io;
-    // Geocercas activas en memoria
-    // En producción vendrán de PostgreSQL
+    this.geofenceRepo = geofenceRepo;
+    this.socketServer = socketServer || null;
+    // Geocercas activas en memoria - ya no las usa evaluate() (ver
+    // arriba), pero sigue siendo la fuente para VehicleProximityService
+    // y para hidratar el mapa de los 3 paneles vía socket.
     this.activeGeofences = [];
     // Estado de alertas activas por dispositivo
     this.activeAlerts = {};
@@ -111,26 +168,37 @@ class GeofenceAlertService {
   }
 
   /**
-   * Evalúa la posición de un vehículo contra todas las geocercas activas
-   * Se llama cada vez que llega una posición nueva de un vehículo
+   * Evalúa la posición de un vehículo contra las geocercas de su
+   * mismo proyecto - se llama cada vez que llega una posición nueva.
+   * Un solo query indexado (PostGIS) reemplaza el loop en memoria de
+   * antes; `projectId` viene ya resuelto en `position`
+   * (PositionProcessor ya lo obtiene de `deviceManager`, sin
+   * consulta adicional).
    */
-  evaluate(position: EvaluatedPosition): void {
-    const { deviceId, latitude, longitude } = position;
+  async evaluate(position: EvaluatedPosition): Promise<void> {
+    const { deviceId, latitude, longitude, projectId } = position;
+
+    const matches = await this.geofenceRepo.findMatchingSpatial({ projectId, latitude, longitude });
 
     let maxSeverity: Severity = null;
-    let triggeredGeofence: Geofence | null = null;
+    let triggeredGeofence: GeofenceMatchRow | null = null;
 
-    // Evaluar contra cada geocerca activa - funciona igual para
-    // círculo, polígono o polilínea/corredor (ver geometry.ts).
     // Para rutas (polyline), la severidad es progresiva según
     // distancia al eje (dentro del corredor → sin alerta, cerca del
-    // borde → warning, fuera del margen → danger), no un tipo fijo.
-    for (const geofence of this.activeGeofences) {
+    // borde → warning, fuera del margen → danger), no un tipo fijo -
+    // círculo/polígono solo aparecen en `matches` cuando el punto ya
+    // está dentro (filtrado por PostGIS), así que su severidad es
+    // directa por `type`.
+    for (const geofence of matches) {
       let severity: Severity = null;
 
-      if (geofence.shapeType === 'polyline') {
-        severity = getCorridorSeverity(latitude, longitude, geofence);
-      } else if (isInsideGeofence(latitude, longitude, geofence)) {
+      if (geofence.shape_type === 'polyline') {
+        severity = corridorSeverityFromDistance(
+          geofence.distance_meters,
+          geofence.corridor_width_meters as number,
+          geofence.corridor_danger_margin_meters,
+        );
+      } else {
         severity =
           geofence.type === 'danger' ? 'danger' : geofence.type === 'parking' ? 'info' : 'warning';
       }
@@ -160,19 +228,25 @@ class GeofenceAlertService {
 
     if (maxSeverity && maxSeverity !== previousAlert) {
       // Vehículo entró a zona de alerta o escaló de nivel
-      this.triggerAlert(deviceId, maxSeverity, triggeredGeofence as Geofence);
+      this.triggerAlert(deviceId, maxSeverity, triggeredGeofence as GeofenceMatchRow, projectId);
       this.activeAlerts[deviceId] = maxSeverity;
     } else if (!maxSeverity && previousAlert) {
       // Vehículo salió de todas las geocercas
-      this.clearAlert(deviceId, previousAlert);
+      this.clearAlert(deviceId, previousAlert, projectId);
       this.activeAlerts[deviceId] = null;
     }
   }
 
   /**
-   * Activa alerta en el dispositivo y notifica al supervisor
+   * Activa alerta en el dispositivo y notifica al supervisor - solo
+   * a la sala del proyecto de este dispositivo (+ admins).
    */
-  triggerAlert(deviceId: string, severity: 'warning' | 'danger' | 'info', geofence: Geofence): void {
+  triggerAlert(
+    deviceId: string,
+    severity: 'warning' | 'danger' | 'info',
+    geofence: { id: number; name: string },
+    projectId: number | null,
+  ): void {
     const messages = {
       warning: 'PRECAUCIÓN - ZONA DE RIESGO - REDUCIR VELOCIDAD',
       danger: 'PELIGRO - DETENER VEHÍCULO INMEDIATAMENTE',
@@ -198,19 +272,19 @@ class GeofenceAlertService {
       `ALERTA ${severity.toUpperCase()} - Device: ${deviceId} | Geocerca: ${geofence.name}`,
     );
 
-    // Emitir al dispositivo específico
-    // En producción usaremos rooms por deviceId
+    if (!this.socketServer) return;
+
     if (severity === 'danger') {
-      this.io.emit('alert:critical', alertPayload);
+      this.socketServer.broadcastToProject(projectId, 'alert:critical', alertPayload);
     } else if (severity === 'info') {
       // Sin sirena/sonido - solo aviso visual (RF de zonas de estacionamiento)
-      this.io.emit('alert:info', alertPayload);
+      this.socketServer.broadcastToProject(projectId, 'alert:info', alertPayload);
     } else {
-      this.io.emit('alert:warning', alertPayload);
+      this.socketServer.broadcastToProject(projectId, 'alert:warning', alertPayload);
     }
 
     // Notificar al panel de supervisor
-    this.io.emit('supervisor:alert', {
+    this.socketServer.broadcastToProject(projectId, 'supervisor:alert', {
       ...alertPayload,
       action: 'entered',
     });
@@ -220,21 +294,24 @@ class GeofenceAlertService {
   }
 
   /**
-   * Cancela alertas activas cuando el vehículo sale de la geocerca
+   * Cancela alertas activas cuando el vehículo sale de la geocerca -
+   * solo a la sala del proyecto de este dispositivo (+ admins).
    */
-  clearAlert(deviceId: string, previousSeverity: Severity): void {
+  clearAlert(deviceId: string, previousSeverity: Severity, projectId: number | null): void {
     console.log(`Device ${deviceId} salió de la geocerca - cancelando alertas`);
 
-    this.io.emit('alert:clear', {
-      deviceId,
-      timestamp: new Date().toISOString(),
-    });
+    if (this.socketServer) {
+      this.socketServer.broadcastToProject(projectId, 'alert:clear', {
+        deviceId,
+        timestamp: new Date().toISOString(),
+      });
 
-    this.io.emit('supervisor:alert', {
-      deviceId,
-      action: 'exited',
-      timestamp: new Date().toISOString(),
-    });
+      this.socketServer.broadcastToProject(projectId, 'supervisor:alert', {
+        deviceId,
+        action: 'exited',
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     this._persistEvent(deviceId, null, 'exit', previousSeverity);
     this._resolveAlertEvent(deviceId);
@@ -299,10 +376,10 @@ class GeofenceAlertService {
    * que un Supervisor ya conectado también vea la alerta resolverse
    * en vivo, no solo que desaparezca de la próxima hidratación.
    */
-  clearDevice(deviceId: string): void {
+  clearDevice(deviceId: string, projectId: number | null): void {
     const previousAlert = this.activeAlerts[deviceId];
     if (previousAlert) {
-      this.clearAlert(deviceId, previousAlert);
+      this.clearAlert(deviceId, previousAlert, projectId);
     }
     delete this.activeAlerts[deviceId];
   }

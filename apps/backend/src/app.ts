@@ -115,7 +115,11 @@ io.use(buildSocketAuthMiddleware({ userRepo }));
 const deviceManager = new DeviceManager({ deviceRepo });
 
 // ── Servicios de seguridad ──────────────────────────────────────
-const geofenceService = new GeofenceAlertService({ io, geofenceEventRepo, alertEventRepo });
+// socketServer se asigna después (ver más abajo) - FleetSocketServer
+// necesita a geofenceService como su propia dependencia, así que no
+// puede pasarse aquí sin crear una dependencia circular (mismo
+// patrón ya usado para socketServer.incidentAlertService).
+const geofenceService = new GeofenceAlertService({ geofenceRepo, geofenceEventRepo, alertEventRepo });
 const preventiveStopService = new PreventiveStopService({ io, alertEventRepo });
 const signalLostService = new SignalLostService({
   io,
@@ -138,6 +142,10 @@ const socketServer = new FleetSocketServer({
   alertEventRepo,
   equipmentManager,
 });
+// Ver comentario en la construcción de geofenceService, arriba -
+// mismo patrón que socketServer.incidentAlertService más abajo.
+geofenceService.socketServer = socketServer;
+
 const positionFilter = new PositionFilterService(env.positionFilter);
 const speedEstimator = new SpeedEstimationService();
 

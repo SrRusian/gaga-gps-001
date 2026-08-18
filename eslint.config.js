@@ -1,3 +1,4 @@
+//Establece las reglas de calidad de código, formato y validación de React/TypeScript para mantener limpio el monorrepositorio.
 const js = require('@eslint/js');
 const tseslint = require('typescript-eslint');
 const globals = require('globals');
@@ -10,9 +11,6 @@ module.exports = [
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    // Los scripts sueltos (config raíz, etc.) que todavía son
-    // CommonJS plano - sourceType/globals de Node para que "require"/
-    // "module"/"console" no se marquen como no-definidos.
     files: ['**/*.js'],
     languageOptions: {
       sourceType: 'commonjs',
@@ -23,9 +21,6 @@ module.exports = [
     },
   },
   {
-    // Aplica a todo .ts/.tsx del monorepo (packages/apps con hooks de
-    // React) - inofensivo en archivos sin hooks, así que no hace
-    // falta acotarlo carpeta por carpeta.
     files: ['**/*.ts', '**/*.tsx'],
     plugins: { 'react-hooks': reactHooks },
     rules: {

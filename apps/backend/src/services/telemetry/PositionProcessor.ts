@@ -194,7 +194,12 @@ class PositionProcessor {
 
       // 4. Ejecutar módulos de seguridad - NO se modifican, solo se invocan
       if (this.geofenceService) {
-        this.geofenceService.evaluate(position);
+        // Único await de este bloque - evaluate() consulta PostGIS
+        // (un solo query indexado por project_id + geog). Los demás
+        // servicios de abajo siguen síncronos/en memoria a propósito
+        // (ver CLAUDE.md/plan - no tienen geometría guardada que
+        // indexar, un round-trip extra ahí no aportaría nada).
+        await this.geofenceService.evaluate({ ...position, projectId: position.projectId ?? null });
       }
 
       if (this.collisionService) {

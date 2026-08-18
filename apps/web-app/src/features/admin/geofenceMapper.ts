@@ -15,6 +15,7 @@ export function toGeofence(row: GeofenceRow): Geofence {
       id: row.id,
       name: row.name,
       type: row.type,
+      projectId: row.project_id,
       shapeType: 'circle',
       center: { lat: row.center_lat as number, lon: row.center_lon as number },
       radiusMeters: row.radius_meters as number,
@@ -25,6 +26,7 @@ export function toGeofence(row: GeofenceRow): Geofence {
       id: row.id,
       name: row.name,
       type: row.type,
+      projectId: row.project_id,
       shapeType: 'polyline',
       geometry: row.geometry as LineString,
       corridorWidthMeters: row.corridor_width_meters as number,
@@ -35,6 +37,7 @@ export function toGeofence(row: GeofenceRow): Geofence {
     id: row.id,
     name: row.name,
     type: row.type,
+    projectId: row.project_id,
     shapeType: 'polygon',
     geometry: row.geometry as Polygon,
   };

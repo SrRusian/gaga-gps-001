@@ -25,7 +25,7 @@ import type GeofenceAlertService from '../../services/alerts/GeofenceAlertServic
 import type { UserRole } from '../../repositories/UserRepository';
 
 interface SocketServerLike {
-  broadcast(event: string, payload: unknown): void;
+  broadcastToProject(projectId: number | null, event: string, payload: unknown): void;
 }
 
 export interface GeofencesRouterDeps {
@@ -116,7 +116,11 @@ export function buildGeofencesRouter({
       // Reflejar en memoria para evaluación en tiempo real (GeofenceAlertService)
       geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(geofence));
 
-      socketServer.broadcast('geofences:update', geofenceService.activeGeofences);
+      socketServer.broadcastToProject(
+        geofence.project_id,
+        'geofences:update',
+        geofenceService.activeGeofences,
+      );
       res.status(201).json(geofence);
     } catch (err) {
       console.error('geofences.routes POST /:', (err as Error).message);
@@ -158,7 +162,11 @@ export function buildGeofencesRouter({
       } else {
         geofenceService.removeGeofence(geofence.id);
       }
-      socketServer.broadcast('geofences:update', geofenceService.activeGeofences);
+      socketServer.broadcastToProject(
+        geofence.project_id,
+        'geofences:update',
+        geofenceService.activeGeofences,
+      );
 
       res.json(geofence);
     } catch (err) {
@@ -169,9 +177,19 @@ export function buildGeofencesRouter({
 
   router.delete('/:id', authMiddleware, canManage, async (req, res) => {
     try {
-      await geofenceRepo.delete(Number(req.params.id));
-      geofenceService.removeGeofence(parseInt(String(req.params.id), 10));
-      socketServer.broadcast('geofences:update', geofenceService.activeGeofences);
+      const id = Number(req.params.id);
+      // Se busca ANTES de borrar - una vez eliminada la fila ya no
+      // hay forma de saber a qué proyecto avisar (mismo motivo por
+      // el que IncidentAlertService.resolveDeviceIncidents se llama
+      // antes de purgar, ver CLAUDE.md).
+      const existing = await geofenceRepo.findById(id);
+      await geofenceRepo.delete(id);
+      geofenceService.removeGeofence(id);
+      socketServer.broadcastToProject(
+        existing?.project_id ?? null,
+        'geofences:update',
+        geofenceService.activeGeofences,
+      );
       res.json({ success: true });
     } catch (err) {
       console.error('geofences.routes DELETE /:id:', (err as Error).message);
@@ -252,7 +270,11 @@ export function buildGeofencesRouter({
       }
 
       if (created.length > 0) {
-        socketServer.broadcast('geofences:update', geofenceService.activeGeofences);
+        socketServer.broadcastToProject(
+          projectId,
+          'geofences:update',
+          geofenceService.activeGeofences,
+        );
       }
 
       res.status(created.length > 0 ? 201 : 400).json({

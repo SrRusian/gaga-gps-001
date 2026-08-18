@@ -7,6 +7,7 @@ interface GeofenceBase {
   id: number;
   name: string;
   type: GeofenceType;
+  projectId: number | null;
 }
 
 export interface CircleGeofence extends GeofenceBase {

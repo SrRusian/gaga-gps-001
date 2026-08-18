@@ -38,6 +38,17 @@ export interface UpdateGeofenceParams {
   corridorDangerMarginMeters?: number;
 }
 
+/** Fila devuelta por findMatchingSpatial() - subconjunto de columnas + distancia calculada por PostGIS. */
+export interface GeofenceMatchRow {
+  id: number;
+  name: string;
+  type: GeofenceType;
+  shape_type: GeofenceShapeType;
+  corridor_width_meters: number | null;
+  corridor_danger_margin_meters: number | null;
+  distance_meters: number;
+}
+
 class GeofenceRepository {
   /** `projectId = null` (admin) devuelve todas, sin filtrar. */
   async findAllActive(projectId?: number | null): Promise<GeofenceRow[]> {
@@ -90,6 +101,50 @@ class GeofenceRepository {
   }
 
   /**
+   * Geocercas relevantes para un punto - un único query indexado
+   * (GiST sobre `geog` + btree sobre `project_id`) en vez de recorrer
+   * todas las geocercas del proyecto en JS. Círculo/polígono solo
+   * vuelven si el punto está dentro (geometría acotada, misma
+   * semántica que isInsideGeofence); polilínea siempre vuelve - la
+   * severidad de un corredor no tiene límite de distancia (ver
+   * getCorridorSeverity en utils/geometry.ts, la misma lógica de 3
+   * niveles se aplica sobre `distance_meters` del lado de quien llama).
+   * `projectId = null` (dispositivo sin proyecto asignado) no
+   * matchea ninguna fila - toda geocerca real requiere project_id.
+   */
+  async findMatchingSpatial({
+    projectId,
+    latitude,
+    longitude,
+  }: {
+    projectId: number | null;
+    latitude: number;
+    longitude: number;
+  }): Promise<GeofenceMatchRow[]> {
+    try {
+      const { rows } = await query<GeofenceMatchRow>(
+        `SELECT g.id, g.name, g.type, g.shape_type,
+                g.corridor_width_meters, g.corridor_danger_margin_meters,
+                ST_Distance(g.geog, pt.g) AS distance_meters
+         FROM geofences g,
+              LATERAL (SELECT ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography AS g) pt
+         WHERE g.active = TRUE
+           AND g.project_id = $1
+           AND (
+             (g.shape_type = 'circle' AND ST_DWithin(g.geog, pt.g, g.radius_meters))
+             OR (g.shape_type = 'polygon' AND ST_Contains(g.geog::geometry, pt.g::geometry))
+             OR (g.shape_type = 'polyline')
+           )`,
+        [projectId, latitude, longitude],
+      );
+      return rows;
+    } catch (err) {
+      console.error('GeofenceRepository.findMatchingSpatial:', (err as Error).message);
+      throw err;
+    }
+  }
+
+  /**
    * Crea una geocerca de cualquier forma.
    *   - shapeType: 'circle' | 'polygon' | 'polyline' (default 'circle')
    *   - circle: centerLat, centerLon, radiusMeters
@@ -110,10 +165,22 @@ class GeofenceRepository {
     corridorDangerMarginMeters,
   }: CreateGeofenceParams): Promise<GeofenceRow> {
     try {
+      // $11/$12 repiten shapeType/geometry (ya mandados como $4/$8) -
+      // a propósito, no un descuido: reusar el mismo placeholder $4/$8
+      // dentro del CASE (una comparación de texto) Y en el VALUES (una
+      // columna VARCHAR/JSONB) hace que Postgres falle al deducir un
+      // solo tipo para ese parámetro ("inconsistent types deduced") -
+      // confirmado en vivo contra Postgres real. Duplicar el valor en
+      // una posición de parámetro aparte evita el conflicto sin tener
+      // que forzar casts explícitos en cada ocurrencia.
       const { rows } = await query<GeofenceRow>(
         `INSERT INTO geofences
-           (name, project_id, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, corridor_danger_margin_meters)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           (name, project_id, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, corridor_danger_margin_meters, geog)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+           CASE $11
+             WHEN 'circle' THEN ST_SetSRID(ST_MakePoint($6, $5), 4326)::geography
+             ELSE ST_GeomFromGeoJSON($12)::geography
+           END)
          RETURNING *`,
         [
           name,
@@ -126,6 +193,8 @@ class GeofenceRepository {
           geometry ? JSON.stringify(geometry) : null,
           corridorWidthMeters ?? null,
           corridorDangerMarginMeters ?? null,
+          shapeType,
+          geometry ? JSON.stringify(geometry) : null,
         ],
       );
       return rows[0];
@@ -164,7 +233,11 @@ class GeofenceRepository {
            radius_meters = COALESCE($7, radius_meters),
            geometry = COALESCE($8, geometry),
            corridor_width_meters = COALESCE($9, corridor_width_meters),
-           corridor_danger_margin_meters = COALESCE($10, corridor_danger_margin_meters)
+           corridor_danger_margin_meters = COALESCE($10, corridor_danger_margin_meters),
+           geog = CASE shape_type
+             WHEN 'circle' THEN ST_SetSRID(ST_MakePoint(COALESCE($6, center_lon), COALESCE($5, center_lat)), 4326)::geography
+             ELSE ST_GeomFromGeoJSON(COALESCE($8, geometry)::text)::geography
+           END
          WHERE id = $1 RETURNING *`,
         [
           id,
@@ -210,6 +283,7 @@ class GeofenceRepository {
         id: row.id,
         name: row.name,
         type: row.type,
+        projectId: row.project_id,
         shapeType: 'circle',
         center: { lat: row.center_lat as number, lon: row.center_lon as number },
         radiusMeters: row.radius_meters as number,
@@ -220,6 +294,7 @@ class GeofenceRepository {
         id: row.id,
         name: row.name,
         type: row.type,
+        projectId: row.project_id,
         shapeType: 'polyline',
         geometry: row.geometry as import('geojson').LineString,
         corridorWidthMeters: row.corridor_width_meters as number,
@@ -231,6 +306,7 @@ class GeofenceRepository {
       id: row.id,
       name: row.name,
       type: row.type,
+      projectId: row.project_id,
       shapeType: 'polygon',
       geometry: row.geometry as import('geojson').Polygon,
     };

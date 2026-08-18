@@ -119,10 +119,7 @@ class FleetSocketServer {
       }
 
       // Equipo estático - filtrado por proyecto (solo admin ve todo),
-      // mismo criterio que la flota de arriba. A diferencia de
-      // geofences:update (que se reenvía sin filtrar - gap
-      // preexistente, documentado, fuera del alcance de este cambio),
-      // este es nuevo y se construye ya filtrado desde el día uno.
+      // mismo criterio que la flota de arriba.
       if (this.equipmentManager) {
         const allEquipment = Object.values(this.equipmentManager.equipment);
         const visibleEquipment =
@@ -134,9 +131,17 @@ class FleetSocketServer {
         }
       }
 
-      // Geocercas activas
+      // Geocercas activas - filtrado por proyecto (solo admin ve
+      // todo), mismo criterio que el resto de la hidratación. Antes
+      // se reenviaba `activeGeofences` completo sin filtrar (gap ya
+      // cerrado en esta ronda junto con evaluate()/broadcasts, ver
+      // GeofenceAlertService.ts).
       if (this.geofenceService) {
-        socket.emit('geofences:update', this.geofenceService.activeGeofences);
+        const visibleGeofences =
+          user?.role === 'admin'
+            ? this.geofenceService.activeGeofences
+            : this.geofenceService.activeGeofences.filter((g) => g.projectId === user?.projectId);
+        socket.emit('geofences:update', visibleGeofences);
 
         const activeAlerts = this.geofenceService.getActiveAlerts();
         Object.entries(activeAlerts).forEach(([deviceId, severity]) => {

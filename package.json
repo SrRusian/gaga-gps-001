@@ -9,13 +9,16 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run --project unit",
+    "test:watch": "vitest --project unit",
     "lint": "eslint .",
     "predev": "npm install && npm run build",
     "dev:backend": "npm run dev --workspace=@gaga-gps/backend",
     "dev:web-app": "wait-on -t 60000 http://localhost:3001/health && npm run dev --workspace=@gaga-gps/web-app",
-    "dev": "concurrently -n backend,web-app -c blue,green \"npm run dev:backend\" \"npm run dev:web-app\""
+    "dev": "concurrently -n backend,web-app -c blue,green \"npm run dev:backend\" \"npm run dev:web-app\"",
+    "pretest:integration": "docker compose up -d postgres",
+    "test:integration": "vitest run --project integration",
+    "test:all": "npm test && npm run test:integration"
   },
   "license": "ISC",
   "devDependencies": {
