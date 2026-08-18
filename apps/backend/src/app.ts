@@ -6,6 +6,7 @@
 import './config/loadEnv';
 import bcrypt from 'bcryptjs';
 import express from 'express';
+import fs from 'fs';
 import http from 'http';
 import path from 'path';
 import { Server } from 'socket.io';
@@ -164,14 +165,34 @@ const positionProcessor = new PositionProcessor({
 });
 
 // ── UI estática ──────────────────────────────────────────────────
-// Una sola SPA (apps/web-app) - el login y las 3 vistas por rol
-// (/admin, /supervisor, /operator) los resuelve React Router del
+// Una sola SPA (apps/web-app) - el login y las vistas por rol
+// (/administrator, /manager, /supervisor, /operator) los resuelve React Router del
 // lado del cliente, no Express. express.static intenta servir un
 // archivo real primero (JS/CSS/imágenes ya compilados); si no
 // existe, sigue a las rutas de abajo, y el fallback de SPA al final
 // del archivo sirve siempre index.html para cualquier ruta de
 // navegación que no sea un archivo ni una API.
-const webAppDir = path.join(__dirname, '../../web-app');
+//
+// Dos estructuras posibles en disco para la MISMA carpeta lógica -
+// se detecta cuál hay en runtime en vez de asumir una sola:
+//   - Imagen de Docker (`apps/backend/Dockerfile`): el build ya
+//     "aplanó" `apps/web-app/dist/*` directo dentro de
+//     `apps/web-app/` (rm -rf + copy) - `apps/web-app/index.html` YA
+//     es el compilado.
+//   - Corriendo con `node`/`tsx` sin Docker (`npm run dev:backend`,
+//     ver README): esa aplanada nunca pasó - `apps/web-app/` sigue
+//     siendo el código fuente de Vite (su propio `index.html` fuente,
+//     que referencia `/src/main.tsx` como módulo ES - eso es lo que
+//     sirve Vite en modo dev, no algo que `express.static` pueda
+//     servir crudo) y el build real (si se corrió `npm run build`)
+//     vive aparte, en `apps/web-app/dist/`. Sin este chequeo,
+//     `express.static` encuentra el `index.html` FUENTE primero y lo
+//     sirve tal cual - pantalla en blanco en el navegador (el
+//     `<script type="module" src="/src/main.tsx">` nunca carga sin el
+//     servidor de Vite) - bug real, reproducido en vivo.
+const webAppRoot = path.join(__dirname, '../../web-app');
+const webAppDistDir = path.join(webAppRoot, 'dist');
+const webAppDir = fs.existsSync(path.join(webAppDistDir, 'index.html')) ? webAppDistDir : webAppRoot;
 app.use(express.static(webAppDir));
 
 // ── Receptor de telemetría - GET /gps (protocolo OsmAnd) ────────
@@ -329,7 +350,7 @@ app.get('/health', async (req, res) => {
 // GET que no sea un archivo real (ya lo habría servido
 // express.static) ni una de las rutas anteriores (/gps, /tiles,
 // /api/*, /health) es una ruta de navegación de React Router
-// (/, /admin, /supervisor, /operator, o una sub-ruta futura) y debe
+// (/, /administrator, /manager, /supervisor, /operator, o una sub-ruta futura) y debe
 // resolver siempre a index.html para que el router del cliente la
 // tome. Se excluye /socket.io explícitamente - Socket.io intercepta
 // esas peticiones por su cuenta (vía engine.io), antes de que
@@ -432,7 +453,7 @@ loadPersistedState().finally(() => {
     console.log(`Backend GAGA-GPS v2.0 (sistema propio) corriendo en puerto ${PORT}`);
     console.log(`   Telemetría: GET http://localhost:${PORT}/gps`);
     console.log(
-      `   Login:      http://localhost:${PORT}/ (redirige a /admin, /supervisor u /operator según el rol)`,
+      `   Login:      http://localhost:${PORT}/ (redirige a /administrator, /supervisor u /operator según el rol)`,
     );
     console.log(`   Health:     http://localhost:${PORT}/health`);
   });

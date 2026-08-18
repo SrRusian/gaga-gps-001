@@ -950,43 +950,128 @@ Notas:
 
 ### Alternativa: correr el backend sin Docker (avanzado)
 
-Para iteración rápida con hot-reload durante desarrollo activo del
-código, puedes correr el backend directo con `node`, apuntando a un
-Postgres/Redis que sigues levantando con Docker. El `npm install` se
-hace **una sola vez en la raíz** (es un monorepo con `npm workspaces`
-- instalar dentro de `apps/backend` directamente no resuelve los
-`packages/*` de los que depende). No hace falta ningún `.env` aparte
-- el backend siempre lee el único `.env` de la raíz, sin importar
-desde qué carpeta se arranque el proceso (`apps/backend/src/config/loadEnv.ts`
+**Docker (arriba) sigue siendo la vía recomendada/por defecto** - si
+solo quieres probar el proyecto tal cual, un `docker compose up -d
+--build` te da todo el stack. Esta alternativa es específicamente
+para iterar rápido *modificando código del backend* - `tsx watch`
+recompila y reinicia en milisegundos con cada guardado, sin esperar
+un rebuild de imagen (~10-20s incluso con caché de Docker) por cada
+cambio de una línea.
+
+Corres el backend directo con `node`, apuntando a un Postgres/Redis
+que sigues levantando con Docker. El `npm install` se hace **una sola
+vez en la raíz** (es un monorepo con `npm workspaces` - instalar
+dentro de `apps/backend` directamente no resuelve los `packages/*` de
+los que depende). No hace falta ningún `.env` aparte - el backend
+siempre lee el único `.env` de la raíz, sin importar desde qué
+carpeta se arranque el proceso (`apps/backend/src/config/loadEnv.ts`
 resuelve la ruta usando su propia ubicación en el repo, no el
 directorio de trabajo del proceso):
 
 ```bash
+docker compose stop gaga-backend        # si ya estaba corriendo - libera el puerto 3001
 docker compose up -d postgres redis     # solo las dependencias
-npm install                             # una vez, desde la raíz del repo
-npm run dev:backend                     # tsx watch - recompila y reinicia solo con guardar
+npm run dev                             # instala dependencias si hacen falta + backend (tsx watch) + frontend (Vite)
 ```
 
-`npm run dev:backend` corre `apps/backend/src/app.ts` directo con
-`tsx` (sin paso de build) - con la base de datos vacía, crea el admin
-por defecto igual que en Docker (ver arriba). Para la SPA en modo
-desarrollo (hot module reload de Vite, proxy a `localhost:3001` ya
-configurado en `vite.config.ts`):
+`npm run dev` deja todo listo solo, sin pasos previos - `predev`
+(convención de npm, cualquier script `pre<nombre>` se ejecuta
+automático antes del script real) corre primero `npm install`
+(instala dependencias si faltan o quedaron incompletas - clon nuevo
+del repo, o un `node_modules` a medio borrar) y después `npm run
+build` (compila backend + frontend a `dist/`, siempre, aunque ya
+existiera uno de antes - deja `apps/web-app/dist/` fresco para que
+`:3001` directo, ver más abajo, sirva la versión real más reciente en
+vez de una desactualizada). Con todo ya instalado y sin cambios de
+código, este paso previo completo toma unos segundos nomás - no
+alcanza a notarse antes de que arranquen los dos servidores de
+desarrollo.
+
+`npm run dev` (`concurrently`, devDependency de la raíz) corre
+`dev:backend` y `dev:web-app` a la vez en la misma terminal, con
+prefijo de color por proceso (`[backend]`/`[web-app]`) para no
+confundir sus logs - `Ctrl+C` una sola vez cierra los dos. Si
+prefieres verlos en terminales separadas (scroll independiente, o
+reiniciar uno sin tocar el otro), cada mitad también funciona sola:
 
 ```bash
-npm run dev --workspace=@gaga-gps/web-app   # http://localhost:5173
+npm run dev:backend    # tsx watch apps/backend/src/app.ts - recompila y reinicia solo con guardar
+npm run dev:web-app    # Vite - http://localhost:5173, hot module reload
 ```
 
-Al ser una sola app con React Router, el login y las 3 vistas por rol
+`dev:backend` corre `apps/backend/src/app.ts` directo con `tsx` (sin
+paso de build) - con la base de datos vacía, crea el admin por
+defecto igual que en Docker (ver arriba). `DB_HOST`/`REDIS_HOST` no
+hacen falta en `.env` para este modo - el código ya cae a `localhost`
+por defecto cuando no corre dentro de la red de Docker
+(`config/database.ts`/`config/redis.ts`), que es exactamente donde
+`docker compose up -d postgres redis` publica esos puertos. `dev:web-app`
+levanta Vite con hot module reload y el proxy a `localhost:3001` ya
+configurado (`vite.config.ts`).
+
+Al ser una sola app con React Router, el login y las vistas por rol
 viven en el mismo puerto - inicia sesión y la propia app te redirige
 a `/administrator`, `/supervisor` u `/operator` según el rol, igual que en
 producción, sin pasos extra.
+
+**¿`:5173` o `:3001` en el navegador? Casi siempre `:5173`** -
+mientras estás editando código del frontend, abre
+`http://localhost:5173`, no `:3001`. Es el servidor de Vite - hot
+module reload real (el cambio se ve al guardar, sin recargar la
+página ni perder el estado de React) y las llamadas a `/api`, `/gps`,
+`/tiles` y el socket ya están proxeadas a `:3001` (`vite.config.ts`),
+así que del punto de vista del navegador es exactamente la misma app,
+solo que con recarga instantánea. `:3001` directo (o la IP de tu
+máquina en la red local, para probar desde una tableta) sirve lo que
+haya en `apps/web-app/dist/` - el último build, ya sea de un `npm run
+build` a mano o el automático que corre `predev` al arrancar `npm run
+dev` (ver arriba) - una foto fija, sin hot-reload - útil para probar
+"cómo se ve en producción" o desde un dispositivo que no puede correr
+Vite, pero inútil para iterar: un cambio de código con `npm run dev`
+ya corriendo no aparece ahí hasta que lo pares y lo vuelvas a
+arrancar (o corras `npm run build` a mano).
+
+**Los mapas satelitales importados NO se comparten automáticamente
+entre Docker y este modo** - Postgres/Redis sí son los mismos
+(mismos contenedores, ambos modos les apuntan), pero los archivos
+`.mbtiles` de Docker viven dentro del volumen nombrado `maps_data`
+(gestionado por Docker, no un folder normal del host) mientras que
+este modo lee/escribe la carpeta real `maps/` en la raíz del repo -
+dos ubicaciones físicas distintas. Un mapa importado corriendo en
+Docker aparece en la lista (la fila de Postgres es la misma) pero sus
+tiles fallan con `unable to open database file` corriendo sin Docker,
+y viceversa. Sincronización manual, una sola vez (o cada vez que
+importes un mapa nuevo del otro lado y quieras verlo también aquí):
+
+```bash
+docker run --rm -v gaga-gps-001_maps_data:/from -v "$(pwd)/maps:/to" alpine cp -a /from/. /to/
+```
+
+No hace falta tocar `docker-compose.yml` para esto (seguiría
+usando el volumen nombrado, sin cambios - ver por qué en
+"Volúmenes y persistencia de datos" más arriba) - es un `cp` de
+una sola vez entre las dos ubicaciones, no una sincronización
+continua.
 
 El script manual (`docker compose exec gaga-backend npm run seed:admin -- ...`)
 sigue disponible si prefieres definir tú las credenciales del primer
 usuario desde el arranque. Fuera de Docker corre sobre el `dist/`
 compilado (`npm run build --workspace=@gaga-gps/backend` primero,
 luego `npm run seed:admin --workspace=@gaga-gps/backend -- ...`).
+
+**Aislamiento garantizado del build de Docker** - correr en este modo
+crea una carpeta `maps/` en la raíz del repo (equivalente local al
+volumen `maps_data`, para los mapas satelitales que importes
+mientras desarrollas así) - está en `.gitignore` **y** en
+`.dockerignore`, así que nunca se sube a GitHub ni puede colarse en
+una imagen construida con `docker compose up -d --build` (el
+`Dockerfile` tampoco hace ningún `COPY . .` genérico que pudiera
+arrastrarla por accidente - cada `COPY` nombra explícitamente qué
+carpeta de código copia). Un clon nuevo del repo (en tu servidor o en
+la máquina de otro dev) arranca siempre con volúmenes de Docker
+vacíos y el schema limpio de `db/migrations/001_init.sql` - nunca
+hereda nada de lo que hayas probado en local, sea vía Docker o vía
+este modo con `node`.
 
 Este flujo es opcional y no forma parte del despliegue estándar.
 

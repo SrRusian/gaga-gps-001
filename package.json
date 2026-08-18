@@ -12,17 +12,22 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "dev:backend": "npm run dev --workspace=@gaga-gps/backend"
+    "predev": "npm install && npm run build",
+    "dev:backend": "npm run dev --workspace=@gaga-gps/backend",
+    "dev:web-app": "wait-on -t 60000 http://localhost:3001/health && npm run dev --workspace=@gaga-gps/web-app",
+    "dev": "concurrently -n backend,web-app -c blue,green \"npm run dev:backend\" \"npm run dev:web-app\""
   },
   "license": "ISC",
   "devDependencies": {
     "@eslint/js": "^9.15.0",
     "@types/node": "^22.9.0",
+    "concurrently": "^10.0.5",
     "eslint": "^9.15.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.9.0",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.14.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wait-on": "^9.1.0"
   }
 }

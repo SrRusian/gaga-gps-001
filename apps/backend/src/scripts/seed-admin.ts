@@ -2,7 +2,7 @@
  * seed-admin.ts
  *
  * Script de utilidad para crear el primer usuario admin del
- * panel /admin. Uso:
+ * panel /administrator. Uso:
  *
  *   node dist/scripts/seed-admin.js <email> <password> [nombre]
  *

@@ -2,7 +2,7 @@
  * users.routes.ts
  *
  * CRUD de usuarios (operadores, supervisores, admins) para el
- * panel /admin. Solo accesible por rol 'admin' (ver auth.middleware).
+ * panel /administrator. Solo accesible por rol 'admin' (ver auth.middleware).
  */
 import bcrypt from 'bcryptjs';
 import express from 'express';

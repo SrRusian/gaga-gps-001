@@ -4,3 +4,4 @@ TEST-FILES/
 *.log
 dist/
 CLAUDE.md
+maps/

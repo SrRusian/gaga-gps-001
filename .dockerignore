@@ -7,4 +7,5 @@ apps/backend/.env
 *.log
 TEST-FILES
 README.md
+maps/
 
