@@ -47,7 +47,7 @@ export function buildDeviceSensorsRouter({
   router.get(
     '/:deviceId/sensors',
     authMiddleware,
-    requireRole('admin', 'supervisor'),
+    requireRole('admin', 'project_supervisor'),
     async (req, res) => {
       try {
         const limit = req.query.limit ? Number(req.query.limit) : 50;

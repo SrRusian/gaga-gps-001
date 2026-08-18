@@ -44,8 +44,7 @@ function formatDuration(from: string, to: string): string {
 }
 
 // ProtectedRoute (features/auth) ya garantizó una sesión válida con
-// rol "supervisor" o "project_supervisor" antes de montar este
-// componente.
+// rol "project_supervisor" antes de montar este componente.
 export default function SupervisorApp() {
   const navigate = useNavigate();
   const user = getStoredUser()!;

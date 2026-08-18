@@ -44,7 +44,7 @@ export function buildFleetRouter({
   router.post(
     '/stop',
     authMiddleware,
-    requireRole('supervisor', 'admin', 'project_supervisor', 'project_manager'),
+    requireRole('admin', 'project_supervisor', 'project_manager'),
     (req, res) => {
       const reason = req.body?.reason;
       preventiveStopService.activate(reason || 'Activado manualmente por supervisor', 'supervisor');
@@ -55,7 +55,7 @@ export function buildFleetRouter({
   router.post(
     '/resume',
     authMiddleware,
-    requireRole('supervisor', 'admin', 'project_supervisor', 'project_manager'),
+    requireRole('admin', 'project_supervisor', 'project_manager'),
     (req, res) => {
       preventiveStopService.deactivate('supervisor');
       res.json({ success: true, status: preventiveStopService.getStatus() });

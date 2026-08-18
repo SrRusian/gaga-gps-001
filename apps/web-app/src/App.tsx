@@ -57,7 +57,7 @@ export default function App() {
               URL del rol equivocado, `ProtectedRoute` lo rebota a "/"
               y `Home` lo manda de vuelta a SU ruta correcta. */}
           <Route
-            path="/admin/*"
+            path="/administrator/*"
             element={
               <ProtectedRoute role="admin">
                 <AdminApp />
@@ -65,7 +65,7 @@ export default function App() {
             }
           />
           <Route
-            path="/encargado/*"
+            path="/manager/*"
             element={
               <ProtectedRoute role="project_manager">
                 <AdminApp />
@@ -75,7 +75,7 @@ export default function App() {
           <Route
             path="/supervisor"
             element={
-              <ProtectedRoute role={['supervisor', 'project_supervisor']}>
+              <ProtectedRoute role="project_supervisor">
                 <SupervisorApp />
               </ProtectedRoute>
             }

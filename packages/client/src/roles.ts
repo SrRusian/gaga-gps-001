@@ -1,22 +1,30 @@
 /**
  * roles.ts
  *
- * `admin`/`supervisor`/`operator` son a la vez el nombre del rol y la
- * ruta de su panel. Los roles de proyecto reutilizan el MISMO
- * componente que Admin/Supervisor con menos alcance (nunca una copia
- * propia) pero sí tienen su propia ruta - puramente por identidad/
+ * Solo 4 roles reales en todo el sistema: `admin`, `project_manager`,
+ * `project_supervisor`, `operator` - el antiguo `supervisor` "clásico"
+ * (sin proyecto, de antes de la Fase A de multi-tenencia) se eliminó
+ * por completo el 2026-08-17 - cero cuentas lo usaban ya, y tenerlo
+ * vivo en `ROLE_PATH`/`ROLE_LABEL` producía una entrada duplicada
+ * "Supervisor" en el `<select>` de rol (dos valores de rol distintos,
+ * mismo texto mostrado - bug real reportado en campo). Si hace falta
+ * reintroducir un supervisor sin proyecto en el futuro, es una
+ * decisión de producto nueva, no un revert de este cambio.
+ *
+ * Cada rol tiene su propia ruta - puramente por identidad/
  * profesionalismo de URL (que se note con qué rol entraste), no por
  * seguridad real: la única puerta de verdad es `ProtectedRoute` +
  * la validación de JWT/rol en cada endpoint del backend, no el string
- * de la URL. Este mapeo es el único lugar donde "rol" y "ruta" se
- * desacoplan - `App.tsx` monta el mismo `<AdminApp />`/`<SupervisorApp />`
- * en ambas rutas de cada par, así que un cambio a ese componente
- * afecta a los dos roles por igual, nunca hay que tocar dos copias.
+ * de la URL. `project_manager`/`project_supervisor` reutilizan el
+ * MISMO componente que Admin/Supervisor con menos alcance (nunca una
+ * copia propia) - `App.tsx` monta el mismo `<AdminApp />`/
+ * `<SupervisorApp />` en ambas rutas de cada par, así que un cambio a
+ * ese componente afecta a los dos roles por igual, nunca hay que
+ * tocar dos copias.
  */
 const ROLE_PATH: Record<string, string> = {
-  admin: 'admin',
-  project_manager: 'encargado',
-  supervisor: 'supervisor',
+  admin: 'administrator',
+  project_manager: 'manager',
   project_supervisor: 'supervisor',
   operator: 'operator',
 };
@@ -35,10 +43,9 @@ export function resolveRolePath(role: string): string {
  */
 const ROLE_LABEL: Record<string, string> = {
   operator: 'Operador',
-  project_supervisor: 'Supervisor',
+  project_supervisor: 'Supervisor de Proyecto',
   project_manager: 'Encargado de Proyecto',
-  admin: 'Admin',
-  supervisor: 'Supervisor',
+  admin: 'Administrador',
 };
 
 export function roleLabel(role: string): string {

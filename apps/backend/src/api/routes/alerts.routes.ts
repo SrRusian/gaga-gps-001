@@ -72,7 +72,7 @@ async function computeFilters(req: express.Request, shiftResolver: ShiftResolver
 
 export function buildAlertsRouter({ alertEventRepo, requireRole, shiftResolver }: AlertsRouterDeps) {
   const router = express.Router();
-  const canView = requireRole('admin', 'supervisor', 'project_manager', 'project_supervisor');
+  const canView = requireRole('admin', 'project_manager', 'project_supervisor');
 
   router.get('/history', canView, async (req, res) => {
     try {

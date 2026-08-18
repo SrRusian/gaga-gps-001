@@ -66,7 +66,7 @@ tres interfaces web, todas detrás de un **login único** (ver
   vehículo: mapa, alertas, mi posición/velocidad.
 - **Supervisor** (`/supervisor`) - vista de sala de control: toda
   la flota, alertas activas, botón de parada preventiva colectiva.
-- **Admin** (`/admin`) - gestión: dispositivos, geocercas, equipo
+- **Admin** (`/administrator`) - gestión: dispositivos, geocercas, equipo
   estático, usuarios, historial/reportes, estado del sistema.
 
 ## Arquitectura
@@ -106,22 +106,24 @@ tenía cuenta en absoluto (pantalla de sala de control sin dueño).
 Ahora:
 
 ```
-app.gaga-maquinaria.com/           (features/auth/LoginScreen.tsx)
+app.gaga-maquinaria.com/                    (features/auth/LoginScreen.tsx)
         │ POST /api/auth/login  →  { token, user: { role } }
         │ guarda la sesión en localStorage
         ▼
-navigate(`/${role}`)   ← React Router, sin recargar la página
+navigate(`/${resolveRolePath(role)}`)   ← React Router, sin recargar la página
         │
-        ├─ role="admin"      → /admin       (features/admin,      lazy)
-        ├─ role="supervisor" → /supervisor  (features/supervisor, lazy)
-        └─ role="operator"   → /operator    (features/operator,   lazy)
+        ├─ role="admin"               → /administrator (features/admin,      lazy)
+        ├─ role="project_manager"     → /manager        (features/admin,      lazy - mismo componente que admin, menos alcance)
+        ├─ role="project_supervisor"  → /supervisor      (features/supervisor, lazy)
+        └─ role="operator"            → /operator        (features/operator,   lazy)
 ```
 
-Dos roles más reutilizan estos mismos paneles con distinto alcance -
-`project_manager` entra a `/encargado` (mismo componente `AdminApp`
-que Admin, misma sección `features/admin` - dos rutas, no dos copias,
-solo para que la URL refleje con qué rol se entró) y `project_supervisor`
-entra a `/supervisor` (como Supervisor, pero solo de su turno) - ver
+Solo 4 roles reales en todo el sistema - no hay un rol "supervisor"
+genérico/sin proyecto (existió antes de la Fase A de multi-tenencia,
+se eliminó por completo). `admin` y `project_manager` comparten
+literalmente el mismo componente (`AdminApp`/`features/admin`, dos
+rutas separadas solo para que la URL refleje con qué rol se entró,
+nunca una copia del código) - ver
 [Multi-tenencia por proyecto](#multi-tenencia-por-proyecto) más abajo.
 `resolveRolePath()` (`packages/client/src/roles.ts`) es el único lugar
 donde "rol" y "ruta de panel" se desacoplan.
@@ -142,7 +144,7 @@ Router decide qué mostrar del lado del cliente).
 
 - **`ProtectedRoute`** (`features/auth/ProtectedRoute.tsx`) reemplaza
   lo que antes era `useRoleGuard` repetido en cada app: valida que
-  haya sesión y que el rol coincida con la ruta (`/admin` exige
+  haya sesión y que el rol coincida con la ruta (`/administrator` exige
   `role==="admin"`, etc.) - si no, `<Navigate to="/" replace />` sin
   recargar la página. Antes una sesión inválida hacía
   `window.location.href = '/'` (recarga completa); ahora es una
@@ -314,9 +316,9 @@ el trabajo no las reabra sin razón):
   estado de React, no con URLs, igual que antes con JS puro.~~
   **Revertido después**: al consolidar las 4 apps en una sola SPA sí
   se agregó React Router - con una sola app y 3 roles en la misma
-  URL base, sí hacía falta enrutamiento real (`/admin`, `/supervisor`,
+  URL base, sí hacía falta enrutamiento real (`/administrator`, `/supervisor`,
   `/operator` + `ProtectedRoute`). Admin sigue sin URLs por sección
-  internamente (`/admin` es una sola ruta; el cambio de "pestaña" en
+  internamente (`/administrator` es una sola ruta; el cambio de "pestaña" en
   el panel sigue siendo estado de React) - ver
   [Autenticación y roles](#autenticación-y-roles).
 - Los `packages/*` se consumen como TypeScript fuente, sin build
@@ -773,7 +775,7 @@ bien visible en `docker compose logs gaga-backend`.
 
 > **Cambia esa contraseña de inmediato** - entra a la raíz del
 > sitio (`/`, el login único) con esas credenciales y actualízala
-> desde **Usuarios** una vez dentro de `/admin` (o define
+> desde **Usuarios** una vez dentro de `/administrator` (o define
 > `DEFAULT_ADMIN_PASSWORD` en tu `.env` _antes_ del primer arranque
 > si prefieres no usar nunca la de por defecto). Este mecanismo solo
 > se activa una vez, con la tabla vacía - no vuelve a crear el
@@ -977,7 +979,7 @@ npm run dev --workspace=@gaga-gps/web-app   # http://localhost:5173
 
 Al ser una sola app con React Router, el login y las 3 vistas por rol
 viven en el mismo puerto - inicia sesión y la propia app te redirige
-a `/admin`, `/supervisor` u `/operator` según el rol, igual que en
+a `/administrator`, `/supervisor` u `/operator` según el rol, igual que en
 producción, sin pasos extra.
 
 El script manual (`docker compose exec gaga-backend npm run seed:admin -- ...`)
@@ -992,12 +994,12 @@ Este flujo es opcional y no forma parte del despliegue estándar.
 
 | Ruta                                 | Descripción                                                                             |
 | ------------------------------------ | --------------------------------------------------------------------------------------- |
-| `http://localhost:3001/`             | Login único (gateway) - redirige a /admin, /supervisor u /operator según el rol         |
+| `http://localhost:3001/`             | Login único (gateway) - redirige a /administrator, /supervisor u /operator según el rol |
 | `GET/POST http://localhost:3001/gps` | Receptor de telemetría (usado por las tabletas)                                         |
 | `http://localhost:3001/operator`     | UI Operador                                                                             |
 | `http://localhost:3001/supervisor`   | UI Supervisor                                                                           |
-| `http://localhost:3001/admin`        | Panel de administración (rol `admin`)                                                   |
-| `http://localhost:3001/encargado`    | Mismo panel de administración, rol `project_manager` (acotado a su proyecto)            |
+| `http://localhost:3001/administrator`| Panel de administración (rol `admin`)                                                   |
+| `http://localhost:3001/manager`      | Mismo panel de administración, rol `project_manager` (acotado a su proyecto)            |
 | `http://localhost:3001/health`       | Health check (estado de Postgres/Redis)                                                 |
 | `https://app.gaga-maquinaria.com`    | URL pública principal en producción, servida por Caddy - abre directo en el login único |
 
@@ -1712,7 +1714,7 @@ que ya no pertenecen a ningún proyecto:
 
 ## Panel de administración
 
-Accesible en `/admin` (rol `admin`) o `/encargado` (rol `project_manager`,
+Accesible en `/administrator` (rol `admin`) o `/manager` (rol `project_manager`,
 mismo componente con menos alcance - ver [Autenticación y roles](#autenticación-y-roles))
 tras iniciar sesión en el login único (`/`; ver
 [Instalación y despliegue](#instalación-y-despliegue) para crear el
@@ -1913,9 +1915,9 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota (JSON por disposit
 | Síntoma                                                                                               | Causa probable                                                                                                                                                                                                                                      | Solución                                                                                                                                                                                                                                                                         |
 | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `NOAUTH Authentication required` (Redis)                                                              | Falta `REDIS_PASSWORD` en `.env`                                                                                                                                                                                                                    | Debe coincidir con lo que arrancó el contenedor `gaga-redis` (`docker compose up -d --build` para aplicar cambios de `.env`)                                                                                                                                                     |
-| `Cannot GET /`, `/admin`, `/operator`, `/supervisor`                                                  | El build de `apps/web-app` no llegó a la imagen del backend, o falta el fallback de SPA                                                                                                                                                             | Verificar que `apps/web-app/dist` exista tras `npm run build` (lo copia la etapa `runtime` de `apps/backend/Dockerfile`); confirmar que `app.ts` tiene el `app.get(/^\/(?!api\|gps\|tiles\|health\|socket\.io).*/, ...)` al final, después de todas las demás rutas              |
-| Entrar a `/admin`, `/supervisor` u `/operator` directo manda de vuelta al login (`/`) en loop         | No hay sesión válida en `localStorage`, o el rol del usuario no coincide con esa ruta (`ProtectedRoute` redirige si no coincide)                                                                                                                    | Es el comportamiento esperado - inicia sesión en `/` con un usuario de ese rol. Si el loop persiste con credenciales correctas, revisar la consola del navegador por errores de red a `/api/auth/login`                                                                          |
-| `401`/`403` en `/api/fleet/stop` o `/resume` con un usuario logueado                                   | El usuario no tiene un rol autorizado (`requireRole('supervisor', 'admin', 'project_supervisor', 'project_manager')`), o el token venció                                                                                                            | Confirmar el rol del usuario en Admin → Dashboard → overlay Usuarios; si el rol es correcto pero sigue fallando, volver a iniciar sesión (el token pudo expirar)                                                                                                              |
+| `Cannot GET /`, `/administrator`, `/operator`, `/supervisor`                                                  | El build de `apps/web-app` no llegó a la imagen del backend, o falta el fallback de SPA                                                                                                                                                             | Verificar que `apps/web-app/dist` exista tras `npm run build` (lo copia la etapa `runtime` de `apps/backend/Dockerfile`); confirmar que `app.ts` tiene el `app.get(/^\/(?!api\|gps\|tiles\|health\|socket\.io).*/, ...)` al final, después de todas las demás rutas              |
+| Entrar a `/administrator`, `/supervisor` u `/operator` directo manda de vuelta al login (`/`) en loop         | No hay sesión válida en `localStorage`, o el rol del usuario no coincide con esa ruta (`ProtectedRoute` redirige si no coincide)                                                                                                                    | Es el comportamiento esperado - inicia sesión en `/` con un usuario de ese rol. Si el loop persiste con credenciales correctas, revisar la consola del navegador por errores de red a `/api/auth/login`                                                                          |
+| `401`/`403` en `/api/fleet/stop` o `/resume` con un usuario logueado                                   | El usuario no tiene un rol autorizado (`requireRole('admin', 'project_supervisor', 'project_manager')`), o el token venció                                                                                                            | Confirmar el rol del usuario en Admin → Dashboard → overlay Usuarios; si el rol es correcto pero sigue fallando, volver a iniciar sesión (el token pudo expirar)                                                                                                              |
 | El socket no conecta / no llegan actualizaciones en vivo en Supervisor u Operador                     | `io.use(buildSocketAuthMiddleware(...))` rechaza conexiones sin un JWT válido - antes los sockets eran abiertos                                                                                                                                     | Confirmar que hay una sesión válida en `localStorage` (`gaga_auth_token`) antes de que la app llame a `createSocket()`; en herramientas manuales (`test-client.js`) hacer login por HTTP primero para obtener el token                                                           |
 | `404` en Traccar Client al mandar posición                                                            | La tableta usa `POST` en vez de `GET`                                                                                                                                                                                                               | Ya soportado - verificar que el backend esté actualizado (`router.post('/gps', ...)` en `telemetry.routes.ts`)                                                                                                                                                                   |
 | `400` "Faltan parámetros requeridos" pese a que la tableta manda datos                                | Traccar Client envía los parámetros en el body (`form-urlencoded`), no en la URL                                                                                                                                                                    | Ya soportado - requiere `express.urlencoded()` en `app.ts`                                                                                                                                                                                                                       |

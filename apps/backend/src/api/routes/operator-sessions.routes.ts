@@ -151,7 +151,7 @@ export function buildOperatorSessionsRouter({
   router.get(
     '/report',
     authMiddleware,
-    requireRole('admin', 'supervisor', 'project_manager', 'project_supervisor'),
+    requireRole('admin', 'project_manager', 'project_supervisor'),
     async (req, res) => {
       try {
         const { userId, deviceId, from, to } = req.query;
