@@ -23,6 +23,7 @@ export interface AlertEventRow {
   resolved_at: Date | null;
 }
 
+// historial unificado de las 6 familias de alerta - no reemplaza geofence_events/incident_reports
 class AlertEventRepository {
   async recordOrEscalate({
     alertType,

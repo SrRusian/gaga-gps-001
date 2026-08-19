@@ -1,3 +1,4 @@
+// duplicado a propósito, ver apps/backend/src/utils/geometry.ts (haversineDistance)
 const EARTH_RADIUS_M = 6371000;
 
 function toRad(deg: number): number {

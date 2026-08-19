@@ -25,9 +25,6 @@ class MapPipelineService {
     this.mapRepo = mapRepo;
   }
 
-  /**
-   * @param chosenCrs - CRS elegido en el formulario
-   */
   async process(
     mapId: number,
     imagePath: string,

@@ -58,6 +58,7 @@ class SpeedEstimationService {
     }
     state.lastFix = { lat, lon, fixTimeMs };
 
+    // si divergen demasiado, descarta el crudo (Doppler) y usa solo la derivada
     let blendedKmh: number;
     if (rawDeviceKmh != null && derivedKmh != null) {
       blendedKmh =
@@ -72,6 +73,7 @@ class SpeedEstimationService {
     const smoothedKmh = this.emaAlpha * blendedKmh + (1 - this.emaAlpha) * prevSmoothed;
     state.smoothedKmh = smoothedKmh;
 
+    // clamp solo en el retorno, no en el estado - si no, el arranque real tarda mas
     const reportedKmh = smoothedKmh < this.minSpeedKmh ? 0 : smoothedKmh;
 
     return { speedMs: reportedKmh / 3.6, rawDeviceKmh, derivedKmh };

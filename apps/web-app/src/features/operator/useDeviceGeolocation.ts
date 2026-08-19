@@ -35,6 +35,7 @@ export function useDeviceGeolocation() {
   useEffect(() => {
     if (!supported) return;
 
+    // requiere HTTPS/localhost exacto - si no, PERMISSION_DENIED sin diálogo
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
         setError(null);

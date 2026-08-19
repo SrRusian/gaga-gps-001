@@ -45,7 +45,7 @@ export function buildMapsRouter({ mapsDir, mapRepo, userRepo }: MapsRouterDeps):
 
     const zoom = parseInt(req.params.z, 10);
     const tileX = parseInt(req.params.x, 10);
-    const tileY = 2 ** zoom - 1 - parseInt(req.params.y, 10);
+    const tileY = 2 ** zoom - 1 - parseInt(req.params.y, 10); // mbtiles usa esquema TMS (Y invertido)
 
     try {
       const db = getTilesDb(mapId);

@@ -25,6 +25,8 @@ interface EvaluatedPosition {
 
 type ProximityAlertLevel = 'none' | 'warning' | 'critical';
 
+// separado de CollisionRiskService a proposito, sin heuristica de convergencia
+// global, no filtra por proyecto (gap de aislamiento conocido)
 class VehicleProximityService {
   io: SocketIoLike;
   alertEventRepo?: AlertEventRepoLike;

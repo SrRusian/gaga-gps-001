@@ -1,8 +1,4 @@
-/**
- * Las tabletas (Traccar Client) reportan directamente a GET /gps
- * usando el protocolo OsmAnd. Este archivo solo ensambla config,
- * repositorios, servicios y rutas - la lógica vive en cada módulo.
- */
+// GET /gps recibe telemetría de tabletas (Traccar Client, protocolo OsmAnd)
 import './config/loadEnv';
 import bcrypt from 'bcryptjs';
 import express from 'express';
@@ -107,18 +103,11 @@ const authMiddleware = buildAuthMiddleware({ userRepo });
 const downloadAuthMiddleware = buildDownloadAuthMiddleware({ userRepo });
 io.use(buildSocketAuthMiddleware({ userRepo }));
 
-// Se crea antes que los servicios de seguridad porque SignalLostService
-// lo necesita para marcar `devices.status='offline'` en PostgreSQL en
-// cuanto se detecta pérdida de señal (ver más abajo) - antes esa
-// transición nunca se persistía y el panel admin quedaba mostrando
-// "online" indefinidamente.
+// antes de los servicios de seguridad - SignalLostService lo necesita para persistir status=offline
 const deviceManager = new DeviceManager({ deviceRepo });
 
 // ── Servicios de seguridad ──────────────────────────────────────
-// socketServer se asigna después (ver más abajo) - FleetSocketServer
-// necesita a geofenceService como su propia dependencia, así que no
-// puede pasarse aquí sin crear una dependencia circular (mismo
-// patrón ya usado para socketServer.incidentAlertService).
+// socketServer se asigna después - evita ciclo con FleetSocketServer (mismo patrón que incidentAlertService abajo)
 const geofenceService = new GeofenceAlertService({ geofenceRepo, geofenceEventRepo, alertEventRepo });
 const preventiveStopService = new PreventiveStopService({ io, alertEventRepo });
 const signalLostService = new SignalLostService({
@@ -142,19 +131,15 @@ const socketServer = new FleetSocketServer({
   alertEventRepo,
   equipmentManager,
 });
-// Ver comentario en la construcción de geofenceService, arriba -
-// mismo patrón que socketServer.incidentAlertService más abajo.
+// mismo patrón de ciclo evitado que socketServer.incidentAlertService abajo
 geofenceService.socketServer = socketServer;
 
 const positionFilter = new PositionFilterService(env.positionFilter);
 const speedEstimator = new SpeedEstimationService();
 
-// Nace ya aislado por proyecto (cada incidente trae su project_id) -
-// por eso necesita socketServer.broadcastToProject, no `io` directo
-// como los demás servicios de alerta (ver comentario en la clase).
+// usa socketServer.broadcastToProject (no io directo) - incidentes ya traen su project_id
 const incidentAlertService = new IncidentAlertService({ socketServer, incidentRepo, alertEventRepo });
-// Ver comentario en FleetSocketServer.ts - no puede llegar por su
-// constructor sin crear una dependencia circular con socketServer.
+// asignado post-construcción para evitar ciclo con socketServer (ver FleetSocketServer.ts)
 socketServer.incidentAlertService = incidentAlertService;
 
 const positionProcessor = new PositionProcessor({
@@ -173,31 +158,9 @@ const positionProcessor = new PositionProcessor({
 });
 
 // ── UI estática ──────────────────────────────────────────────────
-// Una sola SPA (apps/web-app) - el login y las vistas por rol
-// (/administrator, /manager, /supervisor, /operator) los resuelve React Router del
-// lado del cliente, no Express. express.static intenta servir un
-// archivo real primero (JS/CSS/imágenes ya compilados); si no
-// existe, sigue a las rutas de abajo, y el fallback de SPA al final
-// del archivo sirve siempre index.html para cualquier ruta de
-// navegación que no sea un archivo ni una API.
-//
-// Dos estructuras posibles en disco para la MISMA carpeta lógica -
-// se detecta cuál hay en runtime en vez de asumir una sola:
-//   - Imagen de Docker (`apps/backend/Dockerfile`): el build ya
-//     "aplanó" `apps/web-app/dist/*` directo dentro de
-//     `apps/web-app/` (rm -rf + copy) - `apps/web-app/index.html` YA
-//     es el compilado.
-//   - Corriendo con `node`/`tsx` sin Docker (`npm run dev:backend`,
-//     ver README): esa aplanada nunca pasó - `apps/web-app/` sigue
-//     siendo el código fuente de Vite (su propio `index.html` fuente,
-//     que referencia `/src/main.tsx` como módulo ES - eso es lo que
-//     sirve Vite en modo dev, no algo que `express.static` pueda
-//     servir crudo) y el build real (si se corrió `npm run build`)
-//     vive aparte, en `apps/web-app/dist/`. Sin este chequeo,
-//     `express.static` encuentra el `index.html` FUENTE primero y lo
-//     sirve tal cual - pantalla en blanco en el navegador (el
-//     `<script type="module" src="/src/main.tsx">` nunca carga sin el
-//     servidor de Vite) - bug real, reproducido en vivo.
+// una sola SPA - rutas por rol las resuelve React Router, no Express
+// runtime detecta dist/ (Docker, ya aplanado) vs código fuente (tsx/node sin Docker) -
+// sin esto express.static servía el index.html fuente y daba pantalla en blanco (bug real)
 const webAppRoot = path.join(__dirname, '../../web-app');
 const webAppDistDir = path.join(webAppRoot, 'dist');
 const webAppDir = fs.existsSync(path.join(webAppDistDir, 'index.html')) ? webAppDistDir : webAppRoot;
@@ -207,20 +170,8 @@ app.use(express.static(webAppDir));
 app.use(telemetryLimiter, buildTelemetryRouter({ positionProcessor }));
 
 // ── Tiles MBTiles / importador de mapas satelitales ───────────────
-// `__dirname` compilado es `apps/backend/dist` - a diferencia de
-// `webAppDir` (arriba, que SÍ vive dentro de `apps/`, dos niveles
-// arriba alcanzan), `maps/` vive en la raíz del proyecto/contenedor
-// (junto a `db/`, mismo nivel que `apps/`) - hacen falta TRES niveles
-// arriba (`dist` -> `backend` -> `apps` -> raíz), no dos. Con solo dos
-// niveles esto resolvía a `apps/maps` (`/app/apps/maps` en Docker) -
-// una carpeta fuera del volumen nombrado `maps_data:/app/maps` de
-// `docker-compose.yml`, así que cualquier mapa importado se escribía
-// en la capa efímera del contenedor y parecía funcionar mientras ese
-// mismo proceso seguía vivo (mismo path al leer y escribir), pero
-// desaparecía sin dejar rastro en cuanto el contenedor se recreaba
-// (cualquier `docker compose up -d --build`) - la fila de `maps` en
-// Postgres (persistente, volumen aparte) seguía diciendo
-// `status=ready` para un archivo que ya no existía en ningún lado.
+// 3 niveles arriba (dist->backend->apps->raíz), no 2 - con 2 resolvía a apps/maps
+// (efímero, fuera del volumen maps_data) y los mapas importados se perdían al rebuildear
 const resolvedMapsDir = path.join(__dirname, '../../../', env.mapsDir);
 const mapsRouter = buildMapsRouter({ mapsDir: resolvedMapsDir, mapRepo, userRepo });
 const mapPipelineService = new MapPipelineService({ mapsDir: resolvedMapsDir, mapRepo });
@@ -311,9 +262,7 @@ app.use(
   authMiddleware,
   buildAlertsRouter({ alertEventRepo, requireRole, shiftResolver }),
 );
-// El chequeo de rol ahora es por-ruta dentro del router (Admin y
-// Encargado de Proyecto pueden ver/editar; crear/eliminar sigue
-// siendo exclusivo de Admin) - ver users.routes.ts.
+// chequeo de rol por-ruta dentro del router, no aquí - ver users.routes.ts
 app.use('/api/users', authMiddleware, buildUsersRouter({ userRepo, requireRole }));
 
 app.use(
@@ -354,28 +303,12 @@ app.get('/health', async (req, res) => {
 });
 
 // ── Fallback de SPA ───────────────────────────────────────────────
-// Debe ir al final, después de todas las rutas de arriba - cualquier
-// GET que no sea un archivo real (ya lo habría servido
-// express.static) ni una de las rutas anteriores (/gps, /tiles,
-// /api/*, /health) es una ruta de navegación de React Router
-// (/, /administrator, /manager, /supervisor, /operator, o una sub-ruta futura) y debe
-// resolver siempre a index.html para que el router del cliente la
-// tome. Se excluye /socket.io explícitamente - Socket.io intercepta
-// esas peticiones por su cuenta (vía engine.io), antes de que
-// Express decida qué hacer con ellas.
+// debe ir al final - resuelve rutas de React Router a index.html; excluye /socket.io (lo maneja engine.io)
 app.get(/^\/(?!api|gps|tiles|health|socket\.io).*/, (req, res) => {
   res.sendFile(path.join(webAppDir, 'index.html'));
 });
 
-/**
- * Crea el usuario admin@gaga.com (o el que se configure vía
- * DEFAULT_ADMIN_EMAIL) con la contraseña por defecto SOLO si la
- * tabla `users` está completamente vacía - o sea, la primera vez
- * que se levanta el volumen de PostgreSQL. Evita el paso manual de
- * `npm run seed:admin` en una instalación nueva; el script sigue
- * disponible para crear usuarios adicionales o resetear la
- * contraseña más adelante.
- */
+// crea admin por defecto solo si users está vacía (primer arranque) - seed:admin sigue disponible aparte
 async function ensureDefaultAdmin(): Promise<void> {
   const existing = await userRepo.findAll();
   if (existing.length > 0) return;
@@ -404,10 +337,7 @@ async function loadPersistedState(): Promise<void> {
     geofences.forEach((g) => geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(g)));
     console.log(`${geofences.length} geocerca(s) cargada(s) desde PostgreSQL`);
 
-    // Recupera el reloj de "última señal" de los dispositivos que
-    // quedaron marcados online antes de este reinicio - así
-    // SignalLostService los re-evalúa de inmediato en vez de
-    // olvidarlos (ver comentario en SignalLostService.hydrate).
+    // recupera last_update de dispositivos "online" antes del reinicio para que SignalLostService los re-evalúe
     const devices = await deviceRepo.findAll();
     const staleTrackedDevices = devices
       .filter((d) => d.status === 'online' && d.last_update)

@@ -52,6 +52,7 @@ export function useAlertHistory() {
     const res = await fetch(`/api/alerts/history/csv?${toQuery(filters)}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
+    // blob: Chrome bloquea esta descarga fuera de HTTPS/localhost exacto
     const blob = await res.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);

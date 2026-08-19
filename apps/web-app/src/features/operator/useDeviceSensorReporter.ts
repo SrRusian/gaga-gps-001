@@ -104,7 +104,7 @@ async function collectDynamicSnapshot(
       const estimate = await navigator.storage.estimate();
       snapshot.storage = { usageBytes: estimate.usage ?? null, quotaBytes: estimate.quota ?? null };
     } catch {
-      // Idem - algunos navegadores exponen la API pero la rechazan en ciertos contextos.
+      // Idem - a veces la API existe pero el navegador la rechaza
     }
   }
 

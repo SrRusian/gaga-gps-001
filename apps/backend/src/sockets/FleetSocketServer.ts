@@ -28,6 +28,7 @@ function alertEventKey(row: AlertEventRow): string {
       return `geofence:${row.device_id}`;
     case 'signal_lost':
       return `signal:${row.device_id}`;
+    // deviceId es string, no numérico - sort().join() en vez de Math.min (bug real ya corregido)
     case 'collision':
       return `collision:${[row.device_id, row.device_id_2].sort().join('-')}`;
     case 'proximity':
@@ -47,7 +48,7 @@ class FleetSocketServer {
   mapRepo?: MapRepository;
   alertEventRepo?: AlertEventRepository;
   equipmentManager?: StaticEquipmentManager;
-  incidentAlertService?: IncidentAlertService;
+  incidentAlertService?: IncidentAlertService; // asignado post-construcción desde app.ts, evita ciclo
 
   constructor({
     io,
@@ -70,6 +71,7 @@ class FleetSocketServer {
   }
 
   _registerConnectionHandler(): void {
+    // hidratación filtrada por proyecto - no solo los broadcasts en vivo
     this.io.on('connection', async (socket: Socket) => {
       console.log(`Cliente conectado: ${socket.id}`);
       const user = (socket.data as { user?: AuthTokenPayload }).user;

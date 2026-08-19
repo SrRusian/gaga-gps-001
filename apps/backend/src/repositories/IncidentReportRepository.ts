@@ -79,6 +79,7 @@ class IncidentReportRepository {
   }): Promise<IncidentReportRow> {
     try {
       const { rows } = await query<IncidentReportRow>(
+        // 120m default - no cambiar sin confirmar con el equipo de campo
         `INSERT INTO incident_reports
            (project_id, device_id, reported_by, category, message, latitude, longitude, radius_meters)
          VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8, 120))

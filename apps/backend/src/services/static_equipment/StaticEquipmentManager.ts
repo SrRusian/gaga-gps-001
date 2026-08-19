@@ -25,6 +25,7 @@ interface EvaluatedPosition {
 
 type ApproachState = 'clear' | 'outer' | 'inner' | 'minimum';
 
+// global, no filtra por proyecto (gap de aislamiento conocido)
 class StaticEquipmentManager {
   io: SocketIoLike;
   equipment: Record<number, StaticEquipment>;
@@ -80,6 +81,7 @@ class StaticEquipmentManager {
 
     Object.values(this.equipment).forEach((eq) => {
       if (eq.status === 'inactive') return;
+      // evita que el equipo se alerte de si mismo via su propia tableta vinculada
       if (eq.linkedDeviceId != null && String(deviceId) === eq.linkedDeviceId) return;
 
       const distance = this.calculateDistance(latitude, longitude, eq.lat, eq.lon);

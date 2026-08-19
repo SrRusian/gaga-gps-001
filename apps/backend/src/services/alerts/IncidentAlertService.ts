@@ -131,6 +131,7 @@ class IncidentAlertService {
     return updated;
   }
 
+  // llamar antes de purgar el device - resolve() hace UPDATE, necesita la fila viva
   async resolveDeviceIncidents(deviceId: string): Promise<void> {
     const ids = Object.values(this.activeIncidents)
       .filter((incident) => incident.device_id === deviceId)

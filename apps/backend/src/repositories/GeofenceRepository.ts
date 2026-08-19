@@ -149,6 +149,7 @@ class GeofenceRepository {
           geometry ? JSON.stringify(geometry) : null,
           corridorWidthMeters ?? null,
           corridorDangerMarginMeters ?? null,
+          // duplican $4/$8 - mismo placeholder en dos contextos de tipo distinto confunde a pg
           shapeType,
           geometry ? JSON.stringify(geometry) : null,
         ],

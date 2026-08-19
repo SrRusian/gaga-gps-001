@@ -1,3 +1,4 @@
+// duplicado a propósito, ver apps/backend/src/services/telemetry/PositionFilterService.ts - mismo criterio en ambos
 import { haversineMeters } from './geometry';
 
 export interface PositionFilterOptions {

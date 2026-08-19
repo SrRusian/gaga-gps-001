@@ -883,6 +883,7 @@ export function DashboardSection() {
       updateDraftPreviewRef.current();
       const featureId = e.features?.[0]?.id;
       if (featureId != null) {
+        // changeMode síncrono aquí reentra draw.create y truena el stack - diferir
         setTimeout(() => {
           drawRef.current?.changeMode('direct_select', { featureId: String(featureId) });
         }, 0);

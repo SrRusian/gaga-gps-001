@@ -11,6 +11,7 @@ function toMinutesOfDay(time: string): number {
   return h * 60 + m;
 }
 
+// requiere TZ=America/Mexico_City en el proceso - getHours() usa la hora local
 export function resolveShiftForTime(
   shifts: ShiftTimeRange[],
   now: Date = new Date(),
@@ -20,6 +21,7 @@ export function resolveShiftForTime(
   for (const shift of shifts) {
     const start = toMinutesOfDay(shift.start_time);
     const end = toMinutesOfDay(shift.end_time);
+    // start > end = turno cruza medianoche
     const matches = start <= end ? nowMinutes >= start && nowMinutes < end : nowMinutes >= start || nowMinutes < end;
     if (matches) return shift.id;
   }

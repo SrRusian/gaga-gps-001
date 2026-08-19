@@ -31,6 +31,7 @@ interface DeviceFilterState {
   consecutiveRejects: number;
 }
 
+// copia duplicada en packages/map-core/src/positionFilter.ts - replicar cambios ahi
 class PositionFilterService {
   toleranceFactor: number;
   minFloorKmh: number;

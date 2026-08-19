@@ -38,9 +38,7 @@ export interface UseMapLibreMapResult {
   loaded: boolean;
 }
 
-/**
- * @param containerRef - ref al div contenedor del mapa (debe tener altura definida por CSS)
- */
+// containerRef necesita altura definida por CSS
 export function useMapLibreMap(
   containerRef: React.RefObject<HTMLDivElement | null>,
   { center, zoom, style }: UseMapLibreMapOptions,
@@ -65,7 +63,7 @@ export function useMapLibreMap(
       mapRef.current = null;
       setLoaded(false);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- crea el mapa una sola vez al montar, no en cada cambio de center/zoom/style
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- crea el mapa una sola vez al montar
   }, []);
 
   return { map: mapRef.current, loaded };

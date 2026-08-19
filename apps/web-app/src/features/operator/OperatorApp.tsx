@@ -68,6 +68,7 @@ export default function OperatorApp() {
   const batteryLevel = useBatteryLevel();
   useDeviceSensorReporter(deviceId);
 
+  // posición propia: local tiene prioridad sobre servidor; alertas siguen siendo del servidor
   const displayFleet = useMemo(() => {
     if (!deviceId || !localGeo) return fleet;
     const base = fleet[deviceId];

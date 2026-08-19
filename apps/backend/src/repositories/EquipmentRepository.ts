@@ -90,6 +90,7 @@ class EquipmentRepository {
       linkedDeviceId?: string | null;
     },
   ): Promise<EquipmentRow | null> {
+    // SET armado a mano - COALESCE no distingue null intencional de "no vino en el body"
     const columns: Record<string, unknown> = {
       name: fields.name,
       type: fields.type,

@@ -131,6 +131,7 @@ class DeviceRepository {
       attributes?: Record<string, unknown>;
     },
   ): Promise<DeviceRow | null> {
+    // SET armado a mano - COALESCE no distingue null intencional de "no vino en el body"
     const sets: string[] = [];
     const values: unknown[] = [id];
     if (name !== undefined) {
@@ -180,9 +181,7 @@ class DeviceRepository {
     }
   }
 
-  /**
-   * @param force - si es true, purga también TODO el historial del dispositivo antes de eliminarlo
-   */
+  // force=true purga todo el historial antes de eliminar
   async delete(id: number, { force = false }: { force?: boolean } = {}): Promise<true> {
     const client = force ? await pool.connect() : null;
     try {
@@ -194,6 +193,7 @@ class DeviceRepository {
         );
         const uniqueId = rows[0]?.unique_id;
         if (uniqueId) {
+          // debe purgar TODAS las FK reales a devices - grep REFERENCES devices en 001_init.sql
           await client.query('DELETE FROM operator_sessions WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM positions WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM device_sensor_snapshots WHERE device_id = $1', [uniqueId]);

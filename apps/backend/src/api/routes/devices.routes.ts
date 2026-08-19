@@ -159,6 +159,7 @@ export function buildDevicesRouter({
         : [];
 
       if (device && incidentAlertService) {
+        // debe ir ANTES de purgar la fila - resolveDeviceIncidents necesita que exista todavía
         await incidentAlertService.resolveDeviceIncidents(device.unique_id);
       }
 
@@ -170,6 +171,7 @@ export function buildDevicesRouter({
       }
 
       if (device) {
+        // la fila ya no existe pero el estado en memoria de cada servicio de alerta sigue vivo
         geofenceAlertService?.clearDevice(device.unique_id, device.project_id);
         signalLostService?.clearDevice(device.unique_id);
         collisionRiskService?.clearDevice(device.unique_id, otherDeviceIds);

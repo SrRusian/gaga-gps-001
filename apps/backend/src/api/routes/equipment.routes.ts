@@ -104,6 +104,7 @@ export function buildEquipmentRouter({
         longitude,
         swingRadius,
         safetyRadius,
+        // 'in' distingue null intencional de "no vino" - COALESCE en el repo no puede
         linkedDeviceId: 'linkedDeviceId' in req.body ? linkedDeviceId : undefined,
       });
       if (!eq) return res.status(404).json({ error: 'Equipo no encontrado' });

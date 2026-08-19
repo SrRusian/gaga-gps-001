@@ -28,6 +28,7 @@ interface HistoryPoint {
 
 type CollisionAlertLevel = 'none' | 'proximity' | 'critical';
 
+// global, no filtra por proyecto (gap de aislamiento conocido)
 class CollisionRiskService {
   io: SocketIoLike;
   alertEventRepo?: AlertEventRepoLike;
@@ -35,7 +36,7 @@ class CollisionRiskService {
   collisionAlerts: Record<string, CollisionAlertLevel>;
   readonly THRESHOLD_1_METERS = 80;
   readonly THRESHOLD_2_METERS = 40;
-  readonly CLEAR_MARGIN = 1.15;
+  readonly CLEAR_MARGIN = 1.15; // histeresis - evita parpadeo por ruido GPS al limpiar
 
   constructor({ io, alertEventRepo }: { io: SocketIoLike; alertEventRepo?: AlertEventRepoLike }) {
     this.io = io;
@@ -44,9 +45,7 @@ class CollisionRiskService {
     this.collisionAlerts = {};
   }
 
-  /**
-   * @param fleetState - estado actual de toda la flota, keyed por deviceId
-   */
+  // fleetState viene keyed por deviceId
   evaluate(position: EvaluatedPosition, fleetState: Record<string, EvaluatedPosition>): void {
     const { deviceId } = position;
     this.updateHistory(position);
@@ -86,6 +85,7 @@ class CollisionRiskService {
   }
 
   evaluatePair(pos1: EvaluatedPosition, pos2: EvaluatedPosition): void {
+    // deviceId es string - sort+join evita el bug viejo de Math.min devolviendo NaN
     const pairKey = [String(pos1.deviceId), String(pos2.deviceId)].sort().join('-');
 
     const distance = this.calculateDistance(

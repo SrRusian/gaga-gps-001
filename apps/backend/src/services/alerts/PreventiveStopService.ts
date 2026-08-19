@@ -39,6 +39,7 @@ class PreventiveStopService {
     this.activationReason = null;
   }
 
+  // afecta a toda la flota, no filtra por proyecto (gap de aislamiento conocido)
   activate(reason: string, triggeredBy: PreventiveStopTriggeredBy = 'auto'): void {
     if (this.isActive) return;
 

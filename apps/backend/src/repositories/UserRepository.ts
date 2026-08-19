@@ -122,6 +122,7 @@ class UserRepository {
       projectId?: number | null;
     },
   ): Promise<PublicUserRow | null> {
+    // SET armado a mano - COALESCE no distingue null intencional de "no vino en el body"
     const sets: string[] = [];
     const values: unknown[] = [id];
     if (email !== undefined) {
@@ -191,9 +192,7 @@ class UserRepository {
     }
   }
 
-  /**
-   * @param force - si es true, purga también sus turnos de operador
-   */
+  // force=true purga turnos de operador; shifts/incidentes solo se desvinculan (SET NULL)
   async delete(id: number, { force = false }: { force?: boolean } = {}): Promise<true> {
     const client = force ? await pool.connect() : null;
     try {

@@ -103,6 +103,7 @@ class ShiftRepository {
       active?: boolean;
     },
   ): Promise<ShiftRow | null> {
+    // SET armado a mano - COALESCE no distingue null intencional de "no vino en el body"
     const sets: string[] = [];
     const values: unknown[] = [id];
     if (name !== undefined) {

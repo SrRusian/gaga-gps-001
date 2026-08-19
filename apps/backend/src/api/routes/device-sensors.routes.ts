@@ -19,6 +19,7 @@ export function buildDeviceSensorsRouter({
 
   router.post('/:deviceId/sensors', authMiddleware, async (req, res) => {
     try {
+      // deviceId debe existir ya en devices (FK) - a diferencia de /gps, no auto-registra
       const deviceId = String(req.params.deviceId);
       const { data, source } = req.body;
 

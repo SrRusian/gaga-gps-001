@@ -14,6 +14,7 @@ export function ReportsSection() {
     const url = `/api/reports/history/csv?deviceId=${encodeURIComponent(deviceId)}&from=${new Date(from).toISOString()}&to=${new Date(to).toISOString()}`;
     const token = getStoredToken();
     const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    // blob: Chrome bloquea esta descarga fuera de HTTPS/localhost exacto
     const blob = await res.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
