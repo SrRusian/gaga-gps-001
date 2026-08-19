@@ -1,11 +1,3 @@
-/**
- * ShiftRepository.ts
- *
- * Responsabilidad: CRUD de turnos programados (horario recurrente
- * diario por proyecto) - no confundir con operator_sessions (turno
- * operador+vehículo). El Encargado de Proyecto crea/edita estos y
- * asigna un Supervisor de Proyecto a cada uno.
- */
 import { query } from '../config/database';
 
 export interface ShiftRow {
@@ -56,7 +48,6 @@ class ShiftRepository {
     }
   }
 
-  /** Turno(s) donde este usuario es el supervisor asignado. */
   async findBySupervisor(supervisorUserId: number): Promise<ShiftRow[]> {
     try {
       const { rows } = await query<ShiftRow>(
@@ -112,13 +103,6 @@ class ShiftRepository {
       active?: boolean;
     },
   ): Promise<ShiftRow | null> {
-    // COALESCE no distingue "no lo mandaron" (undefined, no tocar) de
-    // "lo mandaron como null" (limpiar de verdad, ej. quitar el
-    // supervisor asignado) - ambos bindean como NULL en pg. Se arma
-    // el SET a mano por eso: solo entra el campo cuya key vino en el
-    // body, aunque su valor sea null. (Bug real ya documentado en
-    // CLAUDE.md - "no se puede explicitar null vía update" - ahora
-    // corregido de verdad en vez de solo anotado.)
     const sets: string[] = [];
     const values: unknown[] = [id];
     if (name !== undefined) {
@@ -155,13 +139,6 @@ class ShiftRepository {
     }
   }
 
-  /**
-   * `operator_sessions.shift_id` tiene ON DELETE SET NULL - el
-   * historial de horas trabajadas bajo este turno se conserva, solo
-   * queda sin turno asociado. No hace falta ninguna limpieza manual
-   * aparte, a diferencia de otros `delete({force:true})` de este
-   * proyecto que sí necesitan purgar/desvincular a mano.
-   */
   async delete(id: number): Promise<true> {
     try {
       await query('DELETE FROM shifts WHERE id = $1', [id]);

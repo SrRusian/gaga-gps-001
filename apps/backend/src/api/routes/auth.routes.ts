@@ -1,10 +1,3 @@
-/**
- * auth.routes.ts
- *
- * Responsabilidad: Login/logout con JWT para el panel admin.
- * Los tokens se validan con auth.middleware.js en las rutas
- * protegidas del panel.
- */
 import bcrypt from 'bcryptjs';
 import express from 'express';
 import jwt from 'jsonwebtoken';
@@ -31,11 +24,6 @@ export function buildAuthRouter({ userRepo }: { userRepo: UserRepository }) {
         return res.status(401).json({ error: 'Credenciales inválidas' });
       }
 
-      // La duración del token depende del rol, no de un flag que
-      // mande el cliente - un operador (tableta fija en el vehículo)
-      // necesita que el turno persista varios días sin forzar
-      // re-login constante; el resto de roles usa la expiración
-      // corta de siempre (env.jwtExpiresIn).
       const expiresIn: string =
         user.role === 'operator' ? env.operatorJwtExpiresIn : env.jwtExpiresIn;
 
@@ -71,8 +59,6 @@ export function buildAuthRouter({ userRepo }: { userRepo: UserRepository }) {
     }
   });
 
-  // El logout es responsabilidad del cliente (descartar el token);
-  // se expone el endpoint para futura invalidación/blacklist si aplica.
   router.post('/logout', (req, res) => {
     res.json({ success: true });
   });

@@ -21,7 +21,6 @@ export interface FleetVehicle extends Position {
   lastSeen: number;
 }
 
-/** Forma en memoria (StaticEquipmentManager) -> forma que espera useEquipmentLayer. */
 function toMarkerData(eq: StaticEquipment): EquipmentMarkerData {
   return {
     id: eq.id,
@@ -39,7 +38,6 @@ export interface AlertEntry {
   message: string;
   severity: 'danger' | 'warning' | 'info';
   since: string;
-  /** Solo presente en incidentes reportados por un operador - los demás tipos de alerta se resuelven solos. */
   incidentId?: number;
 }
 
@@ -175,8 +173,6 @@ export function useSupervisorSocket() {
       );
     });
 
-    // Marcador en el mapa (posición + radio real) - independiente de
-    // la entrada en la lista de alertas, que usa supervisor:incident.
     socket.on('incident:reported', (data) => {
       setIncidentMarkers((prev) => ({ ...prev, [data.id]: data }));
     });
@@ -189,10 +185,6 @@ export function useSupervisorSocket() {
       });
     });
 
-    // Alertas de incidente en tiempo real (estilo Waze/Uber) - a
-    // diferencia de los demás tipos, no se resuelven solas: alguien
-    // tiene que confirmarlo (botón "Resolver" en AlertBanner, ver
-    // resolveIncident más abajo).
     socket.on('supervisor:incident', (data) => {
       const key = `incident:${data.id}`;
       if (data.level === 0) {
@@ -208,16 +200,11 @@ export function useSupervisorSocket() {
       );
     });
 
-    // Repuebla "Activas" al conectar con lo que ya estuviera abierto
-    // antes de esta conexión (geocerca/señal/colisión/proximidad/
-    // parada preventiva - incidentes se hidratan aparte, ver
-    // 'incident:reported'/'supervisor:incident' arriba). Antes esta
-    // lista se perdía por completo en cada F5.
     socket.on('alerts:snapshot', (entries) => {
       setActiveAlerts((prev) => {
         const next = { ...prev };
         entries.forEach((entry) => {
-          if (next[entry.key]) return; // ya llegó por un evento en vivo, no pisarlo
+          if (next[entry.key]) return;
           next[entry.key] = {
             key: entry.key,
             message: entry.message,
@@ -269,11 +256,6 @@ export function useSupervisorSocket() {
     setStopStatus({ active: false });
   }, []);
 
-  // No espera la confirmación del servidor (`supervisor:incident`
-  // nivel 0) para quitarlo de la lista - mismo criterio que
-  // activateStop/deactivateStop: la UI responde de inmediato, el
-  // socket solo confirma lo que ya se hizo (y sincroniza a los demás
-  // supervisores conectados).
   const resolveIncident = useCallback(
     async (incidentId: number) => {
       await api.post(`/api/incidents/${incidentId}/resolve`);

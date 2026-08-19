@@ -1,16 +1,3 @@
-/**
- * maps.routes.ts
- *
- * Distribución pública de tiles MBTiles offline (Operador/Supervisor,
- * sin autenticación individual - mismo criterio que /api/fleet/*) y
- * del estado actual de capas satelitales activas.
- *
- * Varios mapas pueden estar activos a la vez (ver
- * MapRepository.findActiveReady) - cada uno se sirve por su propio
- * id, no hay un único archivo fijo como antes.
- *
- * RF asociados: RF-MAP-01, RF-MAP-02, RF-MAP-03
- */
 import Database from 'better-sqlite3';
 import express from 'express';
 import path from 'path';
@@ -41,11 +28,6 @@ export function buildMapsRouter({ mapsDir, mapRepo, userRepo }: MapsRouterDeps):
     return db;
   }
 
-  /**
-   * Cierra y descarta el handle SQLite cacheado de un mapa - se
-   * llama desde maps-admin.routes.js al eliminarlo, para no dejar un
-   * handle abierto apuntando a un archivo ya borrado.
-   */
   function invalidateCache(mapId: number): void {
     const db = dbCache.get(mapId);
     if (db) {
@@ -80,26 +62,11 @@ export function buildMapsRouter({ mapsDir, mapRepo, userRepo }: MapsRouterDeps):
         res.status(204).send();
       }
     } catch (err) {
-      // Archivo inexistente (mapa borrado/no listo) u otro error de
-      // lectura - no debe tumbar el request, solo faltar ese tile.
       console.error(`Error tile (mapa #${mapId}):`, (err as Error).message);
       res.status(404).send('Mapa no disponible');
     }
   });
 
-  /**
-   * Estado actual de capas satelitales activas - lo consumen
-   * Operador/Supervisor al cargar (antes de que llegue cualquier
-   * evento de socket) y el panel Admin. Mismo shape que el evento
-   * de socket `maps:active_update` (ver maps-admin.routes.js).
-   *
-   * Sigue siendo público (sin `authMiddleware`, mismo criterio que
-   * `/api/fleet/*`) - un caller sin token sigue viendo todos los
-   * mapas activos, exactamente igual que antes de que existiera
-   * `project_id`. Si SÍ manda `Authorization: Bearer` válido, se
-   * filtra por su proyecto (`tryVerifyUser` nunca rechaza la
-   * request, solo intenta leer el token).
-   */
   router.get('/active-maps.json', async (req, res) => {
     try {
       const header = req.headers.authorization || '';

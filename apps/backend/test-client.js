@@ -1,11 +1,3 @@
-// Cliente de diagnóstico manual - conecta por socket y muestra en
-// consola los eventos de flota en vivo. Desde que los sockets
-// requieren login (ver auth.middleware.ts → buildSocketAuthMiddleware),
-// primero hace login por HTTP para obtener un token.
-//
-// Uso:
-//   node test-client.js [email] [password]
-//   (por defecto usa las credenciales del admin creado automáticamente)
 const http = require('http');
 const { io } = require('socket.io-client');
 

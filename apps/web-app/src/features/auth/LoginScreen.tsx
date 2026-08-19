@@ -10,11 +10,6 @@ interface LoginResponse {
   user: AuthUser;
 }
 
-/**
- * Login único para todos los roles - reemplaza lo que antes era la
- * app separada web-gateway. Al loguearse exitosamente navega a
- * /${role} sin recargar la página (SPA real, no window.location).
- */
 export function LoginScreen() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');

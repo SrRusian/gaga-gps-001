@@ -1,20 +1,3 @@
-/**
- * maps-admin.routes.ts
- *
- * Responsabilidad: Importar, listar, activar, renombrar y eliminar
- * mapas satelitales/drone (TIF+TFW o JPG+JPW → MBTiles) desde el
- * panel Admin. Protegida con JWT + rol admin/project_manager
- * (aplicado al montar en app.ts, mismo patrón que /api/users) - un
- * Encargado de Proyecto tiene acceso completo, pero acotado a los
- * mapas de su propio proyecto (ver `assertProjectAccess` abajo,
- * `GET /` ya filtra por `req.user.projectId` vía `mapRepo.findAll`).
- *
- * El procesamiento GDAL corre en segundo plano (no se espera en la
- * request) - MapPipelineService.process() nunca lanza, cualquier
- * fallo deja la fila en status='failed' con error_message.
- *
- * RF asociados: RF-MAP-01, RF-MAP-02, RF-MAP-03
- */
 import type { Request } from 'express';
 import express from 'express';
 import fs from 'fs/promises';
@@ -54,34 +37,10 @@ export function buildMapsAdminRouter({
   const sourcesDir = path.join(mapsDir, 'sources');
   const uploadTmpDir = path.join(mapsDir, 'tmp-uploads');
 
-  /**
-   * Admin (req.user.projectId == null) siempre tiene acceso - un
-   * Encargado de Proyecto solo al mapa cuyo project_id coincida con
-   * el suyo. A diferencia de `GET /` (que filtra la lista completa
-   * desde el repositorio), rename/activate/deactivate/delete operan
-   * por id directo - sin este chequeo, un Encargado podría adivinar
-   * el id de un mapa de OTRO proyecto y modificarlo/eliminarlo
-   * saltándose por completo el aislamiento por proyecto.
-   */
   function hasProjectAccess(req: Request, mapProjectId: number | null): boolean {
     return req.user!.projectId == null || req.user!.projectId === mapProjectId;
   }
 
-  /**
-   * Difunde el conjunto actual de capas activas a Operador/Supervisor
-   * en tiempo real - se llama tras activar/desactivar un mapa.
-   * Mismo shape que GET /tiles/active-maps.json. Acotado al proyecto
-   * del mapa (`broadcastToProject` - solo esa sala + admins, que
-   * reciben todo) - antes usaba `broadcast()` sin filtrar, mandando
-   * TODOS los mapas activos de TODOS los proyectos a cualquier
-   * socket conectado (Operador/Supervisor de un proyecto ajeno
-   * habría recibido y renderizado capas satelitales que no son
-   * suyas). Encontrado al agregar el mismo socket a Admin/Encargado
-   * en esta ronda - Admin/Encargado ya filtran del lado del cliente
-   * (`scopedActiveMaps`) así que el payload sin filtrar no les
-   * afectaba, pero Operador/Supervisor sí consumen el payload
-   * directo sin volver a filtrar.
-   */
   async function broadcastActiveMaps(projectId: number | null) {
     const maps = await mapRepo.findActiveReady(projectId);
     socketServer.broadcastToProject(projectId, 'maps:active_update', { maps: maps.map(toPublicShape) });
@@ -141,11 +100,6 @@ export function buildMapsAdminRouter({
           return res.status(400).json({ error: 'sourceCrs inválido - formato esperado EPSG:XXXX' });
         }
 
-        // Mismo patrón que geocercas/equipo: Encargado/Supervisor de
-        // Proyecto no elige, siempre es el suyo; Admin debe indicarlo.
-        // req.body.projectId llega como string (multipart/form-data
-        // vía multer nunca tipa los campos de texto) - se normaliza
-        // explícitamente, la columna es INTEGER.
         const projectId = req.user!.projectId ?? (req.body.projectId ? Number(req.body.projectId) : null);
         if (projectId === null) {
           return res.status(400).json({ error: 'projectId es requerido' });
@@ -170,13 +124,8 @@ export function buildMapsAdminRouter({
 
         res.status(202).json(mapRow);
 
-        // Procesamiento GDAL en segundo plano - puede tardar varios
-        // minutos en ortofotos grandes; nunca bloquea esta request ni
-        // el event loop (ver MapPipelineService, usa execFile async).
         mapPipelineService.process(mapRow.id, finalImagePath, finalWorldPath, sourceCrs || null);
       } catch (err) {
-        // Limpieza best-effort de los temporales de multer si algo
-        // falló antes de moverlos a su destino final.
         await fs.rm(imageFile?.path || '', { force: true }).catch(() => {});
         await fs.rm(worldFile?.path || '', { force: true }).catch(() => {});
         console.error('maps-admin.routes POST /:', (err as Error).message);

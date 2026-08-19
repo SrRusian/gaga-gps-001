@@ -1,14 +1,3 @@
-/**
- * equipmentLayer.ts
- *
- * Renderizado de equipo estático (palas, excavadoras, cargadores)
- * sobre MapLibre - mismo patrón de dos anillos que incidentLayer.ts:
- * núcleo = radio de giro real de la máquina, anillo exterior = radio
- * de seguridad (la zona que ya dispara las alertas de aproximación
- * en StaticEquipmentManager). Reutiliza `circleToPolygon` de
- * geofenceLayer.ts - una sola implementación de "círculo en metros →
- * polígono GeoJSON" para todas las capas del mapa.
- */
 import type { Feature, FeatureCollection } from 'geojson';
 import type { GeoJSONSource, Map as MaplibreMap } from 'maplibre-gl';
 import { useEffect } from 'react';
@@ -21,13 +10,9 @@ export interface EquipmentMarkerData {
   longitude: number;
   swingRadiusMeters: number;
   safetyRadiusMeters: number;
-  /** Tableta montada en esta máquina ahora mismo, si tiene una vinculada. */
   linkedDeviceId?: string | null;
 }
 
-// Exportados - Admin los reutiliza para la vista previa en vivo
-// mientras se crea/edita un equipo, antes de guardarlo, así el color
-// es el mismo desde el primer clic hasta el marcador ya guardado.
 export const EQUIPMENT_CORE_COLOR = '#f0a83c';
 export const EQUIPMENT_OUTER_COLOR = '#4f8ff0';
 const CORE_COLOR = EQUIPMENT_CORE_COLOR;

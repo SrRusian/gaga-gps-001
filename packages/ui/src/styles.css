@@ -61,11 +61,6 @@
   cursor: not-allowed;
 }
 
-/* Aviso "sin mapa satelital para este alcance" - Admin/Encargado y
-   Supervisor lo muestran junto al selector de modo cuando Satelital/
-   Mixto están deshabilitados (satelliteAvailable=false). Colores
-   literales (no variables heredadas del panel), mismo criterio que
-   PanelHeader - el mensaje en sí (children) lo arma cada panel. */
 .gg-no-maps-banner {
   display: flex;
   align-items: center;
@@ -192,14 +187,6 @@
   color: #ffaa00;
 }
 
-/* Entrada/salida animada - el backdrop funde a negro y la tarjeta
-   funde + escala + sube un poco desde abajo (mismo lenguaje que un
-   modal nativo del sistema). Arrancan en el estado "oculto" por
-   default; `Modal.tsx` agrega `--visible` un frame después de montar
-   para que el navegador sí anime la transición en vez de pintar ya en
-   el estado final. `TRANSITION_MS` en `Modal.tsx` debe coincidir con
-   esta duración - es el mismo tiempo que el componente espera antes
-   de desmontar el nodo al cerrar. */
 .gg-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -226,7 +213,9 @@
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
   opacity: 0;
   transform: translateY(14px) scale(0.97);
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
 }
 .gg-modal-card--visible {
   opacity: 1;
@@ -314,23 +303,6 @@
   background: #4f8ff0;
 }
 
-/* Header flotante completo (título + slot de nav + status) -
-   PanelHeader.tsx, compartido de verdad por Admin/Encargado y
-   Supervisor (Operador tiene su propio header, contenido distinto).
-   Colores literales (no custom properties heredadas) a propósito -
-   este componente vive dentro de `.ad-app`/`.sup-app` en cada panel,
-   pero no debe depender de que ese ancestro defina exactamente las
-   mismas variables `--ad-*`/`--sup-*`; los valores ya son la misma
-   paleta profesional en ambos (ver tokens.ts).
-
-   La altura (52px / 92px en ≤860px) debe coincidir con
-   `--ad-header-h`/`--sup-header-h` en `admin.css`/`supervisor.css` -
-   esas variables posicionan los DEMÁS paneles flotantes de cada
-   panel (`top: calc(var(--ad-header-h) + 12px)`, etc.) y viven ahí
-   porque CSS no permite que un componente hijo exponga una variable
-   hacia arriba, a un ancestro (`.ad-app`/`.sup-app`) - son números
-   duplicados a propósito, no una variable compartida real, hay que
-   mantenerlos sincronizados a mano si esta altura cambia. */
 .gg-panel-header {
   position: fixed;
   top: 0;

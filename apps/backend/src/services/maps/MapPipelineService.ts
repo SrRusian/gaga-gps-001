@@ -1,28 +1,3 @@
-/**
- * MapPipelineService.ts
- *
- * Responsabilidad: Procesar una imagen georreferenciada
- * (TIF+TFW o JPG+JPW) subida desde el panel Admin y convertirla a
- * MBTiles para distribución offline a las tabletas - usa GDAL
- * (gdal_translate, gdalsrsinfo, gdaltransform, gdal2tiles.py),
- * instalado en la imagen Docker del backend (ver Dockerfile).
- *
- * Un world file (TFW/JPW) nunca incluye el sistema de coordenadas
- * (CRS) - solo tamaño de píxel y origen en las unidades que sea.
- * Por eso el pipeline primero intenta detectar el CRS embebido en
- * la imagen (gdalsrsinfo); si no lo encuentra, usa el que el admin
- * eligió en el formulario de importación. Asumir mal el CRS coloca
- * el mapa en el lugar o a la escala equivocada sin ningún error
- * visible - de ahí la importancia de nunca adivinar en silencio.
- *
- * Usa child_process.execFile (async) en vez de execSync - convertir
- * una ortofoto grande puede tardar varios minutos, y este mismo
- * proceso Node recibe telemetría GPS en tiempo real; bloquear el
- * event loop durante el procesamiento habría congelado la recepción
- * de posiciones de toda la flota.
- *
- * RF asociados: RF-MAP-01, RF-MAP-02, RF-MAP-03
- */
 import { execFile } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
@@ -30,7 +5,7 @@ import Database from 'better-sqlite3';
 import type MapRepository from '../../repositories/MapRepository';
 import type { MapBounds } from '../../repositories/MapRepository';
 
-const COMMAND_TIMEOUT_MS = 10 * 60 * 1000; // 10 min - ortofotos grandes tardan
+const COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
 
 interface WorldFile {
   pixelSizeX: number;
@@ -51,14 +26,7 @@ class MapPipelineService {
   }
 
   /**
-   * Procesa un mapa ya creado en la base de datos (status='processing').
-   * No lanza excepciones hacia el llamador - cualquier fallo se
-   * captura y se refleja en la fila (status='failed' + error_message),
-   * para que un import roto nunca tumbe el backend ni deje la fila
-   * atorada en 'processing' para siempre.
-   *
-   * @param chosenCrs - CRS elegido en el formulario (ej. 'EPSG:32613'),
-   *   usado solo si no se logra detectar uno embebido en la imagen
+   * @param chosenCrs - CRS elegido en el formulario
    */
   async process(
     mapId: number,
@@ -88,10 +56,6 @@ class MapPipelineService {
       const worldFile = await this._readWorldFile(worldFilePath);
       const { widthPx, heightPx } = await this._getImageSizePixels(imagePath);
 
-      // Bounding box en las unidades nativas del CRS - el world file
-      // da el origen (esquina superior izquierda) y el tamaño de
-      // píxel; la esquina inferior derecha se deriva del tamaño de
-      // la imagen en píxeles.
       const ulx = worldFile.originX;
       const uly = worldFile.originY;
       const lrx = worldFile.originX + worldFile.pixelSizeX * widthPx;
@@ -110,19 +74,8 @@ class MapPipelineService {
         georefPath,
       ]);
 
-      // gdal2tiles.py en esta versión de GDAL (3.6, la que trae
-      // Debian bookworm) no soporta empaquetar directo a .mbtiles
-      // (esa opción llegó en versiones más nuevas) - genera un
-      // directorio z/x/y.png, que se empaqueta a mano abajo con
-      // better-sqlite3 (ya es dependencia del backend). Sin --xyz,
-      // la numeración de filas que produce es TMS - el mismo
-      // esquema que ya espera maps.routes.js al servir tiles.
       const tileDir = path.join(workDir, 'tiles');
       await this._run('gdal2tiles.py', [
-        // gdal2tiles.py usa "-s" para el CRS de origen (a diferencia
-        // de gdal_translate, que sí usa "-a_srs") - "-s_srs" es
-        // inválido aquí y el parser de opciones lo confunde con un
-        // archivo de entrada extra.
         '-s',
         crs,
         '-w',
@@ -177,14 +130,6 @@ class MapPipelineService {
     await fs.rm(path.join(this.mapsDir, mbtilesFilename), { force: true }).catch(() => {});
   }
 
-  // ── Internos ─────────────────────────────────────────────────
-
-  /**
-   * Intenta leer el CRS embebido en la imagen - algunos exportadores
-   * (Pix4D, DroneDeploy, Agisoft) sí incrustan el GeoTIFF; si no hay
-   * ninguno, devuelve null y el pipeline usa el CRS elegido en el
-   * formulario.
-   */
   async _detectCrs(imagePath: string): Promise<string | null> {
     try {
       const { stdout } = await this._run('gdalsrsinfo', ['-o', 'epsg', imagePath]);
@@ -202,11 +147,6 @@ class MapPipelineService {
     return { widthPx, heightPx };
   }
 
-  /**
-   * Reproyecta las esquinas superior-izquierda/inferior-derecha del
-   * CRS de origen a WGS84 - para mostrar el área cubierta en el
-   * panel Admin sin tener que volver a abrir el .mbtiles resultante.
-   */
   async _reprojectBoundsToWgs84(
     crs: string,
     ulx: number,
@@ -238,15 +178,6 @@ class MapPipelineService {
     };
   }
 
-  /**
-   * Empaqueta un directorio de tiles z/x/y.png (salida de
-   * gdal2tiles.py) en un único archivo .mbtiles (esquema estándar:
-   * tabla `tiles`, igual que ya lee maps.routes.js). Usa
-   * better-sqlite3 en transacciones por lote y cede el hilo entre
-   * carpetas (setImmediate) para no acaparar el event loop - no es
-   * tan lento como los subprocesos GDAL, pero un directorio con
-   * decenas de miles de tiles sí puede sumar tiempo de CPU síncrono.
-   */
   async _packageMbtiles(
     tileDir: string,
     outputPath: string,
@@ -256,10 +187,6 @@ class MapPipelineService {
     const db = new Database(outputPath);
 
     try {
-      // Sin WAL - este .mbtiles es un artefacto de un solo archivo
-      // que se sirve directo desde disco (ver maps.routes.js); WAL
-      // dejaría archivos -wal/-shm colgantes fuera de ese único
-      // archivo.
       db.exec(`
         CREATE TABLE metadata (name TEXT, value TEXT);
         CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER, tile_row INTEGER, tile_data BLOB);
@@ -313,9 +240,6 @@ class MapPipelineService {
           insertBatch(batch);
           total += batch.length;
 
-          // Cede el hilo tras cada carpeta x/ - evita monopolizar el
-          // event loop (y con él, la recepción de telemetría GPS)
-          // en ortofotos con muchísimos tiles.
           await new Promise((resolve) => setImmediate(resolve));
         }
       }
@@ -331,13 +255,6 @@ class MapPipelineService {
     }
   }
 
-  /**
-   * World file (TFW/JPW) - 6 líneas: tamaño de píxel X, rotación,
-   * rotación, tamaño de píxel Y (negativo), origen X, origen Y. El
-   * origen es el centro del píxel superior izquierdo - para el uso
-   * que le damos aquí (bounding box a nivel de tiles) el desfase de
-   * medio píxel es insignificante.
-   */
   async _readWorldFile(worldFilePath: string): Promise<WorldFile> {
     const content = await fs.readFile(worldFilePath, 'utf8');
     const lines = content.trim().split('\n').map(Number);
@@ -349,11 +266,6 @@ class MapPipelineService {
     };
   }
 
-  /**
-   * Ejecuta un comando GDAL sin bloquear el event loop. Usa
-   * execFile (no exec/execSync) - argumentos como array, sin
-   * interpretación de shell.
-   */
   _run(
     command: string,
     args: string[],

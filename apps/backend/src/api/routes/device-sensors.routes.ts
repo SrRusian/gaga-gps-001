@@ -1,10 +1,3 @@
-/**
- * device-sensors.routes.ts
- *
- * Receptor de snapshots de sensores del navegador (Operador) -
- * canal separado de /gps (Traccar Client), porque Traccar es una
- * app nativa que no tiene acceso a las APIs del navegador.
- */
 import type { RequestHandler } from 'express';
 import express from 'express';
 import type DeviceSensorRepository from '../../repositories/DeviceSensorRepository';
@@ -42,8 +35,6 @@ export function buildDeviceSensorsRouter({
     }
   });
 
-  // Solo para verificación/diagnóstico (admin/supervisor) - no hay
-  // pantalla que lo consuma todavía.
   router.get(
     '/:deviceId/sensors',
     authMiddleware,

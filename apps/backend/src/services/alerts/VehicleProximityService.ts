@@ -1,22 +1,3 @@
-/**
- * VehicleProximityService.ts
- *
- * Responsabilidad: radar de proximidad por distancia entre vehículos
- * que están FUERA de cualquier corredor/ruta autorizada (geocerca
- * tipo polyline) - patios, zonas de maniobra y áreas abiertas sin
- * ruta definida.
- *
- * A diferencia de CollisionRiskService (RF-ALR-10, todos-contra-todos
- * con heurística de trayectorias convergentes), este servicio es
- * puro por distancia - no exige convergencia, porque en zonas sin
- * ruta definida esa heurística es poco confiable. Es un servicio
- * nuevo y separado deliberadamente: CollisionRiskService tiene un
- * bug conocido y documentado (dedupe de pares vía Math.min sobre
- * deviceId string, que da NaN) que no se toca - este servicio nace
- * con una clave de par correcta desde el día uno.
- *
- * RF asociados: extensión de seguridad - sin RF-ALR asignado aún.
- */
 import type { Geofence } from '@gaga-gps/shared-types';
 import { isInsideGeofence } from '../../utils/geometry';
 
@@ -55,18 +36,9 @@ class VehicleProximityService {
   constructor({ io, alertEventRepo }: { io: SocketIoLike; alertEventRepo?: AlertEventRepoLike }) {
     this.io = io;
     this.alertEventRepo = alertEventRepo;
-    // Estado de alerta por par de vehículos - clave: ids ordenados
-    // alfabéticamente como string, nunca Math.min/Math.max numérico
-    // (deviceId es un string, p. ej. "CAMION-01").
     this.proximityAlerts = {};
   }
 
-  /**
-   * Evalúa la posición de un vehículo contra el resto de la flota
-   * activa, mostrando distancia en vivo al más cercano y alertando
-   * solo cuando ninguno de los dos está dentro de un corredor
-   * autorizado.
-   */
   evaluate(
     position: EvaluatedPosition,
     fleetState: Record<string, EvaluatedPosition>,
@@ -74,8 +46,6 @@ class VehicleProximityService {
   ): void {
     const { deviceId } = position;
     if (this.isInsideAnyRoute(position, activeGeofences)) {
-      // Dentro de una ruta autorizada - este radar no aplica aquí,
-      // el carril ya acota la separación entre vehículos.
       return;
     }
 
@@ -112,7 +82,6 @@ class VehicleProximityService {
     }
   }
 
-  /** true si la posición está dentro del ancho de algún corredor (polyline) activo. */
   isInsideAnyRoute(position: EvaluatedPosition, activeGeofences: Geofence[]): boolean {
     return activeGeofences.some(
       (g) =>
@@ -196,7 +165,6 @@ class VehicleProximityService {
     this._resolveAlertEvent(deviceId1, deviceId2);
   }
 
-  /** Historial unificado de alertas (ver alert_events) - fire-and-forget. */
   _recordAlertEvent(
     deviceId1: string,
     deviceId2: string,
@@ -219,7 +187,6 @@ class VehicleProximityService {
       .catch((err: Error) => console.error('VehicleProximityService._resolveAlertEvent:', err.message));
   }
 
-  /** Haversine - distancia en metros. Misma fórmula usada en el resto del sistema. */
   calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371000;
     const dLat = this.toRad(lat2 - lat1);
@@ -238,13 +205,6 @@ class VehicleProximityService {
     return deg * (Math.PI / 180);
   }
 
-  /**
-   * Limpia el estado de un dispositivo eliminado - mismo criterio y
-   * misma razón que `CollisionRiskService.clearDevice` (par fantasma
-   * en `proximityAlerts` si no se limpia, `pairKey` no se puede
-   * parsear de vuelta de forma confiable así que se reconstruye
-   * contra cada dispositivo conocido).
-   */
   clearDevice(deviceId: string, otherDeviceIds: string[]): void {
     otherDeviceIds.forEach((otherId) => {
       const pairKey = [deviceId, otherId].sort().join('-');

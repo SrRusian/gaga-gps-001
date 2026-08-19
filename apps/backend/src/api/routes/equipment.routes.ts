@@ -1,12 +1,3 @@
-/**
- * equipment.routes.ts
- *
- * CRUD de equipo estático (palas, excavadoras, cargadores) con
- * radio de giro. Persiste en PostgreSQL y sincroniza con
- * StaticEquipmentManager (memoria) para evaluación en tiempo real.
- *
- * RF asociados: RF-ALR-12
- */
 import express from 'express';
 import { DeviceAlreadyLinkedError } from '../../repositories/EquipmentRepository';
 import type EquipmentRepository from '../../repositories/EquipmentRepository';
@@ -30,11 +21,6 @@ export function buildEquipmentRouter({
 }: EquipmentRouterDeps) {
   const router = express.Router();
 
-  // Reenvía el snapshot completo del equipo de UN proyecto (mismo
-  // criterio "reenviar todo" que ya usaba geofences:update) - nunca
-  // el mapa global completo, para no filtrar equipo de otros
-  // proyectos a quien no debe verlo (broadcastToProject ya limita la
-  // sala, pero el payload también debe estar acotado).
   function broadcastEquipmentUpdate(projectId: number | null) {
     const scoped = Object.values(equipmentManager.equipment).filter(
       (eq) => eq.projectId === projectId,
@@ -108,8 +94,6 @@ export function buildEquipmentRouter({
     }
   });
 
-  // Edición completa (posición/radios/nombre/tipo) - distinta de
-  // /:id/status, que solo maneja el ciclo activo/pausa/inactivo.
   router.patch('/:id', async (req, res) => {
     try {
       const { name, type, latitude, longitude, swingRadius, safetyRadius, linkedDeviceId } = req.body;
@@ -120,9 +104,6 @@ export function buildEquipmentRouter({
         longitude,
         swingRadius,
         safetyRadius,
-        // `linkedDeviceId` solo se toca si la key vino en el body -
-        // `undefined` (no vino) deja el vínculo actual intacto,
-        // `null` explícito lo desvincula (ver EquipmentRepository.update).
         linkedDeviceId: 'linkedDeviceId' in req.body ? linkedDeviceId : undefined,
       });
       if (!eq) return res.status(404).json({ error: 'Equipo no encontrado' });
@@ -168,16 +149,8 @@ export function buildEquipmentRouter({
   router.delete('/:id', async (req, res) => {
     try {
       const id = Number(req.params.id);
-      // Capturar el proyecto ANTES de borrar - una vez eliminado de
-      // `equipmentManager.equipment` no hay forma de saber a qué sala
-      // avisar.
       const projectId = equipmentManager.equipment[id]?.projectId ?? null;
       await equipmentRepo.delete(id);
-      // clearEquipment (no un simple delete) - también libera a
-      // cualquier vehículo que siguiera en zona de alerta contra este
-      // equipo, ver StaticEquipmentManager. El dispositivo vinculado
-      // (si tenía uno) no se toca - la FK ya lo hizo NULL en Postgres,
-      // el dispositivo en sí nunca se elimina.
       equipmentManager.clearEquipment(id);
       broadcastEquipmentUpdate(projectId);
       res.json({ success: true });

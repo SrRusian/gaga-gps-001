@@ -30,7 +30,6 @@ function toQuery(filters: AlertHistoryFilters): string {
   return params.toString();
 }
 
-/** Pestaña "Historial" del panel de Supervisor - ver GET /api/alerts/history. */
 export function useAlertHistory() {
   const [rows, setRows] = useState<AlertHistoryRow[]>([]);
   const [loading, setLoading] = useState(false);

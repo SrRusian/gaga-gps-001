@@ -1,16 +1,3 @@
-/**
- * geofences.routes.ts
- *
- * CRUD de geocercas persistidas en PostgreSQL. Cada cambio se
- * refleja de inmediato en GeofenceAlertService (memoria) y se
- * notifica a todos los clientes conectados vía Socket.io.
- *
- * Soporta 3 formas: círculo (centerLat/centerLon/radiusMeters),
- * polígono (geometry GeoJSON Polygon) y polilínea/corredor
- * (geometry GeoJSON LineString + corridorWidthMeters).
- *
- * RF asociados: RF-ALR-02, RF-ALR-03
- */
 import type { RequestHandler } from 'express';
 import express from 'express';
 import type { LineString, Polygon } from 'geojson';
@@ -46,12 +33,6 @@ export function buildGeofencesRouter({
   requireRole,
 }: GeofencesRouterDeps) {
   const router = express.Router();
-
-  // Antes solo exigía sesión válida (cualquier rol autenticado,
-  // incluido operador), sin restricción real - Admin/Encargado/
-  // Supervisor de Proyecto tienen acceso completo (crear/editar/
-  // eliminar/importar/exportar) dentro de su propio proyecto; el
-  // resto de roles queda fuera.
   const canManage = requireRole('admin', 'project_manager', 'project_supervisor');
 
   router.get('/', authMiddleware, canManage, async (req, res) => {
@@ -82,8 +63,6 @@ export function buildGeofencesRouter({
         return res.status(400).json({ error: 'name y type son requeridos' });
       }
 
-      // Admin (projectId null) debe indicar a qué proyecto pertenece;
-      // un Encargado/Supervisor de proyecto no elige, siempre es el suyo.
       const projectId = req.user!.projectId ?? req.body.projectId ?? null;
       if (projectId === null) {
         return res.status(400).json({ error: 'projectId es requerido' });
@@ -113,7 +92,6 @@ export function buildGeofencesRouter({
         corridorDangerMarginMeters,
       });
 
-      // Reflejar en memoria para evaluación en tiempo real (GeofenceAlertService)
       geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(geofence));
 
       socketServer.broadcastToProject(
@@ -155,8 +133,6 @@ export function buildGeofencesRouter({
       });
       if (!geofence) return res.status(404).json({ error: 'Geocerca no encontrada' });
 
-      // Reflejar el cambio en memoria y notificar en vivo a
-      // Operador/Supervisor (misma mecánica que crear/eliminar)
       if (geofence.active) {
         geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(geofence));
       } else {
@@ -178,10 +154,6 @@ export function buildGeofencesRouter({
   router.delete('/:id', authMiddleware, canManage, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      // Se busca ANTES de borrar - una vez eliminada la fila ya no
-      // hay forma de saber a qué proyecto avisar (mismo motivo por
-      // el que IncidentAlertService.resolveDeviceIncidents se llama
-      // antes de purgar, ver CLAUDE.md).
       const existing = await geofenceRepo.findById(id);
       await geofenceRepo.delete(id);
       geofenceService.removeGeofence(id);
@@ -197,11 +169,6 @@ export function buildGeofencesRouter({
     }
   });
 
-  // ── Exportación en formatos estándar ────────────────────────────
-  // Ambas rutas aceptan ?ids=1,2,3 opcional para exportar solo un
-  // subconjunto - sin el parámetro (o vacío), exportan todas las
-  // geocercas activas, igual que antes (compatible con enlaces ya
-  // existentes que usen la ruta directa sin selección).
   function resolveGeofences(req: express.Request) {
     const ids = String(req.query.ids || '')
       .split(',')
@@ -210,11 +177,6 @@ export function buildGeofencesRouter({
     return ids.length > 0 ? geofenceRepo.findByIds(ids) : geofenceRepo.findAllActive();
   }
 
-  // GeoJSON - formato principal, nativo en JS/QGIS/Leaflet/Mapbox.
-  // `downloadAuthMiddleware` (no el `authMiddleware` estricto de las
-  // demás rutas) porque el frontend dispara esto con un `<a href>`
-  // real, no `fetch()` - un link no puede mandar un header
-  // Authorization, así que acepta el token por query string.
   router.get('/export.geojson', downloadAuthMiddleware, canManage, async (req, res) => {
     try {
       const geofences = await resolveGeofences(req);
@@ -227,8 +189,6 @@ export function buildGeofencesRouter({
     }
   });
 
-  // KML - formato usado en topografía/minería y Google Earth (mismo
-  // motivo que export.geojson para usar downloadAuthMiddleware).
   router.get('/export.kml', downloadAuthMiddleware, canManage, async (req, res) => {
     try {
       const geofences = await resolveGeofences(req);
@@ -241,9 +201,6 @@ export function buildGeofencesRouter({
     }
   });
 
-  // ── Importación - GeoJSON FeatureCollection o texto KML ─────────
-  // Body: { format: 'geojson', data: <FeatureCollection> } o
-  //       { format: 'kml', data: '<contenido del archivo .kml>' }
   router.post('/import', authMiddleware, canManage, async (req, res) => {
     try {
       const { format, data } = req.body;
@@ -302,11 +259,6 @@ interface ShapeFields {
   corridorWidthMeters?: number;
 }
 
-/**
- * Validación mínima de los campos requeridos según la forma -
- * evita persistir geometría malformada que rompería geometry.ts
- * al evaluarse en tiempo real contra las posiciones entrantes.
- */
 function validateShapeFields(
   shapeType: string,
   { centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters }: ShapeFields,

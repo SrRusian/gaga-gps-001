@@ -1,10 +1,3 @@
-/**
- * logger.ts
- *
- * Responsabilidad: Configurar Winston como logger central
- * del backend (consola + archivo), complementando los
- * console.log con emojis usados en los servicios.
- */
 import type { NextFunction, Request, Response } from 'express';
 import winston from 'winston';
 
@@ -23,9 +16,6 @@ export const logger = winston.createLogger({
   ],
 });
 
-/**
- * Middleware Express - registra cada request entrante
- */
 export function requestLogger(req: Request, res: Response, next: NextFunction): void {
   logger.info(`${req.method} ${req.originalUrl} - IP: ${req.ip}`);
   next();

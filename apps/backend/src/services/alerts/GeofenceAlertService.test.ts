@@ -1,17 +1,5 @@
-// Test de caracterización - congela el comportamiento actual.
-//
-// Desde la migración a PostGIS, `evaluate()` ya no recorre
-// `activeGeofences` en JS - delega el match geométrico a
-// `geofenceRepo.findMatchingSpatial()` (SQL real, cubierto por
-// GeofenceRepository.integration.test.ts). Estos tests cubren la
-// lógica que SÍ sigue viviendo aquí: prioridad de severidad
-// (danger > warning > info), detección de cambio de estado
-// (entra/sale/escala), severidad progresiva de corredor a partir de
-// una distancia ya resuelta, y el aislamiento por proyecto de cada
-// emisión - con un `geofenceRepo` fake que devuelve filas ya
-// armadas, sin necesitar Postgres.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import GeofenceAlertService from './GeofenceAlertService';
+import GeofenceAlertService, { type GeofenceMatchRow } from './GeofenceAlertService';
 
 const dangerCircleRow = {
   id: 1,
@@ -59,14 +47,21 @@ function pos(deviceId = 'V1', projectId: number | null = 7) {
   return { deviceId, latitude: 19.35, longitude: -103.56, projectId };
 }
 
+type FindMatchingSpatial = (params: {
+  projectId: number | null;
+  latitude: number;
+  longitude: number;
+}) => Promise<GeofenceMatchRow[]>;
+type BroadcastToProject = (projectId: number | null, event: string, payload: unknown) => void;
+
 describe('GeofenceAlertService', () => {
-  let socketServer: { broadcastToProject: ReturnType<typeof vi.fn> };
-  let findMatchingSpatial: ReturnType<typeof vi.fn>;
+  let socketServer: { broadcastToProject: ReturnType<typeof vi.fn<BroadcastToProject>> };
+  let findMatchingSpatial: ReturnType<typeof vi.fn<FindMatchingSpatial>>;
   let service: InstanceType<typeof GeofenceAlertService>;
 
   beforeEach(() => {
-    socketServer = { broadcastToProject: vi.fn() };
-    findMatchingSpatial = vi.fn().mockResolvedValue([]);
+    socketServer = { broadcastToProject: vi.fn<BroadcastToProject>() };
+    findMatchingSpatial = vi.fn<FindMatchingSpatial>().mockResolvedValue([]);
     service = new GeofenceAlertService({
       geofenceRepo: { findMatchingSpatial },
       socketServer,
@@ -166,7 +161,7 @@ describe('GeofenceAlertService', () => {
     findMatchingSpatial.mockResolvedValue([dangerCircleRow]);
     await service.evaluate(pos());
     socketServer.broadcastToProject.mockClear();
-    await service.evaluate(pos()); // sigue dentro, misma severidad
+    await service.evaluate(pos());
     expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
   });
 
@@ -202,12 +197,10 @@ describe('GeofenceAlertService', () => {
   });
 
   it('polilínea: severidad progresiva por distancia, no el binario dentro/fuera', async () => {
-    // Dentro del corredor (distancia <= corridorWidthMeters) -> sin alerta
     findMatchingSpatial.mockResolvedValue([corridorRow(5)]);
     await service.evaluate(pos());
     expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
 
-    // Lejos del eje -> warning (sin corridorDangerMarginMeters, nunca escala a danger)
     findMatchingSpatial.mockResolvedValue([corridorRow(500)]);
     await service.evaluate(pos());
     expect(socketServer.broadcastToProject).toHaveBeenCalledWith(7, 'alert:warning', expect.anything());

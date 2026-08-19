@@ -11,13 +11,6 @@ interface ShiftWithRoster {
   roster: { device_id: string }[];
 }
 
-/**
- * Roster (deviceIds) del turno asignado a un Supervisor de Proyecto -
- * a diferencia del Encargado de Proyecto (ve todo el proyecto sin
- * filtrar), este rol solo debe ver su propio turno. `null` cuando el
- * rol no aplica (Supervisor "clásico"/Encargado) - en ese caso
- * SupervisorApp no filtra nada, mismo comportamiento de siempre.
- */
 export function useMyShift(enabled: boolean) {
   const [deviceIds, setDeviceIds] = useState<Set<string> | null>(null);
 

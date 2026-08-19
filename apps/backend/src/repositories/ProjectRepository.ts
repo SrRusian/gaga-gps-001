@@ -1,10 +1,3 @@
-/**
- * ProjectRepository.ts
- *
- * Responsabilidad: CRUD de proyectos (sitios de operación) -
- * fundamento de la multi-tenencia. Un proyecto agrupa dispositivos y
- * usuarios que no deben verse entre proyectos distintos.
- */
 import { pool, query } from '../config/database';
 
 export interface ProjectRow {
@@ -14,14 +7,6 @@ export interface ProjectRow {
   created_at: Date;
 }
 
-/**
- * Red de seguridad, no el camino esperado: `delete()` ya desvincula/
- * elimina explícitamente todo lo que referencia `projects` (ver
- * abajo). Solo debería lanzarse si una tabla nueva agrega
- * `REFERENCES projects(id)` sin que `delete()` se actualice para
- * cubrirla - el 23503 (foreign_key_violation) de Postgres seguiría
- * bloqueándolo a nivel de constraint de todos modos.
- */
 export class ProjectHasDependentsError extends Error {
   code = 'PROJECT_HAS_DEPENDENTS';
 
@@ -85,28 +70,6 @@ class ProjectRepository {
     }
   }
 
-  /**
-   * Elimina un proyecto y todo lo que le pertenece exclusivamente
-   * (turnos, geocercas, equipo estático, incidentes, historial de
-   * alertas, mapas) - decisión explícita del usuario: un proyecto
-   * eliminado se lleva sus propios datos operativos, no tiene sentido
-   * conservarlos huérfanos sin ningún proyecto al que pertenecer.
-   *
-   * Usuarios y dispositivos son la excepción a propósito - NO se
-   * eliminan (conservan su cuenta/identidad e historial de
-   * telemetría), solo se desvinculan (`project_id = NULL`). Los
-   * usuarios además se desactivan (mismo criterio que si un admin los
-   * deshabilitara a mano - ya no pertenecen a ningún proyecto
-   * operativo); los dispositivos no tienen un equivalente "activo/
-   * inactivo" en el schema, así que solo quedan sin proyecto asignado
-   * (aparecen en "Dispositivos" listados primero, ver
-   * DashboardSection.tsx) hasta que alguien los reasigne.
-   *
-   * Los archivos `.mbtiles` de los mapas del proyecto deben limpiarse
-   * ANTES de llamar a este método (`projects.routes.ts` lo hace,
-   * reutilizando `MapPipelineService` - este repositorio no tiene
-   * acceso al filesystem de mapas) - aquí solo se eliminan las filas.
-   */
   async delete(id: number): Promise<true> {
     const client = await pool.connect();
     try {
@@ -128,10 +91,6 @@ class ProjectRepository {
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
 
-      // 23503 = foreign_key_violation - ver el comentario de
-      // ProjectHasDependentsError: no debería pasar en operación
-      // normal, es la red de seguridad si una tabla nueva referencia
-      // `projects` sin que este método se actualice para cubrirla.
       if ((err as { code?: string }).code === '23503') {
         throw new ProjectHasDependentsError('datos asociados que este método todavía no cubre');
       }

@@ -1,13 +1,3 @@
-/**
- * http.ts
- *
- * Fetch tipado - reemplaza los patrones sueltos que hoy tiene cada
- * panel (`const BACKEND_URL = ""` / `const API = ""` + `fetch()`
- * directo). Same-origin por default (mismo criterio que los 3
- * paneles actuales), con adjunto opcional de JWT y manejo
- * consistente de errores/401.
- */
-
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -20,11 +10,8 @@ export class ApiError extends Error {
 }
 
 export interface ApiClientOptions {
-  /** Vacío por default - mismo origen que la página, igual que hoy. */
   baseUrl?: string;
-  /** Se llama en cada request - permite leer el token más reciente de localStorage. */
   getToken?: () => string | null | undefined;
-  /** Se llama cuando el backend responde 401 - típico: cerrar sesión y redirigir al login. */
   onUnauthorized?: () => void;
 }
 
@@ -33,7 +20,6 @@ export interface ApiClient {
   post<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   delete<T>(path: string): Promise<T>;
-  /** Para casos que no encajan en los helpers de arriba (multipart, etc.). */
   request<T>(path: string, init?: RequestInit): Promise<T>;
 }
 

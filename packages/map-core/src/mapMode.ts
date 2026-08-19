@@ -1,9 +1,3 @@
-/**
- * mapMode.ts
- *
- * Selector de modo de mapa - Calles / Satelital / Mixto - con
- * persistencia en localStorage, igual que los 3 paneles hoy.
- */
 import { useCallback, useState } from 'react';
 
 export type MapMode = 'streets' | 'satellite' | 'hybrid';

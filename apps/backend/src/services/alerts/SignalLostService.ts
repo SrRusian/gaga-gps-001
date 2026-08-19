@@ -1,28 +1,14 @@
-/**
- * SignalLostService.ts
- *
- * Responsabilidad: Detectar pérdida de señal de vehículos
- * y ejecutar protocolo de emergencia colectiva.
- *
- * Nivel 1 - 10 segundos sin señal: alerta a toda la flota
- * Nivel 2 - 20 segundos sin señal: emergencia colectiva
- *
- * Umbrales deliberadamente bajos (antes 45s/90s) - en un sitio
- * minero, 10 segundos sin posición confiable ya es tiempo
- * suficiente para un incidente.
- *
- * RF asociados: RF-ALR-05
- */
-import type PreventiveStopService from './PreventiveStopService';
+import type { PreventiveStopTriggeredBy } from './PreventiveStopService';
 
 interface SocketIoLike {
   emit(event: string, payload: unknown): void;
 }
 
-/**
- * Mínima superficie de DeviceManager que necesita este servicio -
- * evita acoplarse a la clase completa (mismo patrón que SocketIoLike).
- */
+interface PreventiveStopServiceLike {
+  isActive: boolean;
+  activate(reason: string, triggeredBy?: PreventiveStopTriggeredBy): void;
+}
+
 interface DeviceManagerLike {
   markOffline(uniqueId: string): Promise<void>;
 }
@@ -42,7 +28,7 @@ type AlertLevel = 'none' | 'level1' | 'level2';
 
 class SignalLostService {
   io: SocketIoLike;
-  preventiveStopService: PreventiveStopService;
+  preventiveStopService: PreventiveStopServiceLike;
   deviceManager?: DeviceManagerLike;
   alertEventRepo?: AlertEventRepoLike;
   lastSeen: Record<string, number>;
@@ -58,7 +44,7 @@ class SignalLostService {
     alertEventRepo,
   }: {
     io: SocketIoLike;
-    preventiveStopService: PreventiveStopService;
+    preventiveStopService: PreventiveStopServiceLike;
     deviceManager?: DeviceManagerLike;
     alertEventRepo?: AlertEventRepoLike;
   }) {
@@ -71,15 +57,6 @@ class SignalLostService {
     this.checkInterval = null;
   }
 
-  /**
-   * Siembra `lastSeen` a partir de `devices.last_update` al arrancar
-   * el backend - sin esto, un dispositivo que ya estaba "online" con
-   * datos viejos ANTES de un reinicio nunca se re-evalúa:
-   * `checkAllDevices` solo recorre las claves que ya existan en
-   * `lastSeen`, y ese mapa siempre arranca vacío en un proceso nuevo
-   * (quedaría "online" en PostgreSQL para siempre, sin que nada lo
-   * corrija, hasta que el propio dispositivo vuelva a reportar).
-   */
   hydrate(records: { deviceId: string; lastSeenAt: Date }[]): void {
     records.forEach(({ deviceId, lastSeenAt }) => {
       this.lastSeen[deviceId] = lastSeenAt.getTime();
@@ -130,17 +107,6 @@ class SignalLostService {
     });
   }
 
-  /**
-   * Persiste la pérdida de señal en PostgreSQL (`devices.status`) -
-   * sin esto, un dispositivo que deja de reportar queda marcado
-   * "online" para siempre en la DB, aunque las alertas en vivo sí
-   * funcionen. Se llama tanto al entrar a nivel 1 como al entrar
-   * directo a nivel 2 (un dispositivo que ya llevaba mucho tiempo
-   * silencioso, p. ej. tras `hydrate()`, puede saltar nivel 1 por
-   * completo). La recuperación no necesita un llamado simétrico:
-   * PositionProcessor ya marca online con cada posición aceptada,
-   * antes de llegar a recordPosition().
-   */
   _markDeviceOffline(deviceId: string): void {
     this.deviceManager
       ?.markOffline(deviceId)
@@ -191,7 +157,6 @@ class SignalLostService {
       elapsedSeconds: seconds,
     });
 
-    // Activar parada preventiva colectiva automáticamente - RF-ALR-11
     if (this.preventiveStopService && !this.preventiveStopService.isActive) {
       this.preventiveStopService.activate(
         `Vehículo ${deviceId} sin señal por ${seconds} segundos`,
@@ -219,15 +184,6 @@ class SignalLostService {
     this._resolveAlertEvent(deviceId);
   }
 
-  /**
-   * Historial unificado de alertas (ver alert_events) -
-   * fire-and-forget, no bloquea las alertas en tiempo real ya
-   * emitidas. `deviceId` es el unique_id de texto original - NO el
-   * `parseInt(deviceId)` que se manda en los payloads de socket de
-   * arriba (ese cast da NaN con IDs no numéricos como "TABLETA-01";
-   * es un bug preexistente fuera de alcance aquí, pero el historial
-   * no debe heredarlo).
-   */
   _recordAlertEvent(
     deviceId: string,
     severity: 'warning' | 'danger',
@@ -247,15 +203,6 @@ class SignalLostService {
       .catch((err: Error) => console.error('SignalLostService._resolveAlertEvent:', err.message));
   }
 
-  /**
-   * Limpia el estado de un dispositivo eliminado - equivalente a una
-   * "reconexión" para que un nivel de alerta activo no quede
-   * fantasma en `lastSeen`/`alertLevel` para siempre (nunca se
-   * recuperaría solo: `handleRecovery` solo se dispara desde
-   * `recordPosition()`, que ya no va a llegar de un dispositivo
-   * borrado - y `checkAllDevices` seguiría iterando su entrada cada
-   * 5s sin sentido).
-   */
   clearDevice(deviceId: string): void {
     const wasLost = this.alertLevel[deviceId];
     if (wasLost && wasLost !== 'none') {

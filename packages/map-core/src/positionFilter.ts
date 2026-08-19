@@ -1,16 +1,3 @@
-/**
- * positionFilter.ts
- *
- * Copia del lado del navegador de `PositionFilterService`
- * (`apps/backend/src/services/telemetry/PositionFilterService.ts`) -
- * misma lógica exacta, aplicada aquí al sensor local del operador
- * (`useDeviceGeolocation`) para que un salto físicamente implausible
- * (glitch fix/float del RTK) tampoco se muestre en su propia pantalla,
- * igual que el backend ya lo descarta para lo que ve el resto de la
- * flota. No comparten un paquete en común porque el backend no puede
- * depender de `map-core` (trae React/MapLibre) - si se ajusta el
- * criterio en un lado, replicarlo en el otro.
- */
 import { haversineMeters } from './geometry';
 
 export interface PositionFilterOptions {

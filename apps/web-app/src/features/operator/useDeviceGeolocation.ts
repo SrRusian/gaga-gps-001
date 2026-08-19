@@ -23,18 +23,8 @@ const ERROR_CODE_LABEL: Record<number, string> = {
   3: 'Tiempo de espera agotado',
 };
 
-// Misma clave interna para las dos instancias del filtro (backend y
-// este hook) - cada uno corre en su propio proceso/dispositivo, no
-// comparten estado, solo la lógica.
 const LOCAL_FILTER_DEVICE_KEY = 'local-device';
 
-// Sensor local del dispositivo - funciona sin conexión al servidor.
-// Pasa por la misma lógica anti-teletransporte que usa el backend
-// para Traccar Client (PositionFilterService, copia en
-// @gaga-gps/map-core - ver comentario ahí) - sin esto, un salto de
-// fix/float del RTK que el servidor ya descarta para lo que ve el
-// supervisor seguiría mostrándose, sin
-// filtrar, en la pantalla del propio operador.
 export function useDeviceGeolocation() {
   const supported = typeof navigator !== 'undefined' && 'geolocation' in navigator;
   const [position, setPosition] = useState<DeviceGeolocation | null>(null);
@@ -56,10 +46,6 @@ export function useDeviceGeolocation() {
           fixTime: pos.timestamp,
         });
 
-        // Salto físicamente implausible (glitch fix/float del RTK) -
-        // se ignora y se mantiene la última posición aceptada en
-        // pantalla, igual que hace el backend con lo que ve el resto
-        // de la flota.
         if (!verdict.accepted) return;
 
         setPosition({

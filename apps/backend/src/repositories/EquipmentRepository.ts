@@ -1,9 +1,3 @@
-/**
- * EquipmentRepository.ts
- *
- * Responsabilidad: CRUD de equipo estático (palas, excavadoras,
- * cargadores) en PostgreSQL.
- */
 import { query } from '../config/database';
 
 export type EquipmentStatus = 'active_swing' | 'active_pause' | 'inactive';
@@ -21,7 +15,6 @@ export interface EquipmentRow {
   linked_device_id: string | null;
 }
 
-/** Ese dispositivo ya está vinculado a otro equipo - el índice único parcial de `linked_device_id` lo bloqueó. */
 export class DeviceAlreadyLinkedError extends Error {
   code = 'DEVICE_ALREADY_LINKED';
 
@@ -31,7 +24,6 @@ export class DeviceAlreadyLinkedError extends Error {
 }
 
 class EquipmentRepository {
-  /** `projectId = null` (admin) devuelve todo, sin filtrar. */
   async findAll(projectId?: number | null): Promise<EquipmentRow[]> {
     try {
       const { rows } =
@@ -86,15 +78,6 @@ class EquipmentRepository {
     }
   }
 
-  /**
-   * SET armado a mano (solo las columnas cuya key vino en `fields`,
-   * distinguiendo `undefined` de un valor real) en vez de
-   * `COALESCE($n, columna)` - mismo criterio ya aplicado en
-   * UserRepository/DeviceRepository/ShiftRepository tras el bug donde
-   * COALESCE no permitía limpiar un campo a null. Ninguno de estos
-   * campos es nullable desde el panel de edición hoy, pero este
-   * patrón es el correcto por defecto para cualquier update parcial.
-   */
   async update(
     id: number,
     fields: {
@@ -104,8 +87,6 @@ class EquipmentRepository {
       longitude?: number;
       swingRadius?: number;
       safetyRadius?: number;
-      // `null` explícito = desvincular; `undefined` = no tocar el
-      // vínculo actual (la key ni siquiera vino en el body).
       linkedDeviceId?: string | null;
     },
   ): Promise<EquipmentRow | null> {
@@ -146,7 +127,6 @@ class EquipmentRepository {
     }
   }
 
-  /** Equipo (si existe) que tiene esta tableta vinculada ahora mismo. */
   async findByLinkedDevice(deviceId: string): Promise<EquipmentRow | null> {
     try {
       const { rows } = await query<EquipmentRow>(

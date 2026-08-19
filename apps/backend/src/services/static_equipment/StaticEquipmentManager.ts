@@ -1,12 +1,3 @@
-/**
- * StaticEquipmentManager.ts
- *
- * Responsabilidad: Gestionar equipos estáticos con radio
- * de giro activo (palas, excavadoras, cargadores) y
- * guiar la aproximación de vehículos hacia ellos.
- *
- * RF asociados: RF-ALR-12
- */
 import type { EquipmentStatus } from '../../repositories/EquipmentRepository';
 
 interface SocketIoLike {
@@ -20,12 +11,9 @@ export interface StaticEquipment {
   type: string;
   lat: number;
   lon: number;
-  /** Radio de giro del brazo en metros */
   swingRadius: number;
-  /** Distancia mínima segura en metros */
   safetyRadius: number;
   status: EquipmentStatus;
-  /** Tableta montada en esta máquina ahora mismo, si tiene una vinculada. */
   linkedDeviceId: string | null;
 }
 
@@ -44,15 +32,10 @@ class StaticEquipmentManager {
 
   constructor({ io }: { io: SocketIoLike }) {
     this.io = io;
-    // Equipos estáticos registrados
     this.equipment = {};
-    // Estado de aproximación por par vehiculo-equipo
     this.approachState = {};
   }
 
-  /**
-   * Registra un equipo estático en el sistema
-   */
   registerEquipment(eq: StaticEquipment): void {
     this.equipment[eq.id] = { ...eq };
     console.log(
@@ -60,20 +43,6 @@ class StaticEquipmentManager {
     );
   }
 
-  /**
-   * Actualiza el estado operativo de un equipo
-   * active_swing  → brazo girando - máximo peligro
-   * active_pause  → brazo detenido - umbrales reducidos al 60%
-   * inactive      → fuera de turno - sin restricciones
-   *
-   * Ya NO emite el socket aquí - antes hacía `this.io.emit(...)` a
-   * TODOS los clientes conectados sin importar su proyecto (fuga de
-   * aislamiento). El caller (equipment.routes.ts /
-   * operator-sessions.routes.ts) es quien conoce el `projectId` del
-   * equipo y debe notificar con `socketServer.broadcastToProject(...)`
-   * después de llamar a este método - mismo patrón ya usado ahí para
-   * separar "actualizar estado en memoria" de "avisar por socket".
-   */
   updateStatus(equipmentId: number, status: EquipmentStatus): void {
     if (this.equipment[equipmentId]) {
       this.equipment[equipmentId].status = status;
@@ -81,14 +50,6 @@ class StaticEquipmentManager {
     }
   }
 
-  /**
-   * Limpia el vínculo de esta tableta con cualquier equipo que la
-   * tuviera asignada - usado al eliminar un dispositivo (la FK ya
-   * limpia `linked_device_id` en Postgres vía ON DELETE SET NULL,
-   * pero el mapa en memoria no se entera solo). Devuelve el equipo
-   * afectado (para que el caller decida cómo avisar por socket) o
-   * `null` si esa tableta no estaba vinculada a nada.
-   */
   clearDeviceLink(deviceId: string): StaticEquipment | null {
     const eq = Object.values(this.equipment).find((e) => e.linkedDeviceId === deviceId);
     if (!eq) return null;
@@ -96,15 +57,6 @@ class StaticEquipmentManager {
     return eq;
   }
 
-  /**
-   * Elimina el equipo del mapa en memoria - a diferencia de un simple
-   * `delete this.equipment[id]`, también limpia cualquier alerta de
-   * aproximación que siguiera activa contra este equipo. Sin esto, un
-   * vehículo que estuviera en zona "outer"/"inner"/"minimum" contra
-   * este equipo se quedaría con el HUD atascado para siempre - una
-   * vez borrado, `evaluate()` nunca vuelve a iterarlo, así que jamás
-   * emitiría el `equipment:approach_clear` normal por su cuenta.
-   */
   clearEquipment(equipmentId: number): void {
     if (!this.equipment[equipmentId]) return;
     const suffix = `-${equipmentId}`;
@@ -123,50 +75,36 @@ class StaticEquipmentManager {
     delete this.equipment[equipmentId];
   }
 
-  /**
-   * Evalúa la posición de un vehículo respecto a todos
-   * los equipos estáticos activos
-   */
   evaluate(position: EvaluatedPosition): void {
     const { deviceId, latitude, longitude } = position;
 
     Object.values(this.equipment).forEach((eq) => {
       if (eq.status === 'inactive') return;
-      // La tableta montada en la propia máquina nunca debe evaluarse
-      // contra su propia zona - sin este guard, la excavadora se
-      // dispararía a sí misma "DETENGA EL VEHÍCULO" en cuanto su
-      // propia tableta reporte una posición (distancia ~0 de su
-      // propio centro).
       if (eq.linkedDeviceId != null && String(deviceId) === eq.linkedDeviceId) return;
 
       const distance = this.calculateDistance(latitude, longitude, eq.lat, eq.lon);
 
-      // Ajustar umbrales según estado del equipo
       const factor = eq.status === 'active_pause' ? 0.6 : 1.0;
-      const outerZone = 50 * factor; // Zona exterior
-      const innerZone = eq.safetyRadius * 2 * factor; // Zona interior
-      const minDistance = eq.safetyRadius * factor; // Límite mínimo
+      const outerZone = 50 * factor;
+      const innerZone = eq.safetyRadius * 2 * factor;
+      const minDistance = eq.safetyRadius * factor;
 
       const pairKey = `${deviceId}-${eq.id}`;
       const currentState: ApproachState = this.approachState[pairKey] || 'clear';
 
       if (distance <= minDistance) {
-        // Límite mínimo alcanzado - detener vehículo
         if (currentState !== 'minimum') {
           this.triggerMinimumLimit(deviceId, eq, distance);
           this.approachState[pairKey] = 'minimum';
         }
       } else if (distance <= innerZone) {
-        // Zona interior - aproximación lenta
         if (currentState !== 'inner' && currentState !== 'minimum') {
           this.triggerInnerZone(deviceId, eq, distance);
           this.approachState[pairKey] = 'inner';
         } else if (currentState === 'inner') {
-          // Actualizar distancia en tiempo real
           this.updateApproachDistance(deviceId, eq, distance);
         }
       } else if (distance <= outerZone) {
-        // Zona exterior - iniciar guía de aproximación
         if (currentState === 'clear') {
           this.triggerOuterZone(deviceId, eq, distance);
           this.approachState[pairKey] = 'outer';
@@ -174,7 +112,6 @@ class StaticEquipmentManager {
           this.updateApproachDistance(deviceId, eq, distance);
         }
       } else {
-        // Fuera de todas las zonas
         if (currentState !== 'clear') {
           this.clearApproach(deviceId, eq);
           this.approachState[pairKey] = 'clear';
@@ -208,7 +145,6 @@ class StaticEquipmentManager {
       timestamp: new Date().toISOString(),
     });
 
-    // Notificar al operador del equipo estático
     this.io.emit('equipment:vehicle_approaching', {
       equipmentId: eq.id,
       deviceId,

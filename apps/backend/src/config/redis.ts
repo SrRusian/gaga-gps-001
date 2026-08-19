@@ -1,10 +1,3 @@
-/**
- * redis.ts
- *
- * Responsabilidad: Exponer un cliente Redis (ioredis) para
- * almacenar el estado en memoria de la flota (FleetStateManager)
- * y otros datos efímeros.
- */
 import Redis from 'ioredis';
 
 export const redis = new Redis({

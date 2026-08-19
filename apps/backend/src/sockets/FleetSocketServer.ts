@@ -1,12 +1,3 @@
-/**
- * FleetSocketServer.ts
- *
- * Responsabilidad: Encapsular Socket.io - maneja conexiones
- * entrantes, hidrata a cada cliente nuevo con el estado actual
- * (flota, geocercas, alertas activas, parada preventiva, capas de
- * mapas satelitales activas) y expone broadcast() para que otros
- * servicios distribuyan eventos sin acoplarse directamente a `io`.
- */
 import type { Server, Socket } from 'socket.io';
 import { ADMIN_ROOM, projectRoom } from '../api/middleware/auth.middleware';
 import type { AuthTokenPayload } from '../api/middleware/auth.middleware';
@@ -31,13 +22,6 @@ export interface FleetSocketServerDeps {
   equipmentManager?: StaticEquipmentManager;
 }
 
-/**
- * Arma la misma clave que ya usa `useSupervisorSocket.ts` para
- * upsert/resolve en vivo (`geofence:${deviceId}`, `pairKey('collision', ...)`,
- * etc.) - así una fila rehidratada desde `alert_events` y una que
- * llega después por un evento `supervisor:*` en vivo apuntan a la
- * MISMA entrada en `activeAlerts`, no a dos duplicadas.
- */
 function alertEventKey(row: AlertEventRow): string {
   switch (row.alert_type) {
     case 'geofence':
@@ -63,9 +47,6 @@ class FleetSocketServer {
   mapRepo?: MapRepository;
   alertEventRepo?: AlertEventRepository;
   equipmentManager?: StaticEquipmentManager;
-  // Asignado después de construir (IncidentAlertService necesita
-  // esta misma instancia para emitir, así que no puede llegar por
-  // el constructor sin crear una dependencia circular) - ver app.ts.
   incidentAlertService?: IncidentAlertService;
 
   constructor({
@@ -93,16 +74,8 @@ class FleetSocketServer {
       console.log(`Cliente conectado: ${socket.id}`);
       const user = (socket.data as { user?: AuthTokenPayload }).user;
 
-      // Hidratar con el estado actual de la flota (Redis) - filtrado
-      // al proyecto del usuario conectado; un admin (projectId null)
-      // recibe todo. Sin este filtro, el snapshot inicial (a
-      // diferencia de las actualizaciones en vivo, que ya van solo a
-      // la sala de su proyecto) filtraría toda la flota a cualquiera.
       try {
         const currentFleet = await this.fleetState.getAll();
-        // Solo el admin global ve la flota completa sin filtrar -
-        // un rol de proyecto mal configurado (projectId null sin ser
-        // admin) no debe heredar esa vista por accidente.
         const visible =
           user?.role === 'admin'
             ? Object.values(currentFleet)
@@ -118,8 +91,6 @@ class FleetSocketServer {
         console.error('FleetSocketServer - error hidratando flota:', (err as Error).message);
       }
 
-      // Equipo estático - filtrado por proyecto (solo admin ve todo),
-      // mismo criterio que la flota de arriba.
       if (this.equipmentManager) {
         const allEquipment = Object.values(this.equipmentManager.equipment);
         const visibleEquipment =
@@ -131,11 +102,6 @@ class FleetSocketServer {
         }
       }
 
-      // Geocercas activas - filtrado por proyecto (solo admin ve
-      // todo), mismo criterio que el resto de la hidratación. Antes
-      // se reenviaba `activeGeofences` completo sin filtrar (gap ya
-      // cerrado en esta ronda junto con evaluate()/broadcasts, ver
-      // GeofenceAlertService.ts).
       if (this.geofenceService) {
         const visibleGeofences =
           user?.role === 'admin'
@@ -164,7 +130,6 @@ class FleetSocketServer {
         });
       }
 
-      // Estado de parada preventiva
       if (this.preventiveStopService) {
         const stopStatus = this.preventiveStopService.getStatus();
         if (stopStatus.isActive) {
@@ -179,37 +144,17 @@ class FleetSocketServer {
         }
       }
 
-      // Incidentes abiertos del proyecto - mismo filtro que la flota:
-      // solo Admin ve todos, un rol de proyecto solo los del suyo.
-      // Se emiten AMBOS eventos, no solo `incident:reported`: ese
-      // alimenta el marcador del mapa (`incidentMarkers` en
-      // useSupervisorSocket), pero la lista "Alertas activas" depende
-      // de `supervisor:incident` - sin esto, un Supervisor que
-      // recarga la página pierde de la lista cualquier incidente ya
-      // reportado antes de conectarse (aunque el marcador del mapa
-      // siga viéndose bien, por eso el bug pasaba desapercibido).
       if (this.incidentAlertService) {
         const incidents = Object.values(this.incidentAlertService.activeIncidents).filter(
           (inc) => user?.role === 'admin' || inc.project_id === user?.projectId,
         );
         incidents.forEach((inc) => {
-          // Reutiliza el mismo armado de forma pública que usa
-          // IncidentAlertService al reportar/resolver - evita repetir
-          // (y volver a desalinear) la normalización BIGSERIAL→Number
-          // del `id` en un segundo lugar (ver CLAUDE.md).
           const payload = incidentPublicShape(inc);
           socket.emit('incident:reported', payload);
           socket.emit('supervisor:incident', { ...payload, level: 1 });
         });
       }
 
-      // Historial de alertas "normales" (geocerca, señal perdida,
-      // colisión, proximidad, parada preventiva) - sin esto, un
-      // Supervisor que recarga la página pierde de "Alertas activas"
-      // cualquiera que ya estuviera abierta antes de conectarse
-      // (mismo bug que ya se corrigió para incidentes, generalizado
-      // aquí a las otras 5 familias vía `alert_events`). Se excluye
-      // 'incident' - ese ya se hidrata arriba con su propio evento.
       if (this.alertEventRepo) {
         try {
           const projectId = user?.role === 'admin' ? null : (user?.projectId ?? null);
@@ -235,9 +180,6 @@ class FleetSocketServer {
         }
       }
 
-      // Capas de mapas satelitales activas - acotadas al proyecto del
-      // usuario conectado, mismo criterio que el resto de la
-      // hidratación (admin: sin filtrar).
       if (this.mapRepo) {
         try {
           const mapsProjectId = user?.role === 'admin' ? null : (user?.projectId ?? null);
@@ -257,23 +199,10 @@ class FleetSocketServer {
     });
   }
 
-  /**
-   * Distribuye un evento a todos los clientes conectados -
-   * reservado para eventos verdaderamente globales (p. ej. mapas
-   * satelitales activos). Para lo que sea específico de la flota de
-   * un proyecto, usar broadcastToProject.
-   */
   broadcast(event: string, payload: unknown): void {
     this.io.emit(event, payload);
   }
 
-  /**
-   * Distribuye un evento solo a la sala del proyecto indicado (+ la
-   * sala de admins, que recibe todo) - así un cliente de otro
-   * proyecto nunca lo recibe. `projectId = null` es la sala de
-   * dispositivos sin proyecto asignado todavía; solo los admins la
-   * ven (nadie más se une a esa sala).
-   */
   broadcastToProject(projectId: number | null, event: string, payload: unknown): void {
     if (projectId === null) {
       this.io.to(ADMIN_ROOM).emit(event, payload);

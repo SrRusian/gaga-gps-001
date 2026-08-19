@@ -15,9 +15,6 @@ export interface ReportIncidentOverlayProps {
   submitting: boolean;
 }
 
-// Estilo Waze/Uber - reporta un peligro desde la posición actual del
-// operador; se marca en el mapa de los demás vehículos del mismo
-// proyecto y alerta a quien se acerque (IncidentAlertService).
 export function ReportIncidentOverlay({
   onSubmit,
   onClose,

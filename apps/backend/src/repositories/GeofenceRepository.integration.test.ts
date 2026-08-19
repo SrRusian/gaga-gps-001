@@ -1,17 +1,3 @@
-/**
- * GeofenceRepository.integration.test.ts
- *
- * Test de integración real contra Postgres+PostGIS - a diferencia
- * del resto de la suite (fakes en memoria), este conecta a la misma
- * instancia de Docker Compose que ya usa el flujo de desarrollo local
- * ("npm run dev"). Corre con "npm run test:integration" (config
- * aparte, ver vitest.integration.config.mts), no con "npm test".
- *
- * Requiere Postgres arriba (`docker compose up -d postgres`, ya lo
- * hace automático el script "pretest:integration" del package.json
- * raíz) y las variables DB_HOST/DB_PORT/etc. resueltas igual que el
- * backend real (config/database.ts), por defecto localhost:5432.
- */
 import fs from 'fs';
 import path from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -23,18 +9,6 @@ let testProjectId: number;
 const createdGeofenceIds: number[] = [];
 
 beforeAll(async () => {
-  // 001_init.sql es 100% idempotente (CREATE TABLE/INDEX IF NOT
-  // EXISTS) - seguro de re-aplicar contra una DB de desarrollo que ya
-  // tiene datos reales, garantiza que la columna `geog`/el índice
-  // GiST existan aunque el volumen local sea de antes de esta ronda.
-  // CREATE TABLE IF NOT EXISTS (más abajo) no altera una tabla que ya
-  // existía ANTES de que se agregara `geog` (ej. el volumen de Docker
-  // de un dev que ya venía usando el proyecto) - se agrega a mano
-  // ANTES de aplicar el resto del archivo, porque 001_init.sql ya
-  // trae su propio `CREATE INDEX ... (geog)` que fallaría si la
-  // columna todavía no existe. Igual que ya se hace manualmente
-  // contra contenedores vivos en este proyecto (ver CLAUDE.md) -
-  // ambas sentencias son idempotentes.
   await pool.query(`
     DO $$ BEGIN
       IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'geofences') THEN
@@ -88,7 +62,7 @@ describe('GeofenceRepository - PostGIS real', () => {
 
     const outside = await repo.findMatchingSpatial({
       projectId: testProjectId,
-      latitude: 19.4, // ~6km de distancia - muy fuera del radio de 100m
+      latitude: 19.4,
       longitude: -103.6,
     });
     expect(outside.map((g) => g.id)).not.toContain(circle.id);
@@ -147,7 +121,6 @@ describe('GeofenceRepository - PostGIS real', () => {
     });
     createdGeofenceIds.push(corridor.id);
 
-    // Sobre el eje exacto -> distancia ~0
     const onAxis = await repo.findMatchingSpatial({
       projectId: testProjectId,
       latitude: 19.35,
@@ -157,7 +130,6 @@ describe('GeofenceRepository - PostGIS real', () => {
     expect(onAxisRow).toBeDefined();
     expect(onAxisRow!.distance_meters).toBeLessThan(5);
 
-    // Lejos del eje (~1.1km al norte) - misma fila, distancia grande
     const farFromAxis = await repo.findMatchingSpatial({
       projectId: testProjectId,
       latitude: 19.36,
@@ -187,7 +159,7 @@ describe('GeofenceRepository - PostGIS real', () => {
 
     try {
       const matches = await repo.findMatchingSpatial({
-        projectId: testProjectId, // el proyecto de prueba, NO el del círculo
+        projectId: testProjectId,
         latitude: 19.35,
         longitude: -103.56,
       });

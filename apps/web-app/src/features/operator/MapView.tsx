@@ -15,46 +15,28 @@ import type { ActiveMap, Geofence, Position } from '@gaga-gps/shared-types';
 import maplibregl from 'maplibre-gl';
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 
-// Mismo umbral que SignalLostService (backend) / detección local de
-// desconexión (useOperatorSocket) - a partir de acá una posición se
-// considera "vieja" y se atenúa en el mapa en vez de quedar
-// congelada sin ningún indicio visual.
 const STALE_THRESHOLD_MS = 10000;
 const STALE_CHECK_INTERVAL_MS = 2000;
-
-// "Glide" entre fixes - sin esto el marcador salta de golpe cada vez
-// que llega una posición nueva. Se anima en el mismo intervalo que
-// tardó en llegar el fix anterior (así el glide termina justo cuando
-// se espera el siguiente, ni se adelanta ni se queda corto), acotado
-// para no quedar pegado si hubo un hueco largo de datos.
 const GLIDE_MAX_MS = 1000;
 const GLIDE_MIN_MS = 200;
 const GLIDE_FALLBACK_MS = 800;
 
 export interface MapViewHandle {
-  /** Centrado manual - botón ⊙, fuerza zoom 18. */
   flyTo(lat: number, lon: number): void;
-  /** Seguimiento continuo - no fuerza zoom, para no pelear con un zoom manual del operador. */
   follow(lat: number, lon: number): void;
-  /** Encuadra ambos vehículos durante una alerta crítica de proximidad/colisión. */
   frameThreat(my: [number, number], other: [number, number]): void;
 }
 
 export interface MapViewProps {
   fleet: Record<string, Position>;
   geofences: Geofence[];
-  /** Incidentes activos del proyecto (alertas de peligro estilo Waze/Uber) - círculo con su radio real. */
   incidents?: IncidentMarkerData[];
-  /** Equipo estático del proyecto (radio de giro/seguridad) - dispositivos vinculados no se dibujan como vehículo, ver abajo. */
   equipment?: EquipmentMarkerData[];
   activeMaps: ActiveMap[];
   mapMode: MapMode;
   myDeviceId: string | null;
-  /** Vehículo más cercano fuera de ruta - resalta su marcador cuando está por debajo del umbral de alerta. */
   threatDeviceId?: string | null;
-  /** Geocerca de la alerta activa (si aplica) - se resalta con un pulso en el mapa. */
   highlightedGeofenceId?: number | null;
-  /** Se dispara cuando el propio operador arrastra/hace zoom manualmente - usado para apagar el auto-seguimiento. */
   onUserInteraction?: () => void;
 }
 
@@ -143,9 +125,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     [map],
   );
 
-  // El auto-seguimiento se apaga si el operador toca el mapa a mano
-  // - `originalEvent` solo existe en gestos de usuario, no en los
-  // que dispara programáticamente flyTo/easeTo/fitBounds de arriba.
   useEffect(() => {
     if (!map || !onUserInteraction) return;
 
@@ -164,11 +143,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   useEffect(() => {
     if (!map || !loaded) return;
 
-    // Un dispositivo vinculado a equipo estático ya se representa con
-    // los dos anillos de useEquipmentLayer (radio de giro/seguridad),
-    // en su posición registrada - un marcador de "vehículo" extra
-    // encima del mismo punto sería un segundo dibujo confuso para la
-    // misma máquina física, así que se salta por completo.
     const linkedDeviceIds = new Set(
       equipment.filter((eq) => eq.linkedDeviceId).map((eq) => eq.linkedDeviceId as string),
     );
@@ -177,8 +151,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const vehicleId = `vehicle-${pos.deviceId}`;
 
       if (linkedDeviceIds.has(pos.deviceId)) {
-        // Si ya existía un marcador de antes de vincularse en vivo,
-        // quitarlo - no debe quedar un vehículo "fantasma" ahí.
         if (markersRef.current[vehicleId]) {
           markersRef.current[vehicleId].remove();
           delete markersRef.current[vehicleId];
@@ -223,8 +195,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     });
   }, [map, loaded, fleet, myDeviceId, equipment]);
 
-  // Resalta el marcador del vehículo "amenaza" (más cercano durante
-  // una alerta activa de proximidad/colisión) con un halo pulsante.
   useEffect(() => {
     Object.entries(markersRef.current).forEach(([vehicleId, marker]) => {
       const deviceId = vehicleId.replace(/^vehicle-/, '');
@@ -232,11 +202,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     });
   }, [threatDeviceId, fleet]);
 
-  // "Posición vieja" - sin nuevos datos por más del umbral, la
-  // congelada de siempre pasa a atenuarse en vez de quedar como si
-  // estuviera al día. Corre en un tick propio: sin esto, un
-  // dispositivo que dejó de reportar nunca dispararía el efecto de
-  // arriba (depende de `fleet`, que ya no cambia para ese vehículo).
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();

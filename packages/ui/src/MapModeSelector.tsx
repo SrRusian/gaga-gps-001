@@ -3,7 +3,6 @@ import type { MapMode } from '@gaga-gps/map-core';
 export interface MapModeSelectorProps {
   mode: MapMode;
   onChange: (mode: MapMode) => void;
-  /** Deshabilita Satelital/Mixto cuando no hay ningún mapa satelital activo para el alcance actual - default `true` (sin restricción), retrocompatible con los consumidores que no lo pasan. */
   satelliteAvailable?: boolean;
 }
 

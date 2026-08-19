@@ -14,17 +14,6 @@ import maplibregl from 'maplibre-gl';
 import type { GeoJSONSource } from 'maplibre-gl';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 
-// Un Supervisor de Proyecto tiene acceso completo (crear/editar/
-// eliminar) a Geocercas/Equipo estático/Mapas dentro de su propio
-// proyecto - a diferencia del panel Admin, aquí el proyecto SIEMPRE
-// es implícito (viene del token, nunca se elige), así que este
-// componente es una versión más simple del equivalente de
-// DashboardSection.tsx: sin selector de proyecto en ningún formulario,
-// sin columna "Proyecto" en ninguna tabla. La lógica de dibujo
-// (MapboxDraw, vista previa en vivo, el fix del doble clic y el fix
-// de reentrada de changeMode) se portó tal cual desde
-// DashboardSection.tsx - son bugs ya resueltos ahí, no hace falta
-// volver a descubrirlos.
 const api = createApiClient({ getToken: getStoredToken });
 
 type GeofenceShape = 'circle' | 'polygon' | 'polyline';
@@ -54,10 +43,6 @@ const CRS_OPTIONS = [
   { value: 'EPSG:4326', label: 'WGS84 lat/lon (EPSG:4326)' },
 ];
 
-// Mismo estilo propio de MapboxDraw ya usado en el panel Admin - el
-// theme por defecto de la librería se pierde contra el mapa. Mismos
-// ids/filtros que el theme original (necesarios, cada uno aplica a un
-// tipo de geometría/estado distinto), solo cambia paint.
 const DRAW_COLOR = '#a855f7';
 const DRAW_ACTIVE_COLOR = '#e879f9';
 const PREVIEW_COLOR = DRAW_COLOR;
@@ -232,7 +217,6 @@ export const GeoManagementPanel = forwardRef<GeoManagementPanelHandle, GeoManage
       // eslint-disable-next-line react-hooks/exhaustive-deps -- carga única al montar
     }, []);
 
-    // ── Geocercas - dibujo (MapboxDraw) + vista previa en vivo ──────
     const drawRef = useRef<MapboxDraw | null>(null);
     const circleMarkerRef = useRef<maplibregl.Marker | null>(null);
     const equipmentMarkerRef = useRef<maplibregl.Marker | null>(null);
@@ -264,11 +248,6 @@ export const GeoManagementPanel = forwardRef<GeoManagementPanelHandle, GeoManage
       safetyRadius: '',
       linkedDeviceId: '',
     });
-    // No es un dispositivo vinculado "en otro lado" si es el mismo
-    // equipo que se está editando ahora mismo - si no se excluyera,
-    // el propio dispositivo vinculado desaparecería del selector al
-    // editar (se vería como "ya ocupado" por el registro que se está
-    // editando).
     const linkableDevices = allDevices.filter(
       (d) =>
         !allEquipment.some(
@@ -430,15 +409,6 @@ export const GeoManagementPanel = forwardRef<GeoManagementPanelHandle, GeoManage
       updateDraftPreviewRef.current();
     }, [showGeoPanel, geoShape, geoSelectedCenter, geofenceForm.radius, geofenceForm.corridorWidth, geofenceForm.corridorMargin]);
 
-    // Igual que en el panel Admin: la fuente/capas de previsualización
-    // se registran UNA sola vez, vacías, al montar - agregar una capa
-    // nueva a media sesión de dibujo rompía la detección de doble clic
-    // de mapbox-gl-draw (ver CLAUDE.md, "Doble clic para terminar
-    // polígono/ruta dejó de funcionar"). El changeMode a direct_select
-    // tras terminar de dibujar se difiere con setTimeout(0) por el
-    // mismo motivo documentado ahí - llamarlo síncrono desde dentro de
-    // draw.create reentra al propio changeMode interno de la librería
-    // y produce "Maximum call stack size exceeded".
     useEffect(() => {
       if (!map || drawRef.current) return;
 
@@ -488,9 +458,6 @@ export const GeoManagementPanel = forwardRef<GeoManagementPanelHandle, GeoManage
         map.off('draw.update', handleDrawChange);
         map.off('draw.create', handleDrawCreate);
       };
-      // placeEquipmentMarker no entra a la dependencia a propósito - el
-      // guard drawRef.current de arriba asegura que este efecto solo
-      // corre una vez de verdad, mismo criterio que DashboardSection.tsx.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [map]);
 
@@ -643,9 +610,6 @@ export const GeoManagementPanel = forwardRef<GeoManagementPanelHandle, GeoManage
             });
           }
         }
-        // No hace falta recargar ninguna lista - `geofences` llega como
-        // prop en vivo (socket `geofences:update`, ya disparado por la
-        // propia ruta al guardar), a diferencia de equipo/mapas.
         resetGeofenceForm();
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Error guardando la geocerca');
@@ -669,7 +633,6 @@ export const GeoManagementPanel = forwardRef<GeoManagementPanelHandle, GeoManage
       }
     }
 
-    // ── Equipo estático ────────────────────────────────────────────
     function placeEquipmentMarker(lat: number, lon: number) {
       if (!map) return;
       if (equipmentMarkerRef.current) equipmentMarkerRef.current.remove();
@@ -774,7 +737,6 @@ export const GeoManagementPanel = forwardRef<GeoManagementPanelHandle, GeoManage
       }
     }
 
-    // ── Mapas ──────────────────────────────────────────────────────
     async function importMap() {
       setMapImportError('');
       const imageFile = imageInputRef.current?.files?.[0];

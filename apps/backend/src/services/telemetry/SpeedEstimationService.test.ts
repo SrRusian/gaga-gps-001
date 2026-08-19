@@ -25,7 +25,6 @@ describe('SpeedEstimationService', () => {
 
   it('combina speed reportado y velocidad derivada cuando ambos coinciden razonablemente', () => {
     service.estimate('V1', LAT, LON, 0, 10);
-    // 100m en 10s = 36 km/h derivado, similar al reportado (~40 km/h)
     const estimate = service.estimate('V1', north(100), LON, 10000, 40 / 3.6);
     expect(estimate.derivedKmh).toBeCloseTo(36, 0);
     expect(estimate.speedMs * 3.6).toBeGreaterThan(30);
@@ -34,7 +33,6 @@ describe('SpeedEstimationService', () => {
 
   it('prioriza la velocidad derivada cuando el GPS reportado diverge demasiado', () => {
     service.estimate('V1', LAT, LON, 0, 0);
-    // Reportado dice 80km/h, pero el desplazamiento real implica ~7 km/h
     const estimate = service.estimate('V1', north(10), LON, 5000, 80 / 3.6);
     expect(estimate.speedMs * 3.6).toBeLessThan(20);
   });
@@ -53,12 +51,6 @@ describe('SpeedEstimationService', () => {
   });
 
   it('un dispositivo parado con deriva de GPS (unos decímetros de ruido por segundo, no movimiento real) reporta 0, no un piso artificial de ruido', () => {
-    // El GPS de un dispositivo quieto "tiembla" unos decímetros por
-    // fix (mismo orden de magnitud que el 0.4-0.7 km/h reportado en
-    // campo) - Haversine siempre da distancia positiva sin importar la
-    // dirección del temblor, así que sin zona muerta esto se traduciría
-    // en una "velocidad" fantasma que nunca decae a cero por más que
-    // se promedie.
     service.estimate('V1', LAT, LON, 0, 0);
     service.estimate('V1', north(0.2), LON, 1000, 0);
     service.estimate('V1', north(0.5), LON, 2000, 0);
@@ -69,7 +61,6 @@ describe('SpeedEstimationService', () => {
   it('respeta un umbral personalizado de zona muerta (minSpeedKmh)', () => {
     const strict = new SpeedEstimationService({ minSpeedKmh: 0 });
     strict.estimate('V1', LAT, LON, 0, 0);
-    // 0.5 km/h reales de movimiento - con minSpeedKmh:0 no se filtra
     const estimate = strict.estimate('V1', north(0.14), LON, 1000, 0.5 / 3.6);
     expect(estimate.speedMs).toBeGreaterThan(0);
   });

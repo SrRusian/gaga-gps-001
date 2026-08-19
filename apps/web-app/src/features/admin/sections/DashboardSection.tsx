@@ -34,25 +34,12 @@ import type {
 } from '../types';
 import { useAdminAuth } from '../useAdminAuth';
 
-
-// Formato compacto para la tabla de detalle del historial -
-// `toLocaleString()` (con sufijo "a. m./p. m." del locale) obligaba a
-// la columna Fecha a envolver en 2-3 líneas incluso con la tabla ya
-// ancha, forzando scroll horizontal por unos pixeles de más. 24h y
-// sin año (el rango de búsqueda ya lo acota) - una sola línea corta.
 function formatHistoryDateTime(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// "Global" es el estado inicial y por defecto para Admin - ve todo
-// mezclado, como un supervisor de todo a la vez. Las dos pseudo-filas
-// especiales ("Administradores globales" = usuarios sin proyecto,
-// "Dispositivos sin asignar" = vehículos auto-registrados sin
-// proyecto todavía) siguen existiendo para acotar rápido a ese caso
-// puntual. Un Encargado de Proyecto nunca ve el selector - siempre es
-// su propio proyecto, nunca "global".
 type Scope = 'global' | number;
 type Overlay =
   | 'projects'
@@ -79,34 +66,10 @@ const MAP_STATUS_LABEL: Record<string, string> = {
   failed: 'Error',
 };
 
-// Estilo propio para MapboxDraw mientras se dibuja una geocerca nueva
-// - el default de la librería (azul/naranja al 10% de opacidad, línea
-// de 2px) se pierde contra el mapa (calles o satelital), sobre todo
-// comparado con el color vívido que ya usa una geocerca guardada
-// (`geofenceLayer.ts`). Mismos ids/filtros que el theme original de
-// mapbox-gl-draw (necesarios para que cada capa siga aplicando al
-// tipo de geometría/estado correcto) - solo cambia paint: relleno más
-// opaco, línea más gruesa, y un halo blanco alrededor de cada punto
-// para que se note incluso sobre imágenes satelitales oscuras.
 const DRAW_COLOR = '#a855f7';
 const DRAW_ACTIVE_COLOR = '#e879f9';
-// Mismo morado que DRAW_COLOR - lo usa la previsualización en vivo de
-// radio (círculo) y ancho de corredor (ruta) mientras se crea/edita,
-// antes de guardar (ver PREVIEW_SOURCE_ID más abajo). Una sola
-// constante para que "todavía no guardado" tenga un único color
-// reconocible en todo el flujo de creación, sin importar la forma.
 const PREVIEW_COLOR = DRAW_COLOR;
 const PREVIEW_SOURCE_ID = 'geofence-draft-preview';
-
-// Vista previa en vivo de equipo estático (radio de giro + radio de
-// seguridad) mientras se crea/edita, antes de guardar - mismos
-// colores que el equipo ya guardado (EQUIPMENT_CORE_COLOR/
-// EQUIPMENT_OUTER_COLOR, `equipmentLayer.ts`) para que el color no
-// "salte" al presionar Crear. El morado de geocercas nunca se usa
-// aquí a propósito - amarillo núcleo + azul punteado exterior es una
-// combinación que ninguna geocerca usa junto, así un equipo estático
-// se distingue de una geocerca a simple vista incluso mientras se
-// está dibujando/editando, no solo por tener dos anillos.
 const EQUIP_PREVIEW_SOURCE_ID = 'equipment-draft-preview';
 const DRAW_STYLES = [
   {
@@ -236,18 +199,6 @@ interface EquipmentFormState {
   linkedDeviceId: string;
 }
 
-// Home único de Admin: mapa grande (geocercas + equipo estático +
-// posiciones en vivo) con resumen de métricas arriba, exactamente
-// como Supervisor pero para toda la operación - por defecto sin
-// ningún proyecto elegido, es decir "Global" (todo mezclado). Elegir
-// un proyecto específico acota el mapa/métricas a ese proyecto.
-// Turnos/Dispositivos/Usuarios/Geocercas/Equipo/Mapas viven en
-// overlays (Modal grande) que se abren bajo demanda desde la barra de
-// herramientas, para no saturar la vista con todo siempre visible.
-// Única excepción: *crear* una geocerca o colocar equipo necesita
-// interacción real con el mapa (clic para centro/dibujo) - eso vive
-// en un panel flotante sobre el mapa mismo, nunca dentro de un modal
-// que lo taparía.
 export function DashboardSection() {
   const { user: me } = useAdminAuth();
   const isAdmin = me.role === 'admin';
@@ -293,11 +244,6 @@ export function DashboardSection() {
     projectId: '',
   });
 
-  // ── Historial de recorridos - modo de vista, no overlay: mientras
-  // está activo, el mapa grande de Dashboard deja de mostrar vehículos
-  // en vivo/equipo estático y dibuja en cambio el recorrido histórico
-  // elegido, conservando geocercas y mapas satelitales como
-  // referencia (mismo mapa, no uno nuevo). ──
   const [historyMode, setHistoryMode] = useState(false);
   const [historyDeviceId, setHistoryDeviceId] = useState('');
   const [historyFrom, setHistoryFrom] = useState('');
@@ -308,8 +254,6 @@ export function DashboardSection() {
   const [showHistoryPanel, setShowHistoryPanel] = useState(true);
   const historyMarkerRef = useRef<maplibregl.Marker | null>(null);
   const historyPlaybackRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // ── Mapa grande ──────────────────────────────────────────────────
   const containerRef = useRef<HTMLDivElement>(null);
   const { map, loaded } = useMapLibreMap(containerRef, { center: [-103.7247, 19.2433], zoom: 12 });
   const [mapMode, setMapMode] = useMapMode('gaga_admin_dash_map_mode', 'streets');
@@ -317,7 +261,6 @@ export function DashboardSection() {
   const circleMarkerRef = useRef<maplibregl.Marker | null>(null);
   const equipmentMarkerRef = useRef<maplibregl.Marker | null>(null);
   const vehicleMarkersRef = useRef<Record<string, maplibregl.Marker>>({});
-
   const [showGeoPanel, setShowGeoPanel] = useState(false);
   const [geoShape, setGeoShape] = useState<GeofenceShape>('circle');
   const [geoSelectedCenter, setGeoSelectedCenter] = useState<{ lat: number; lon: number } | null>(
@@ -365,33 +308,18 @@ export function DashboardSection() {
 
   const [livePositions, setLivePositions] = useState<Record<string, Position>>({});
 
-  // Encargado de Proyecto: el "proyecto activo" siempre es el suyo,
-  // nunca elige. Admin: lo que haya seleccionado arriba - "global" por
-  // defecto (todo mezclado), como si fuera un supervisor de todo.
   const scope: Scope = isAdmin
     ? selectedProjectId === 'global' || selectedProjectId === ''
       ? 'global'
       : Number(selectedProjectId)
     : (me.projectId ?? 'global');
 
-  // Un recorrido histórico pertenece a un proyecto específico - al
-  // cambiar de proyecto (o volver a "Global", donde Historial ni
-  // siquiera aparece) el modo se cierra y se limpia todo, en vez de
-  // dejar dibujada la ruta de un proyecto distinto al elegido ahora.
   useEffect(() => {
     if (historyMode) exitHistoryMode();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope]);
 
   async function loadProjects() {
-    // GET /api/projects ya acepta admin y project_manager - Admin
-    // recibe la lista completa, un Encargado solo el suyo (un array
-    // de un elemento, filtrado del lado del servidor) - lo necesita
-    // para resolver el nombre real de su proyecto (`scopeLabel`,
-    // títulos de los overlays), no para administrar proyectos: crear/
-    // editar/eliminar siguen exigiendo `admin` en el backend, y el
-    // botón "+ Proyecto"/"Gestionar proyectos" del menú sigue oculto
-    // para Encargado (ver `isAdmin ? (...) : (...)` del picker).
     try {
       setProjects(await adminApi.get<ProjectRow[]>('/api/projects'));
     } catch {
@@ -426,11 +354,6 @@ export function DashboardSection() {
   }
 
   async function loadMaps() {
-    // GET /api/maps ya acepta admin y project_manager (backend filtra
-    // por req.user.projectId automáticamente) - mismo criterio que
-    // geocercas/equipo/turnos, un Encargado tiene acceso completo pero
-    // acotado a su propio proyecto. Sin projectId (Admin) trae todo -
-    // así "Global" ya funciona sin caso especial.
     const data = await adminApi.get<MapRow[]>('/api/maps');
     setMapsRows(data);
 
@@ -453,40 +376,23 @@ export function DashboardSection() {
     return () => {
       if (mapsPollRef.current) clearInterval(mapsPollRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- carga única al montar, no en cada render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Admin/Encargado no tienen ningún socket propio (a diferencia de
-  // Supervisor/Operador) - todo lo demás en este componente se
-  // refresca solo cuando la PROPIA pestaña hace una acción
-  // (loadMaps() tras activar/importar/etc). Sin esto, un mapa
-  // activado desde otra sesión (otra pestaña de Encargado, o Admin)
-  // nunca aparecía sin recargar a mano - Supervisor sí lo veía en
-  // vivo porque su socket ya escuchaba 'maps:active_update'. Vuelve a
-  // pedir la lista completa por REST (no consume el payload del
-  // evento directo) para que Admin/Encargado sigan viendo exactamente
-  // lo que su propio scope de proyecto permite, ya resuelto del lado
-  // del servidor - mismo criterio que loadMaps() en cualquier otro
-  // punto de este archivo.
   useEffect(() => {
     const socket = createSocket();
     socket.on('maps:active_update', () => loadMaps());
     return () => {
       socket.disconnect();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadMaps es estable en su forma, mismo criterio que el efecto de montaje de arriba
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     loadShifts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- se recarga a propósito solo cuando cambia el proyecto activo
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope]);
 
-  // ── Posiciones en vivo - polling ligero de /api/fleet/state
-  // (endpoint público que ya existe), Admin no tiene socket propio
-  // hoy y no hace falta agregarle uno solo para esto. Corre siempre
-  // (incluido "Global": todas las posiciones de todos los proyectos a
-  // la vez).
   useEffect(() => {
     let cancelled = false;
     async function poll() {
@@ -496,7 +402,7 @@ export function DashboardSection() {
         if (cancelled) return;
         setLivePositions(Object.fromEntries(data.positions.map((p) => [p.deviceId, p])));
       } catch {
-        // Silencioso - es solo un realce visual del mapa, no una acción crítica.
+        // Silencioso - es solo un realce visual del mapa.
       }
     }
     poll();
@@ -525,13 +431,6 @@ export function DashboardSection() {
     [allUsers, scope],
   );
 
-  // Vehículos: se auto-registran solos desde la tableta (GET /gps con
-  // un unique_id nuevo) sin proyecto asignado - se muestran primero
-  // en la lista (en vez de tener un filtro dedicado "sin asignar")
-  // para que sean fáciles de encontrar y asignar sin agregar una
-  // opción más al selector de alcance. No dependen de ningún turno
-  // para funcionar, permanecen en el proyecto y se reutilizan sin
-  // importar quién esté de turno.
   const scopedDevices = useMemo(() => {
     let list = scope === 'global' ? allDevices : allDevices.filter((d) => d.project_id === scope);
     if (deviceSearch.trim()) {
@@ -559,12 +458,6 @@ export function DashboardSection() {
     return [];
   }, [mapsRows, scope]);
 
-  // Dispositivos elegibles para "Dispositivo vinculado" - del mismo
-  // proyecto que el equipo (el propio, si se está editando en Global;
-  // el elegido en el <select> de Proyecto, si se está creando en
-  // Global) y que no estén ya vinculados a OTRO equipo (el índice
-  // único parcial del backend lo rechazaría con 409 de todos modos,
-  // pero es mejor no ofrecerlo desde el dropdown).
   const linkableDevices = useMemo(() => {
     const targetProjectId =
       typeof scope === 'number'
@@ -625,16 +518,9 @@ export function DashboardSection() {
   }, [hasMaps]);
 
   useGeofenceLayer(map, loaded, geofencesForLayer);
-  // En modo Historial se ocultan los anillos de equipo estático - solo
-  // interesa el recorrido, las geocercas y los mapas satelitales
-  // siguen igual (useGeofenceLayer/useSatelliteLayers sin cambios).
   useEquipmentLayer(map, loaded, historyMode ? [] : equipmentForLayer);
   useSatelliteLayers(map, loaded, scopedActiveMaps, mapMode);
 
-  // Marcadores de vehículo en vivo - imperativos, igual que en
-  // Supervisor/Operador (maplibregl.Marker no es JSX). En modo
-  // Historial no se dibuja ninguno - el mapa muestra el recorrido, no
-  // la flota en vivo.
   useEffect(() => {
     if (!map || !loaded) return;
     if (historyMode) {
@@ -667,7 +553,6 @@ export function DashboardSection() {
     });
   }, [map, loaded, scopedLivePositions, historyMode]);
 
-  // ── Historial de recorridos ────────────────────────────────────
   function enterHistoryMode() {
     setHistoryMode(true);
   }
@@ -701,13 +586,6 @@ export function DashboardSection() {
     clearHistoryRoute();
   }
 
-  // Segmentos coloreados por si el punto estaba dentro de alguna
-  // geocerca (`zones.length > 0`) o no - mismo criterio visual que ya
-  // usa el resto del panel para "dentro/fuera de zona autorizada".
-  // Se agrega la fuente/capa la primera vez (nunca antes de que haya
-  // algo que dibujar) y de ahí en más solo se actualiza con setData -
-  // mismo patrón ya usado para PREVIEW_SOURCE_ID en geocercas, evita
-  // mutar el estilo del mapa a medio uso.
   function renderHistoryRoute(points: HistoryPoint[]) {
     if (!map) return;
 
@@ -774,10 +652,6 @@ export function DashboardSection() {
     }
     stopHistoryPlayback();
     try {
-      // projectId explícito cuando hay un proyecto elegido - el
-      // backend ya lo exige/valida (ver reports.routes.ts), esto solo
-      // evita depender de que req.user.projectId alcance (Admin no
-      // tiene uno propio).
       const projectParam = typeof scope === 'number' ? `&projectId=${scope}` : '';
       const data = await adminApi.get<HistoryPoint[]>(
         `/api/reports/history-with-zones?deviceId=${encodeURIComponent(historyDeviceId)}&from=${new Date(historyFrom).toISOString()}&to=${new Date(historyTo).toISOString()}${projectParam}`,
@@ -809,8 +683,6 @@ export function DashboardSection() {
     }, 300);
   }
 
-  // El marcador de posición actual sigue al slider/reproducción -
-  // el trazo dibujado en sí es estático, solo el marcador se mueve.
   useEffect(() => {
     const point = historyPoints[historySliderIndex];
     if (point && historyMarkerRef.current) {
@@ -820,7 +692,6 @@ export function DashboardSection() {
 
   useEffect(() => stopHistoryPlayback, []);
 
-  // ── MapboxDraw + clic para geocerca circular / colocar equipo ────
   const geoShapeRef = useRef(geoShape);
   geoShapeRef.current = geoShape;
   const showGeoPanelRef = useRef(showGeoPanel);
@@ -828,32 +699,8 @@ export function DashboardSection() {
   const placingEquipmentRef = useRef(placingEquipment);
   placingEquipmentRef.current = placingEquipment;
 
-  // Previsualización en vivo de círculo/corredor mientras se crea o
-  // edita una geocerca, ANTES de guardar - antes solo se veía el pin
-  // del centro (círculo) o el trazo crudo de MapboxDraw (ruta), sin
-  // ninguna referencia visual del radio/ancho real hasta crear. Se
-  // recalcula tanto al escribir en el formulario (efecto de abajo)
-  // como al mover un vértice del trazo (evento `draw.render`/
-  // `draw.update` de MapboxDraw, mount effect) - por eso vive como
-  // función imperativa (no un hook de capa como geofenceLayer.ts) en
-  // vez de derivarse de un solo estado de React: necesita reaccionar
-  // a dos fuentes de cambio distintas (formulario y geometría del
-  // dibujo) sin volver a montar los listeners del mapa en cada
-  // keystroke. `updateDraftPreviewRef` deja que los listeners
-  // (agregados una sola vez al montar) siempre llamen a la versión
-  // más reciente, con los valores de estado más recientes.
   const updateDraftPreviewRef = useRef<() => void>(() => {});
 
-  // Crea la fuente/capas de previsualización UNA sola vez, vacías, al
-  // montar el mapa - `updateDraftPreview` nunca vuelve a llamar
-  // `addSource`/`addLayer` después de esto, solo `setData()`. Se
-  // encontró en vivo que agregar una capa nueva a media sesión de
-  // dibujo (la primera vez que había algo que previsualizar, ej. al
-  // escribir el primer dígito del ancho de corredor) rompía la
-  // detección de doble clic de mapbox-gl-draw para terminar una ruta/
-  // polígono - agregar/mutar el estilo del mapa en medio de una
-  // interacción de clics parece resetear el temporizador interno que
-  // distingue un clic de un doble clic.
   function ensureDraftPreviewLayer(m: maplibregl.Map) {
     if (m.getSource(PREVIEW_SOURCE_ID)) return;
     const empty: FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -879,12 +726,6 @@ export function DashboardSection() {
     });
   }
 
-  // Mismo patrón que ensureDraftPreviewLayer (capa vacía registrada
-  // una sola vez al montar, nunca vuelto a agregar después) - equipo
-  // estático no interactúa con mapbox-gl-draw, pero se mantiene la
-  // misma regla igual por consistencia y para no arriesgar una
-  // mutación de estilo a destiempo si en el futuro se agrega algo más
-  // aquí.
   function ensureEquipmentDraftLayer(m: maplibregl.Map) {
     if (m.getSource(EQUIP_PREVIEW_SOURCE_ID)) return;
     const empty: FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -919,11 +760,6 @@ export function DashboardSection() {
     });
   }
 
-  // A diferencia de la previsualización de geocercas, esta no depende
-  // de eventos de mapbox-gl-draw (equipo estático se coloca con un
-  // clic simple/arrastre de marcador, siempre a través de React
-  // state) - un useEffect normal alcanza, sin necesidad del patrón de
-  // ref-a-última-versión.
   useEffect(() => {
     if (!map) return;
     const source = map.getSource(EQUIP_PREVIEW_SOURCE_ID) as GeoJSONSource | undefined;
@@ -1015,7 +851,7 @@ export function DashboardSection() {
     if (!map || !loaded || drawRef.current) return;
 
     const draw = new MapboxDraw({ displayControlsDefault: false, controls: {}, styles: DRAW_STYLES });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- maplibregl y mapbox-gl-draw difieren levemente en sus tipos de Map, pero son compatibles en tiempo de ejecución
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     map.addControl(draw as any);
     drawRef.current = draw;
     ensureDraftPreviewLayer(map);
@@ -1039,30 +875,10 @@ export function DashboardSection() {
     };
     map.on('click', handleClick);
 
-    // Recalcula la previsualización del corredor a cada cambio del
-    // trazo (agregar/mover/borrar un vértice) - `draw.render` es el
-    // más frecuente de los tres pero el único que dispara también
-    // durante el arrastre en vivo de un vértice, no solo al soltarlo.
     const handleDrawChange = () => updateDraftPreviewRef.current();
     map.on('draw.render', handleDrawChange);
     map.on('draw.update', handleDrawChange);
 
-    // Al terminar de dibujar (doble clic, Enter, o el botón "Finalizar
-    // trazado"), pasar directo a modo edición de vértices - así se
-    // puede ajustar el trazo recién terminado (mover/agregar/quitar
-    // vértices) antes de presionar "Crear", sin tener que saber que
-    // existe un modo aparte para eso.
-    //
-    // El changeMode a direct_select NO puede llamarse de forma
-    // síncrona aquí - draw.create se dispara desde dentro del propio
-    // changeMode interno de mapbox-gl-draw (que ya pasa a simple_select
-    // al terminar de dibujar), y reentrar con otro changeMode antes de
-    // que ese ciclo termine de desenrollarse producía
-    // "Maximum call stack size exceeded" (recursión infinita entre
-    // onStop/fire/changeMode) y dejaba corrupto el detector interno de
-    // doble clic para el siguiente dibujo. Diferir con setTimeout(0)
-    // rompe esa reentrada - se ejecuta después de que mapbox-gl-draw
-    // termina de procesar el evento actual, no durante.
     const handleDrawCreate = (e: { features?: { id?: string | number }[] }) => {
       updateDraftPreviewRef.current();
       const featureId = e.features?.[0]?.id;
@@ -1080,12 +896,6 @@ export function DashboardSection() {
       map.off('draw.update', handleDrawChange);
       map.off('draw.create', handleDrawCreate);
     };
-    // placeEquipmentMarker no entra a la dependencia a propósito - este
-    // efecto solo corre una vez de verdad (el guard drawRef.current de
-    // arriba lo bloquea en cualquier re-render posterior), y `map` ya
-    // es la misma instancia estable para toda la vida del componente
-    // (useMapLibreMap la fija una sola vez) - mismo criterio ya usado
-    // en useMapLibreMap.ts para su propio efecto de montaje único.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, loaded]);
 
@@ -1110,11 +920,6 @@ export function DashboardSection() {
     else if (geoShape === 'polyline') drawRef.current?.changeMode('draw_line_string');
   }
 
-  // Alternativa explícita al doble clic para terminar polígono/ruta -
-  // el doble clic (o doble-tap en tableta) no siempre es confiable en
-  // pantalla táctil. changeMode('simple_select') es la misma
-  // transición que mapbox-gl-draw hace internamente al detectar el
-  // doble clic - dispara draw.create igual, sin duplicar lógica.
   function finishDrawing() {
     drawRef.current?.changeMode('simple_select');
   }
@@ -1122,7 +927,6 @@ export function DashboardSection() {
   const scopeLabel =
     scope === 'global' ? 'Global' : (projects.find((p) => p.id === scope)?.name ?? `Proyecto #${scope}`);
 
-  // ── Proyectos ──────────────────────────────────────────────────
   function openCreateProject() {
     setProjectForm({ name: '' });
     setProjectModal({});
@@ -1187,7 +991,6 @@ export function DashboardSection() {
     setActiveOverlay(null);
   }
 
-  // ── Turnos ─────────────────────────────────────────────────────
   function openCreateShift() {
     setShiftForm({ name: '', startTime: '07:00', endTime: '15:00' });
     setShiftModal({});
@@ -1256,7 +1059,6 @@ export function DashboardSection() {
     }
   }
 
-  // ── Usuarios ───────────────────────────────────────────────────
   function openCreateUser() {
     setUserForm({
       email: '',
@@ -1287,9 +1089,6 @@ export function DashboardSection() {
     try {
       if (userModal?.user) {
         await adminApi.patch(`/api/users/${userModal.user.id}`, {
-          // Un Encargado solo puede tocar el rol (nunca email/nombre/
-          // proyecto - ver los `disabled`/campos ocultos arriba, el
-          // backend además lo exige del lado del servidor).
           ...(isAdmin ? { email: userForm.email, name: userForm.name } : {}),
           role: userForm.role,
           ...(isAdmin
@@ -1353,7 +1152,6 @@ export function DashboardSection() {
     }
   }
 
-  // ── Dispositivos ───────────────────────────────────────────────
   function openCreateDevice() {
     setDeviceForm({ uniqueId: '', name: '', type: 'vehicle', projectId: '' });
     setDeviceModal({});
@@ -1432,7 +1230,6 @@ export function DashboardSection() {
     }
   }
 
-  // ── Geocercas ──────────────────────────────────────────────────
   function resetGeofenceForm() {
     setGeoEditingId(null);
     setGeoTargetProjectId('');
@@ -1474,21 +1271,12 @@ export function DashboardSection() {
         .addTo(map);
       map.flyTo({ center: [g.center_lon as number, g.center_lat as number], zoom: 15 });
     } else if (g.geometry) {
-      // "direct_select" (no el "simple_select" que deja mapbox-gl-draw
-      // por default tras un `.add()`) es el modo que permite editar de
-      // verdad - arrastrar cada vértice, agregar uno nuevo arrastrando
-      // un punto medio, o borrarlo con Supr/Backspace - sin esto,
-      // "editar" una geocerca de polígono/ruta solo servía para
-      // cambiar nombre/tipo, no la forma en sí.
       const addedIds = drawRef.current?.add({ type: 'Feature', properties: {}, geometry: g.geometry });
       const featureId = addedIds?.[0];
       if (featureId != null) {
         drawRef.current?.changeMode('direct_select', { featureId: String(featureId) });
       }
 
-      // Centrar/encuadrar el mapa en la geometría - editar una forma
-      // que quedó fuera de la vista actual obligaría a buscarla a
-      // mano antes de poder tocar un solo vértice.
       const coords =
         g.geometry.type === 'Polygon' ? g.geometry.coordinates[0] : g.geometry.coordinates;
       if (coords.length > 0) {
@@ -1613,13 +1401,6 @@ export function DashboardSection() {
       return;
     }
     const ids = [...selectedExportIds].join(',');
-    // Navegación real a la URL de descarga, no fetch() + blob: - Chrome
-    // bloquea las descargas desde un blob: armado con JS en orígenes
-    // sin HTTPS (mensaje "loaded over an insecure connection... should
-    // be served over HTTPS"), aunque el archivo en sí no tenga nada
-    // sensible; un <a href> a la URL real de red no cae en esa
-    // restricción. Como un <a> no puede mandar un header Authorization,
-    // el token va por query string (ver downloadAuthMiddleware).
     const token = getStoredToken();
     const a = document.createElement('a');
     a.href = `/api/geofences/export.${format}?ids=${ids}&token=${encodeURIComponent(token || '')}`;
@@ -1633,11 +1414,6 @@ export function DashboardSection() {
     setGeoImportModal(true);
   }
 
-  // El proyecto destino es la única pieza de información que un
-  // GeoJSON/KML nunca trae - por eso vive en un modal chico (mismo
-  // patrón que "Importar mapa satelital") en vez de pedirlo recién al
-  // fallar el intento: con "Global" elegido, se pide explícitamente
-  // antes de siquiera leer el archivo.
   async function importGeofences() {
     const file = geoImportFileRef.current?.files?.[0];
     if (!file) {
@@ -1675,11 +1451,6 @@ export function DashboardSection() {
     }
   }
 
-  // ── Equipo estático ────────────────────────────────────────────
-  // Marcador arrastrable - mover un equipo ya colocado no requiere
-  // volver a activar "Colocar en mapa", solo arrastrarlo. dragend
-  // actualiza equipmentPosition (React state), que a su vez dispara
-  // el useEffect de la vista previa y recalcula los dos anillos.
   function placeEquipmentMarker(lat: number, lon: number) {
     if (!map) return;
     if (equipmentMarkerRef.current) equipmentMarkerRef.current.remove();
@@ -1793,7 +1564,6 @@ export function DashboardSection() {
     }
   }
 
-  // ── Mapas ──────────────────────────────────────────────────────
   async function importMap() {
     setMapImportError('');
     const effectiveProjectId =
@@ -1886,16 +1656,6 @@ export function DashboardSection() {
 
   const onlineCount = scopedDevices.filter((d) => d.status === 'online').length;
 
-  // Estilo Traccar: el mapa es el fondo de TODA la ventana
-  // (position:fixed, detrás inclusive del header) y todo lo demás -
-  // barra de herramientas, métricas, selector de modo, panel de
-  // creación - flota encima como paneles independientes, no como
-  // tarjetas apiladas en flujo normal. El selector de alcance solo
-  // tiene "Global" y proyectos reales - no hace falta un filtro
-  // dedicado para administradores/dispositivos sin proyecto: Global
-  // ya los muestra sin filtrar, y los dispositivos sin proyecto se
-  // listan primero dentro del overlay "Dispositivos" (ver
-  // `scopedDevices`).
   return (
     <>
       <div className="dash-map-bg">
@@ -1950,11 +1710,7 @@ export function DashboardSection() {
             </button>
           </div>
 
-          {/* Herramienta aparte, no un CRUD más - mismo separador que
-              ya distingue el picker de proyecto de la lista de arriba.
-              Mismo criterio de visibilidad que Turnos: un recorrido
-              histórico pertenece a un proyecto, no tiene sentido en
-              "Global". */}
+          {}
           {typeof scope === 'number' && (
             <div className="dash-tools">
               <button
@@ -2368,8 +2124,7 @@ export function DashboardSection() {
         </div>
       )}
 
-      {/* ── Overlays de gestión - se abren bajo demanda, no compiten
-         por espacio con el mapa. ── */}
+      {}
 
       <Modal
         size="large"
@@ -2609,13 +2364,7 @@ export function DashboardSection() {
                     <button className="btn btn-sm" onClick={() => openEditUser(u)}>
                       Editar
                     </button>
-                    {/* Un Encargado no puede desactivarse a sí mismo -
-                        se quedaría fuera de su propio proyecto sin
-                        forma de volver a entrar (a diferencia de
-                        Admin, que puede reactivarse con otra cuenta
-                        admin si la hay). Mismo guard reforzado en el
-                        backend, esto es solo para no ofrecer una
-                        acción que el servidor va a rechazar. */}
+                    {}
                     {(isAdmin || u.id !== me.id) && (
                       <button className="btn btn-sm" onClick={() => toggleUserActive(u)}>
                         {u.active ? 'Desactivar' : 'Activar'}
@@ -2845,7 +2594,7 @@ export function DashboardSection() {
         )}
       </Modal>
 
-      {/* ── Modales chicos de alta/edición ── */}
+      {}
 
       <Modal
         open={projectModal !== null}
@@ -2940,26 +2689,13 @@ export function DashboardSection() {
             />
           </div>
         )}
-        {/* Un Encargado SÍ puede editar el rol de los usuarios de su
-            propio proyecto (a diferencia de email/nombre/proyecto,
-            bloqueados arriba/abajo) - la única restricción real es que
-            nunca puede asignar 'admin' (le daría a otra cuenta alcance
-            global, ver el mismo guard reforzado en el backend). Como
-            "+ Nuevo" ya está oculto para Encargado, este modal solo se
-            abre para editar en su caso - no hace falta gate adicional
-            aquí. */}
+        {}
         <div className="gg-modal-field">
           <label>Rol</label>
           <select
             value={userForm.role}
             onChange={(e) => {
               const role = e.target.value;
-              // Admin es alcance global por diseño (project_id = NULL
-              // es el único caso válido en todo el sistema, ver
-              // CLAUDE.md "Multi-tenencia por proyecto") - asignarle
-              // un proyecto no tiene sentido y le quitaría permisos
-              // en la práctica, así que se limpia de una vez al
-              // cambiar a este rol.
               setUserForm({ ...userForm, role, projectId: role === 'admin' ? '' : userForm.projectId });
             }}
           >

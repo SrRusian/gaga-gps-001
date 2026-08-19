@@ -1,9 +1,3 @@
-/**
- * DeviceRepository.ts
- *
- * Responsabilidad: CRUD de dispositivos (tabletas) en PostgreSQL.
- * Reemplaza la gestión de dispositivos del panel de Traccar.
- */
 import { pool, query } from '../config/database';
 
 export interface DeviceRow {
@@ -18,12 +12,6 @@ export interface DeviceRow {
   created_at: Date;
 }
 
-/**
- * Error específico para cuando se intenta eliminar un dispositivo
- * que aún tiene posiciones y/o turnos de operador asociados -
- * permite a la capa de rutas responder 409 con un mensaje claro en
- * lugar de un 500 genérico.
- */
 export class DeviceHasPositionsError extends Error {
   code = 'DEVICE_HAS_POSITIONS';
 
@@ -35,9 +23,6 @@ export class DeviceHasPositionsError extends Error {
 }
 
 class DeviceRepository {
-  /**
-   * Busca un dispositivo por su unique_id (id enviado por Traccar Client)
-   */
   async findByUniqueId(uniqueId: string): Promise<DeviceRow | null> {
     try {
       const { rows } = await query<DeviceRow>('SELECT * FROM devices WHERE unique_id = $1', [
@@ -83,10 +68,6 @@ class DeviceRepository {
     }
   }
 
-  /**
-   * Auto-registra un dispositivo si no existe (RF-TEL - nuevas tabletas
-   * no requieren alta manual previa en el panel).
-   */
   async findOrCreate(
     uniqueId: string,
     defaults: { name?: string; type?: string } = {},
@@ -150,12 +131,6 @@ class DeviceRepository {
       attributes?: Record<string, unknown>;
     },
   ): Promise<DeviceRow | null> {
-    // COALESCE no distingue "no lo mandaron" (undefined, no tocar) de
-    // "lo mandaron como null" (limpiar de verdad, ej. quitarle el
-    // proyecto) - ambos casos bindean como NULL en pg y COALESCE
-    // conserva el valor viejo en los dos. Se arma el SET a mano por
-    // eso: solo entra al SET el campo cuya key vino en el body,
-    // aunque su valor sea null.
     const sets: string[] = [];
     const values: unknown[] = [id];
     if (name !== undefined) {
@@ -206,24 +181,7 @@ class DeviceRepository {
   }
 
   /**
-   * Elimina un dispositivo. Por defecto, si tiene posiciones y/o
-   * turnos de operador registrados (casos comunes - la telemetría
-   * persiste desde el primer reporte) se rechaza con
-   * DeviceHasPositionsError para preservar el historial de
-   * auditoría/seguridad.
-   *
-   * @param force - si es true, purga también TODO el historial del
-   *   dispositivo antes de eliminarlo (acción destructiva explícita,
-   *   no es el comportamiento por defecto): turnos de operador,
-   *   posiciones, snapshots de sensores del navegador, eventos de
-   *   geocerca, incidentes reportados por/desde este dispositivo, y
-   *   alertas (colisión/proximidad/etc.) que lo mencionen. Sin purgar
-   *   las 4 tablas con FK real a `devices(unique_id)` (operator_sessions,
-   *   positions, device_sensor_snapshots, incident_reports) el DELETE
-   *   sigue rechazado con 23503 aunque force=true - bug real
-   *   encontrado en campo: solo se purgaban operator_sessions/positions,
-   *   así que cualquier dispositivo con un snapshot de sensor o un
-   *   incidente reportado no se podía eliminar ni con force.
+   * @param force - si es true, purga también TODO el historial del dispositivo antes de eliminarlo
    */
   async delete(id: number, { force = false }: { force?: boolean } = {}): Promise<true> {
     const client = force ? await pool.connect() : null;
@@ -255,7 +213,6 @@ class DeviceRepository {
     } catch (err) {
       if (client) await client.query('ROLLBACK').catch(() => {});
 
-      // 23503 = foreign_key_violation en PostgreSQL
       if ((err as { code?: string }).code === '23503') {
         const device = await this.findById(id);
         throw new DeviceHasPositionsError(device ? device.unique_id : id);

@@ -1,10 +1,3 @@
-/**
- * IncidentReportRepository.ts
- *
- * Responsabilidad: CRUD de reportes de incidente (peligro en el
- * camino) - persistencia; la evaluación en tiempo real (quién está
- * cerca, cuándo alertar) vive en IncidentAlertService.
- */
 import { query } from '../config/database';
 
 export type IncidentCategory = 'obstacle' | 'accident' | 'traffic' | 'other';
@@ -40,7 +33,6 @@ class IncidentReportRepository {
     }
   }
 
-  /** Todos los incidentes abiertos, sin filtrar - usado al arrancar el backend para hidratar IncidentAlertService. */
   async findAllOpen(): Promise<IncidentReportRow[]> {
     try {
       const { rows } = await query<IncidentReportRow>(

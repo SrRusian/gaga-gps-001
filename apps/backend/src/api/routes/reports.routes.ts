@@ -1,10 +1,3 @@
-/**
- * reports.routes.ts
- *
- * Historial de posiciones (replay) y exportación CSV para el
- * panel admin. La exportación a PDF puede añadirse después con
- * una librería dedicada (p. ej. pdfkit) sin afectar este contrato.
- */
 import type { Request, RequestHandler } from 'express';
 import express from 'express';
 import type DeviceRepository from '../../repositories/DeviceRepository';
@@ -32,24 +25,8 @@ export function buildReportsRouter({
   requireRole,
 }: ReportsRouterDeps) {
   const router = express.Router();
-
-  // Antes solo exigía sesión válida (authMiddleware en app.ts), sin
-  // restricción de rol - un Supervisor de Proyecto podía pedir el
-  // historial de posiciones o el CSV de reportes por API directa
-  // aunque su panel nunca expusiera esa opción ("no puede sacar
-  // reportes ni ver el historial de recorridos" - la restricción
-  // real tiene que vivir aquí, no solo en qué botones se muestran).
   const canView = requireRole('admin', 'project_manager');
 
-  /**
-   * Antes ninguna de las 3 rutas de este archivo comprobaba a qué
-   * proyecto pertenece el `deviceId` consultado - un project_manager
-   * podía pedir el historial de cualquier dispositivo de cualquier
-   * otro proyecto. Admin (projectId null) sin `?projectId=` explícito
-   * sigue viendo todo, igual que el resto del panel en alcance
-   * "Global" - mismo patrón `req.user.projectId ?? query.projectId ?? null`
-   * ya usado en geofences/equipment routes.
-   */
   async function resolveDeviceForHistory(
     req: Request,
     deviceId: string,
@@ -91,13 +68,6 @@ export function buildReportsRouter({
     }
   });
 
-  /**
-   * Igual que /history, pero cada posición viene anotada con las
-   * geocercas en las que estaba en ese momento - usado por el
-   * visor de recorridos del panel Admin para colorear el trayecto
-   * según si el vehículo circulaba dentro de una zona/ruta
-   * autorizada o fuera de todas ellas.
-   */
   router.get('/history-with-zones', canView, async (req, res) => {
     try {
       const { deviceId, from, to, limit } = req.query;
@@ -117,9 +87,6 @@ export function buildReportsRouter({
           to: new Date(String(to)),
           limit: limit ? parseInt(String(limit), 10) : undefined,
         }),
-        // Antes sin filtrar (todas las geocercas de todos los
-        // proyectos) - "zona" podía anotar una geocerca ajena al
-        // proyecto del dispositivo consultado.
         geofenceRepo.findAllActive(resolved.effectiveProjectId),
       ]);
 
@@ -158,10 +125,6 @@ export function buildReportsRouter({
         to: new Date(String(to)),
       });
 
-      // device_id es configurable libremente en la tableta (campo
-      // "Device Identifier" de Traccar Client) y no es un dato
-      // confiable - se escapa para exportación humana (Excel/Sheets)
-      // en km/h para lectura directa por el usuario del reporte.
       const header = 'device_id,latitude,longitude,speed_kmh,course,altitude,fix_time\n';
       const csv =
         header +
@@ -194,12 +157,6 @@ export function buildReportsRouter({
   return router;
 }
 
-/**
- * Escapa un valor para CSV - evita:
- *  - Inyección de fórmulas en Excel/Sheets (valores que empiezan
- *    con =, +, -, @ se prefijan con un apóstrofo)
- *  - Ruptura de columnas si el valor contiene comas, comillas o saltos de línea
- */
 function csvEscape(value: unknown): string {
   let str = String(value ?? '');
   if (/^[=+\-@]/.test(str)) {

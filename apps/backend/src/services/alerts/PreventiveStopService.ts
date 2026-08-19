@@ -1,15 +1,3 @@
-/**
- * PreventiveStopService.ts
- *
- * Responsabilidad: Protocolo de parada preventiva colectiva.
- * Puede activarse automáticamente por condiciones críticas
- * o manualmente por el supervisor.
- *
- * Solo el supervisor puede desactivarlo - nunca automático.
- *
- * RF asociados: RF-ALR-11
- */
-
 interface SocketIoLike {
   emit(event: string, payload: unknown): void;
 }
@@ -34,12 +22,6 @@ export interface PreventiveStopStatus {
   reason: string | null;
 }
 
-// NOTA (multi-tenencia, Fase A): sigue siendo global a propósito -
-// escoparlo por proyecto requiere que SignalLostService (quien lo
-// dispara automáticamente) conozca el proyecto de cada dispositivo,
-// y hoy no lo rastrea. Cambiar esto sin resolver eso primero rompe
-// el contrato que ya cubre PreventiveStopService.test.ts. Queda
-// documentado como pendiente explícito, no lo cierra esta fase.
 class PreventiveStopService {
   io: SocketIoLike;
   alertEventRepo?: AlertEventRepoLike;
@@ -57,12 +39,8 @@ class PreventiveStopService {
     this.activationReason = null;
   }
 
-  /**
-   * Activa el protocolo de parada preventiva colectiva
-   * Emite alerta a TODOS los dispositivos simultáneamente
-   */
   activate(reason: string, triggeredBy: PreventiveStopTriggeredBy = 'auto'): void {
-    if (this.isActive) return; // Ya está activo
+    if (this.isActive) return;
 
     this.isActive = true;
     this.activatedAt = new Date().toISOString();
@@ -73,7 +51,6 @@ class PreventiveStopService {
     console.log(`   Razón: ${reason}`);
     console.log(`   Activado por: ${triggeredBy}`);
 
-    // Emitir a TODA la flota simultáneamente
     this.io.emit('fleet:preventive_stop', {
       active: true,
       reason,
@@ -84,7 +61,6 @@ class PreventiveStopService {
       timestamp: new Date().toISOString(),
     });
 
-    // Notificar al supervisor
     this.io.emit('supervisor:preventive_stop', {
       active: true,
       reason,
@@ -104,10 +80,6 @@ class PreventiveStopService {
       .catch((err: Error) => console.error('PreventiveStopService.activate - alertEventRepo:', err.message));
   }
 
-  /**
-   * Desactiva el protocolo - SOLO puede hacerlo el supervisor
-   * RF-ALR-11: no se desactiva automáticamente bajo ninguna circunstancia
-   */
   deactivate(supervisorId = 'supervisor'): void {
     if (!this.isActive) return;
 
@@ -117,7 +89,6 @@ class PreventiveStopService {
     this.activatedAt = null;
     this.activationReason = null;
 
-    // Notificar cancelación a toda la flota
     this.io.emit('fleet:preventive_stop_clear', {
       active: false,
       deactivatedBy: supervisorId,
@@ -137,9 +108,6 @@ class PreventiveStopService {
       .catch((err: Error) => console.error('PreventiveStopService.deactivate - alertEventRepo:', err.message));
   }
 
-  /**
-   * Retorna el estado actual del protocolo
-   */
   getStatus(): PreventiveStopStatus {
     return {
       isActive: this.isActive,

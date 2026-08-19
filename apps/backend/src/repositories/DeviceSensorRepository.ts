@@ -1,10 +1,3 @@
-/**
- * DeviceSensorRepository.ts
- *
- * Persistencia de snapshots de sensores del navegador en la
- * hypertable `device_sensor_snapshots` - independiente de
- * `positions` (protocolo OsmAnd/Traccar Client).
- */
 import { query } from '../config/database';
 
 export interface DeviceSensorSnapshotRow {

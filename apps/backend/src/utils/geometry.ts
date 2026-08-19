@@ -1,13 +1,3 @@
-/**
- * geometry.ts
- *
- * Utilidades de geometría reutilizables para evaluar geocercas de
- * cualquier forma (círculo, polígono, ruta/corredor) y para cruzar
- * el historial de posiciones contra zonas autorizadas.
- *
- * No depende de PostGIS - todo se calcula en JavaScript sobre
- * coordenadas WGS84 decimal, consistente con el resto del sistema.
- */
 import type { CorridorSeverity, Geofence, PolygonGeofence } from '@gaga-gps/shared-types';
 import type { LineString, Polygon } from 'geojson';
 
@@ -17,12 +7,6 @@ function toRad(deg: number): number {
   return deg * (Math.PI / 180);
 }
 
-/**
- * Distancia en metros entre dos coordenadas - fórmula de Haversine.
- * (Idéntica a la ya usada en GeofenceAlertService/CollisionRiskService/
- * StaticEquipmentManager - centralizada aquí para nuevas funciones
- * que la necesitan, sin duplicar código).
- */
 export function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
@@ -33,12 +17,6 @@ export function haversineDistance(lat1: number, lon1: number, lat2: number, lon2
   return EARTH_RADIUS_METERS * c;
 }
 
-/**
- * Determina si un punto (lat, lon) está dentro de un polígono
- * GeoJSON - algoritmo ray casting sobre el anillo exterior.
- * No soporta huecos (anillos interiores) - no se requieren para
- * geocercas de zona autorizada.
- */
 export function isPointInPolygon(lat: number, lon: number, polygonGeometry: Polygon): boolean {
   const ring = polygonGeometry.coordinates[0];
   let inside = false;
@@ -55,11 +33,6 @@ export function isPointInPolygon(lat: number, lon: number, polygonGeometry: Poly
   return inside;
 }
 
-/**
- * Distancia mínima en metros de un punto a un segmento de línea
- * (aproximación planar válida para distancias cortas - cientos de
- * metros a pocos kilómetros - típicas de un sitio minero).
- */
 export function distancePointToSegmentMeters(
   lat: number,
   lon: number,
@@ -68,8 +41,6 @@ export function distancePointToSegmentMeters(
   lat2: number,
   lon2: number,
 ): number {
-  // Proyección equirectangular local para trabajar en metros,
-  // con el primer punto del segmento como origen (0, 0)
   const latRef = toRad((lat1 + lat2) / 2);
   const metersPerDegLat = 111320;
   const metersPerDegLon = 111320 * Math.cos(latRef);
@@ -96,10 +67,6 @@ export function distancePointToSegmentMeters(
   return Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
 }
 
-/**
- * Distancia mínima en metros de un punto a una polilínea GeoJSON
- * completa (evalúa todos los segmentos consecutivos).
- */
 export function distancePointToLineMeters(
   lat: number,
   lon: number,
@@ -118,12 +85,6 @@ export function distancePointToLineMeters(
   return minDistance;
 }
 
-/**
- * Evalúa si una posición está dentro de una geocerca, sin importar
- * su forma - punto único de verdad usado tanto por
- * GeofenceAlertService (tiempo real) como por el cruce de
- * historial contra zonas (route-zone-crossref).
- */
 export function isInsideGeofence(lat: number, lon: number, geofence: Geofence): boolean {
   switch (geofence.shapeType) {
     case 'polygon':
@@ -141,17 +102,6 @@ export function isInsideGeofence(lat: number, lon: number, geofence: Geofence): 
   }
 }
 
-/**
- * Severidad progresiva para rutas/corredores - a diferencia de
- * círculo/polígono (dentro/fuera binario), una ruta autorizada
- * necesita advertir ANTES de salirse por completo:
- *   distancia <= corridorWidthMeters                      → null (dentro, sin alerta)
- *   corridorWidthMeters < distancia <= +dangerMargin       → 'warning'
- *   distancia > corridorWidthMeters + dangerMargin         → 'danger'
- *
- * Si no se configuró corridorDangerMarginMeters, se comporta como
- * binario (warning = salió del corredor, sin escalar a danger).
- */
 export function getCorridorSeverity(
   lat: number,
   lon: number,

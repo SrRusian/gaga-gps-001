@@ -1,28 +1,8 @@
-/**
- * geoFormats.ts
- *
- * Conversión de geocercas entre el modelo interno (fila de
- * PostgreSQL) y formatos estándar de intercambio geoespacial:
- *   - GeoJSON (RFC 7946) - formato principal, nativo en JS
- *   - KML - muy usado en topografía/minería y Google Earth
- *
- * Convención para círculos (GeoJSON no tiene un tipo nativo para
- * ellos): se representan como Point + propiedad `radiusMeters`,
- * el mismo patrón usado por Leaflet/Mapbox y herramientas GIS.
- *
- * Propiedades usadas en properties/ExtendedData:
- *   name               - nombre de la geocerca
- *   type               - 'warning' | 'danger'
- *   radiusMeters        - solo para círculos (Point)
- *   corridorWidthMeters - solo para rutas (LineString)
- */
 import { DOMParser } from '@xmldom/xmldom';
-// eslint-disable-next-line @typescript-eslint/no-require-imports -- @tmcw/togeojson no expone default export ESM-friendly
-const togeojson = require('@tmcw/togeojson');
+import { kml as kmlToGeoJSON } from '@tmcw/togeojson';
 import type { GeofenceShapeType, GeofenceType } from '@gaga-gps/shared-types';
 import type { Feature, FeatureCollection, Geometry, LineString, Point, Polygon } from 'geojson';
 
-/** Fila cruda de la tabla `geofences` - snake_case, tal como la devuelve PostgreSQL. */
 export interface GeofenceRow {
   id: number;
   project_id: number | null;
@@ -37,8 +17,6 @@ export interface GeofenceRow {
   corridor_width_meters: number | null;
   corridor_danger_margin_meters: number | null;
 }
-
-// ── Exportar a GeoJSON ──────────────────────────────────────────
 
 function geofenceRowToFeature(row: GeofenceRow): Feature {
   const properties: Record<string, unknown> = { name: row.name, type: row.type };
@@ -60,7 +38,6 @@ function geofenceRowToFeature(row: GeofenceRow): Feature {
     return { type: 'Feature', properties, geometry: row.geometry as Geometry };
   }
 
-  // polygon
   return { type: 'Feature', properties, geometry: row.geometry as Geometry };
 }
 
@@ -70,8 +47,6 @@ export function geofencesToGeoJSON(rows: GeofenceRow[]): FeatureCollection {
     features: rows.map(geofenceRowToFeature),
   };
 }
-
-// ── Exportar a KML ───────────────────────────────────────────────
 
 function escapeXml(str: unknown): string {
   return String(str)
@@ -121,8 +96,6 @@ ${placemarks}
 </kml>`;
 }
 
-// ── Importar - GeoJSON/KML → parámetros para GeofenceRepository.create() ─
-
 export interface GeofenceInput {
   name: string;
   type: GeofenceType;
@@ -139,12 +112,10 @@ interface FeatureConversionResult {
   error?: string;
 }
 
-/**
- * Convierte un Feature GeoJSON en los parámetros esperados por
- * GeofenceRepository.create(). Retorna null (con un motivo) si el
- * feature no se puede mapear a una de nuestras 3 formas soportadas.
- */
-function featureToGeofenceInput(feature: Feature, index: number): FeatureConversionResult {
+function featureToGeofenceInput(
+  feature: Feature<Geometry | null>,
+  index: number,
+): FeatureConversionResult {
   const props: Record<string, unknown> = feature.properties || {};
   const name = (props.name as string) || `Geocerca importada ${index + 1}`;
   const type: GeofenceType =
@@ -189,7 +160,9 @@ function featureToGeofenceInput(feature: Feature, index: number): FeatureConvers
   return { error: `Feature ${index + 1}: tipo de geometría no soportado (${geometry.type})` };
 }
 
-export function geoJSONToGeofenceInputs(featureCollection: FeatureCollection | null | undefined): {
+export function geoJSONToGeofenceInputs(
+  featureCollection: FeatureCollection<Geometry | null> | null | undefined,
+): {
   inputs: GeofenceInput[];
   errors: string[];
 } {
@@ -211,6 +184,6 @@ export function kmlToGeofenceInputs(kmlString: string): {
   errors: string[];
 } {
   const dom = new DOMParser().parseFromString(kmlString, 'text/xml');
-  const featureCollection = togeojson.kml(dom);
+  const featureCollection = kmlToGeoJSON(dom);
   return geoJSONToGeofenceInputs(featureCollection);
 }

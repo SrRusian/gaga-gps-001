@@ -1,13 +1,3 @@
-/**
- * GeofenceRepository.ts
- *
- * Responsabilidad: CRUD de geocercas en PostgreSQL - soporta tres
- * formas: círculo (compatibilidad original), polígono y polilínea
- * (ruta/corredor autorizado). Ver db/migrations/003_geofence_shapes.sql.
- *
- * Sustituye la gestión en memoria - GeofenceAlertService sigue
- * evaluando en memoria, pero su lista se hidrata desde aquí.
- */
 import type { Geofence, GeofenceShapeType, GeofenceType } from '@gaga-gps/shared-types';
 import type { LineString, Polygon } from 'geojson';
 import { query } from '../config/database';
@@ -38,7 +28,6 @@ export interface UpdateGeofenceParams {
   corridorDangerMarginMeters?: number;
 }
 
-/** Fila devuelta por findMatchingSpatial() - subconjunto de columnas + distancia calculada por PostGIS. */
 export interface GeofenceMatchRow {
   id: number;
   name: string;
@@ -50,7 +39,6 @@ export interface GeofenceMatchRow {
 }
 
 class GeofenceRepository {
-  /** `projectId = null` (admin) devuelve todas, sin filtrar. */
   async findAllActive(projectId?: number | null): Promise<GeofenceRow[]> {
     try {
       const { rows } =
@@ -67,10 +55,6 @@ class GeofenceRepository {
     }
   }
 
-  /**
-   * Subconjunto de geocercas por id - usado por la exportación
-   * selectiva de GeoJSON/KML (ver geofences.routes.js).
-   */
   async findByIds(ids: number[], projectId?: number | null): Promise<GeofenceRow[]> {
     try {
       const { rows } =
@@ -100,18 +84,6 @@ class GeofenceRepository {
     }
   }
 
-  /**
-   * Geocercas relevantes para un punto - un único query indexado
-   * (GiST sobre `geog` + btree sobre `project_id`) en vez de recorrer
-   * todas las geocercas del proyecto en JS. Círculo/polígono solo
-   * vuelven si el punto está dentro (geometría acotada, misma
-   * semántica que isInsideGeofence); polilínea siempre vuelve - la
-   * severidad de un corredor no tiene límite de distancia (ver
-   * getCorridorSeverity en utils/geometry.ts, la misma lógica de 3
-   * niveles se aplica sobre `distance_meters` del lado de quien llama).
-   * `projectId = null` (dispositivo sin proyecto asignado) no
-   * matchea ninguna fila - toda geocerca real requiere project_id.
-   */
   async findMatchingSpatial({
     projectId,
     latitude,
@@ -144,14 +116,6 @@ class GeofenceRepository {
     }
   }
 
-  /**
-   * Crea una geocerca de cualquier forma.
-   *   - shapeType: 'circle' | 'polygon' | 'polyline' (default 'circle')
-   *   - circle: centerLat, centerLon, radiusMeters
-   *   - polygon: geometry (GeoJSON Polygon)
-   *   - polyline: geometry (GeoJSON LineString), corridorWidthMeters,
-   *     corridorDangerMarginMeters (opcional - ver getCorridorSeverity)
-   */
   async create({
     name,
     projectId,
@@ -165,14 +129,6 @@ class GeofenceRepository {
     corridorDangerMarginMeters,
   }: CreateGeofenceParams): Promise<GeofenceRow> {
     try {
-      // $11/$12 repiten shapeType/geometry (ya mandados como $4/$8) -
-      // a propósito, no un descuido: reusar el mismo placeholder $4/$8
-      // dentro del CASE (una comparación de texto) Y en el VALUES (una
-      // columna VARCHAR/JSONB) hace que Postgres falle al deducir un
-      // solo tipo para ese parámetro ("inconsistent types deduced") -
-      // confirmado en vivo contra Postgres real. Duplicar el valor en
-      // una posición de parámetro aparte evita el conflicto sin tener
-      // que forzar casts explícitos en cada ocurrencia.
       const { rows } = await query<GeofenceRow>(
         `INSERT INTO geofences
            (name, project_id, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, corridor_danger_margin_meters, geog)
@@ -204,12 +160,6 @@ class GeofenceRepository {
     }
   }
 
-  /**
-   * Edita una geocerca existente - no cambia su forma (shape_type),
-   * solo sus parámetros: nombre/tipo/estado siempre, y según la
-   * forma: radio y centro (círculo), geometría (polígono/ruta),
-   * ancho y margen de peligro (ruta).
-   */
   async update(id: number, params: UpdateGeofenceParams): Promise<GeofenceRow | null> {
     const {
       name,
@@ -269,12 +219,6 @@ class GeofenceRepository {
     }
   }
 
-  /**
-   * Convierte una fila de PostgreSQL al formato en memoria que
-   * espera GeofenceAlertService.addGeofence() - un único lugar
-   * para esta conversión, usado tanto al hidratar al arrancar
-   * (app.js) como al crear una geocerca vía API (geofences.routes.js).
-   */
   static toMemoryFormat(row: GeofenceRow): Geofence {
     const shapeType = row.shape_type || 'circle';
 
@@ -301,7 +245,6 @@ class GeofenceRepository {
         corridorDangerMarginMeters: row.corridor_danger_margin_meters ?? undefined,
       };
     }
-    // polygon
     return {
       id: row.id,
       name: row.name,

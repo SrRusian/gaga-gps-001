@@ -1,15 +1,12 @@
-// Test de caracterización - congela el comportamiento actual ANTES
-// de convertir a TypeScript. RF-ALR-11: solo el supervisor desactiva,
-// nunca automático.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PreventiveStopService from './PreventiveStopService';
 
 describe('PreventiveStopService', () => {
-  let io: { emit: ReturnType<typeof vi.fn> };
+  let io: { emit: ReturnType<typeof vi.fn<(event: string, payload: unknown) => void>> };
   let service: InstanceType<typeof PreventiveStopService>;
 
   beforeEach(() => {
-    io = { emit: vi.fn() };
+    io = { emit: vi.fn<(event: string, payload: unknown) => void>() };
     service = new PreventiveStopService({ io });
   });
 
@@ -63,7 +60,6 @@ describe('PreventiveStopService', () => {
     expect(service.getStatus()).toEqual({
       isActive: false,
       activatedAt: null,
-      // activatedBy NO se limpia en deactivate() - solo activatedAt y reason.
       activatedBy: 'auto',
       reason: null,
     });

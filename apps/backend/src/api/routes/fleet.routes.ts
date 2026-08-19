@@ -1,10 +1,3 @@
-/**
- * fleet.routes.ts
- *
- * Estado general de la flota y control de parada preventiva
- * colectiva (RF-ALR-11). Extraído de app.js sin cambiar su
- * comportamiento.
- */
 import express, { type RequestHandler } from 'express';
 import type PreventiveStopService from '../../services/alerts/PreventiveStopService';
 import type FleetStateManager from '../../services/telemetry/FleetStateManager';
@@ -33,14 +26,6 @@ export function buildFleetRouter({
     }
   });
 
-  // Activar/desactivar la parada preventiva colectiva es una acción
-  // de seguridad crítica - antes no requería login (Supervisor era
-  // una pantalla compartida sin cuenta); ahora que todos los roles
-  // tienen usuario y contraseña, se protege con JWT + rol. Roles de
-  // proyecto (Fase B) agregados aquí - se quedaron fuera cuando se
-  // crearon esos roles porque esta ruta no se tocó en esa fase,
-  // dejando a un Supervisor/Encargado de Proyecto sin poder usar el
-  // botón (403 real, reportado en campo).
   router.post(
     '/stop',
     authMiddleware,

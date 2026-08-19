@@ -1,10 +1,3 @@
-/**
- * PositionRepository.ts
- *
- * Responsabilidad: Persistencia de posiciones GPS en la
- * hypertable TimescaleDB `positions`, y consultas de historial
- * para reportes/replay.
- */
 import { query } from '../config/database';
 
 export interface PositionRow {
@@ -39,9 +32,6 @@ export interface PositionInput {
 }
 
 class PositionRepository {
-  /**
-   * Guarda una posición normalizada
-   */
   async save(position: PositionInput): Promise<PositionRow> {
     try {
       const { rows } = await query<PositionRow>(
@@ -72,9 +62,6 @@ class PositionRepository {
     }
   }
 
-  /**
-   * Última posición conocida de un dispositivo
-   */
   async findLatestByDevice(deviceId: string): Promise<PositionRow | null> {
     try {
       const { rows } = await query<PositionRow>(
@@ -89,10 +76,6 @@ class PositionRepository {
     }
   }
 
-  /**
-   * Última posición conocida de cada dispositivo - usado para
-   * reconstruir el estado de flota al arrancar el backend.
-   */
   async findLatestPerDevice(): Promise<PositionRow[]> {
     try {
       const { rows } = await query<PositionRow>(
@@ -108,11 +91,6 @@ class PositionRepository {
     }
   }
 
-  /**
-   * Historial de posiciones para reportes / replay (RF panel admin).
-   * Excluye posiciones descartadas por PositionFilterService
-   * (valid=false) - nunca deben verse en mapa, historial ni CSV.
-   */
   async findHistory({
     deviceId,
     from,

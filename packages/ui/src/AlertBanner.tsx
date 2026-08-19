@@ -4,7 +4,6 @@ export interface AlertBannerProps {
   severity: AlertSeverity;
   message: string;
   time?: string;
-  /** Solo las alertas que no se resuelven solas (incidentes reportados por un operador) lo usan. */
   onResolve?: () => void;
   resolveLabel?: string;
 }

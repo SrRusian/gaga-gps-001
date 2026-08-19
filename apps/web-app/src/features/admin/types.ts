@@ -1,9 +1,3 @@
-/**
- * DTOs tal como los devuelve la API del panel Admin - filas crudas
- * de PostgreSQL (snake_case), distintas de las formas normalizadas
- * de @gaga-gps/shared-types que usan Operador/Supervisor en tiempo
- * real. Ver los repositorios correspondientes en apps/backend.
- */
 import type { LineString, Polygon } from 'geojson';
 
 export interface ProjectRow {

@@ -10,7 +10,6 @@ import type { EquipmentMarkerData } from '@gaga-gps/map-core';
 import { useEffect, useRef, useState } from 'react';
 import { useAlertSound } from './useAlertSound';
 
-/** Forma en memoria (StaticEquipmentManager) -> forma que espera useEquipmentLayer. */
 function toMarkerData(eq: StaticEquipment): EquipmentMarkerData {
   return {
     id: eq.id,
@@ -38,10 +37,6 @@ export interface ThreatVehicle {
   distance: number;
 }
 
-// Mismos umbrales que SignalLostService.ts (backend) - mantenidos en
-// sincronía a propósito, ver comentario ahí. Estos corren en el
-// cliente porque, si el propio socket está caído, el servidor no
-// tiene forma de empujarle `signal:lost:level1/2` a este operador.
 const LOCAL_DISCONNECT_LEVEL1_MS = 10000;
 const LOCAL_DISCONNECT_LEVEL2_MS = 20000;
 
@@ -59,20 +54,13 @@ export function useOperatorSocket(deviceId: string | null) {
   const [activeGeofenceId, setActiveGeofenceId] = useState<number | null>(null);
   const [incidents, setIncidents] = useState<Record<number, IncidentReportedPayload>>({});
   const { playWarningSound, playDangerSound, stopSound } = useAlertSound();
-
-  // Refs para no re-suscribir el socket cada vez que cambian (los
-  // handlers de socket.io capturan closures al momento de registrarse).
   const soundsRef = useRef({ playWarningSound, playDangerSound, stopSound });
   soundsRef.current = { playWarningSound, playDangerSound, stopSound };
 
-  // Detección local de desconexión - independiente del servidor.
   const disconnectedAtRef = useRef<number | null>(null);
   const localSignalLevelRef = useRef<'none' | 'level1' | 'level2'>('none');
 
   useEffect(() => {
-    // Sin vehículo registrado no hay "mi posición" ni turno posible -
-    // ni siquiera vale la pena abrir el socket. El operador ve un
-    // mapa vacío hasta que registre un vehículo (ver OperatorApp).
     if (!deviceId) return;
 
     const socket = createSocket();
@@ -117,7 +105,6 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
 
-    // RF-ALR-02/03 - geocercas
     socket.on('alert:warning', (data) => {
       if (data.deviceId === deviceId) {
         showWarning(data.message);
@@ -132,7 +119,6 @@ export function useOperatorSocket(deviceId: string | null) {
         soundsRef.current.playDangerSound(data.loop);
       }
     });
-    // Zonas de estacionamiento - solo visual, sin sonido/sirena.
     socket.on('alert:info', (data) => {
       if (data.deviceId === deviceId) {
         showInfo(data.message);
@@ -147,7 +133,6 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
 
-    // RF-ALR-05 - pérdida de señal (broadcast a toda la flota, no filtrado por deviceId)
     socket.on('signal:lost:level1', (data) => {
       showWarning(data.message);
       soundsRef.current.playWarningSound();
@@ -161,7 +146,6 @@ export function useOperatorSocket(deviceId: string | null) {
       soundsRef.current.stopSound();
     });
 
-    // RF-ALR-10 - anticolisión
     socket.on('collision:proximity', (data) => {
       showWarning(data.message);
       soundsRef.current.playWarningSound();
@@ -178,7 +162,6 @@ export function useOperatorSocket(deviceId: string | null) {
       setThreat(null);
     });
 
-    // Proximidad fuera de ruta - VehicleProximityService
     socket.on('proximity:distance_update', (data) => {
       if (data.deviceId === deviceId) {
         setNearestVehicle({ deviceId: data.nearestDeviceId, distance: data.distance });
@@ -201,7 +184,6 @@ export function useOperatorSocket(deviceId: string | null) {
       setNearestVehicle(null);
     });
 
-    // RF-ALR-12 - aproximación a equipo estático
     socket.on('equipment:approach_outer', (data) => {
       if (data.deviceId === deviceId) showWarning(data.message);
     });
@@ -224,11 +206,6 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
 
-    // Alertas de incidente en tiempo real (estilo Waze/Uber) -
-    // IncidentAlertService. `incident:nearby` sí se filtra por
-    // deviceId (es un aviso dirigido a quien se está acercando); los
-    // marcadores en el mapa (`incident:reported`/`resolved`) son
-    // para todos los vehículos del proyecto, sin filtrar.
     socket.on('incident:reported', (data) => {
       setIncidents((prev) => ({ ...prev, [data.id]: data }));
     });
@@ -247,7 +224,6 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
 
-    // RF-ALR-11 - parada preventiva colectiva
     socket.on('fleet:preventive_stop', (data) => {
       showDanger(data.message);
       soundsRef.current.playDangerSound(data.loop);
@@ -264,9 +240,6 @@ export function useOperatorSocket(deviceId: string | null) {
     };
   }, [deviceId]);
 
-  // Detección local de desconexión prolongada - corre siempre que
-  // haya un vehículo registrado, sin depender de que el socket esté
-  // vivo (es justamente el caso que cubre: socket caído).
   useEffect(() => {
     if (!deviceId) return;
 
@@ -289,7 +262,7 @@ export function useOperatorSocket(deviceId: string | null) {
     }, 1000);
 
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- playWarningSound/playDangerSound son estables por render (ver useAlertSound), no hace falta re-suscribir el interval por ellas
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
 
   const activeCount = Object.keys(fleet).length;

@@ -1,17 +1,5 @@
-/**
- * UserRepository.ts
- *
- * Responsabilidad: CRUD de usuarios (operadores, supervisores,
- * admins) en PostgreSQL. Las contraseñas se guardan hasheadas
- * con bcrypt - el hasheo ocurre en auth.routes.js / devices UI,
- * este repositorio solo persiste el valor recibido.
- */
 import { pool, query } from '../config/database';
 
-// String genérico (no unión cerrada) - agregar un rol nuevo es
-// configuración (el <select> de Admin → Usuarios, las llamadas a
-// requireRole() en cada ruta), no un cambio de tipo ni de schema
-// (ver migración 009_generic_roles.sql).
 export type UserRole = string;
 
 export interface UserRow {
@@ -20,7 +8,6 @@ export interface UserRow {
   password: string;
   name: string;
   role: UserRole;
-  /** null = alcance global (solo admin). */
   project_id: number | null;
   active: boolean;
   created_at: Date;
@@ -28,13 +15,6 @@ export interface UserRow {
 
 export type PublicUserRow = Omit<UserRow, 'password'>;
 
-/**
- * Error específico para cuando se intenta eliminar un usuario que
- * tiene turnos de operador (operator_sessions) registrados - igual
- * que con DeviceHasPositionsError, evita perder el historial de
- * horas trabajadas por accidente (útil para auditoría/nómina aunque
- * el usuario ya no esté activo).
- */
 export class UserHasSessionsError extends Error {
   code = 'USER_HAS_SESSIONS';
 
@@ -142,11 +122,6 @@ class UserRepository {
       projectId?: number | null;
     },
   ): Promise<PublicUserRow | null> {
-    // COALESCE no distingue "no lo mandaron" (undefined, no tocar) de
-    // "lo mandaron como null" (limpiar de verdad, ej. volver a un
-    // usuario "sin proyecto") - ambos bindean como NULL en pg. Se
-    // arma el SET a mano por eso: solo entra el campo cuya key vino
-    // en el body, aunque su valor sea null.
     const sets: string[] = [];
     const values: unknown[] = [id];
     if (email !== undefined) {
@@ -186,7 +161,6 @@ class UserRepository {
       );
       return rows[0] || null;
     } catch (err) {
-      // 23505 = unique_violation en PostgreSQL (email ya tomado por otro usuario).
       if ((err as { code?: string }).code === '23505' && email) {
         throw new EmailAlreadyExistsError(email);
       }
@@ -195,11 +169,6 @@ class UserRepository {
     }
   }
 
-  /**
-   * Cuenta admins activos, excluyendo opcionalmente un id - usado
-   * para bloquear una acción (desactivar/eliminar/cambiar de rol)
-   * que dejaría el sistema sin ningún admin capaz de iniciar sesión.
-   */
   async countActiveAdmins(excludeId?: number): Promise<number> {
     try {
       const { rows } = await query<{ count: string }>(
@@ -223,24 +192,7 @@ class UserRepository {
   }
 
   /**
-   * Elimina un usuario. Por defecto, si tiene turnos de operador
-   * registrados (operator_sessions) se rechaza con
-   * UserHasSessionsError - se recomienda desactivar en vez de
-   * eliminar para conservar el historial de horas trabajadas.
-   *
    * @param force - si es true, purga también sus turnos de operador
-   *   (operator_sessions - es SU historial de horas trabajadas,
-   *   tiene sentido que se vaya con él) antes de eliminarlo. Los
-   *   turnos que supervisaba (`shifts.supervisor_user_id`) y los
-   *   incidentes que reportó/resolvió (`incident_reports.reported_by`/
-   *   `resolved_by`) se DESVINCULAN (`SET NULL`), no se eliminan - a
-   *   diferencia de operator_sessions, esos no son "datos del
-   *   usuario", son datos de otra entidad (un turno, un incidente de
-   *   seguridad) que solo lo referencian de paso; borrarlos porque
-   *   el usuario que los creó/superviso ya no existe destruiría
-   *   información real sin necesidad (mismo criterio ya usado en
-   *   `maps.uploaded_by`, que ya tenía `ON DELETE SET NULL` en el
-   *   schema desde el día uno).
    */
   async delete(id: number, { force = false }: { force?: boolean } = {}): Promise<true> {
     const client = force ? await pool.connect() : null;
@@ -266,7 +218,6 @@ class UserRepository {
     } catch (err) {
       if (client) await client.query('ROLLBACK').catch(() => {});
 
-      // 23503 = foreign_key_violation en PostgreSQL
       if ((err as { code?: string }).code === '23503') {
         const user = await this.findById(id);
         throw new UserHasSessionsError(user ? user.email : id);

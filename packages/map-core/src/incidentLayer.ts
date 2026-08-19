@@ -1,17 +1,3 @@
-/**
- * incidentLayer.ts
- *
- * Renderizado de incidentes activos (alertas de peligro estilo
- * Waze/Uber) sobre MapLibre - dos anillos concéntricos, no uno solo:
- * un núcleo pequeño de radio fijo, siempre rojo sólido, marcando el
- * punto EXACTO reportado ("aquí está el problema"), y el anillo
- * exterior de siempre con el `radiusMeters` real del incidente
- * (la zona de aproximación que ya dispara `incident:nearby`) en el
- * color de su categoría, punteado. Antes solo existía el anillo
- * exterior - un vehículo lejano no tenía forma de distinguir a
- * simple vista el punto exacto del peligro dentro de una zona de
- * ~100m. Reutiliza `circleToPolygon` de geofenceLayer.ts.
- */
 import type { Feature, FeatureCollection } from 'geojson';
 import type { GeoJSONSource, Map as MaplibreMap } from 'maplibre-gl';
 import { useEffect } from 'react';
@@ -25,8 +11,6 @@ export interface IncidentMarkerData {
   radiusMeters: number;
 }
 
-// Radio fijo del núcleo - no viene del incidente (ese define el
-// anillo de aproximación), es solo la marca visual del punto exacto.
 const CORE_RADIUS_METERS = 15;
 const CORE_COLOR = '#e5484d';
 
@@ -89,8 +73,6 @@ function renderIncidents(map: MaplibreMap, incidents: IncidentMarkerData[]): voi
     paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-dasharray': [2, 1] },
   });
 
-  // Núcleo por encima del anillo exterior - sólido, sin punteado, para
-  // que se distinga a simple vista de la zona de aproximación.
   map.addSource('incidents-core-preview', { type: 'geojson', data: coreGeojson });
   map.addLayer({
     id: 'incidents-core-fill',

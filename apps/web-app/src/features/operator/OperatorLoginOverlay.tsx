@@ -5,12 +5,6 @@ export interface OperatorLoginOverlayProps {
   error: string;
 }
 
-/**
- * Ya no pide credenciales - el login único (gateway) ya identificó
- * a la persona antes de llegar aquí. Este paso solo declara
- * explícitamente "empiezo a operar este vehículo ahora", que es lo
- * que abre el turno en operator_sessions.
- */
 export function OperatorLoginOverlay({ onStartShift, error }: OperatorLoginOverlayProps) {
   const user = getStoredUser();
 

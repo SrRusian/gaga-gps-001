@@ -19,19 +19,6 @@
   color: var(--sup-text);
 }
 
-/* ── Shell flotante estilo Traccar - idéntico en técnica al de Admin,
-   header (`.gg-panel-header`, compartido de verdad, ver
-   `packages/ui`) - el mapa es el fondo de TODA la ventana
-   (`.sup-map-bg`, position:fixed, detrás inclusive del header
-   flotante); todo lo demás flota encima agrupado en columnas fijas
-   (`.sup-left-stack`/`.sup-right-stack`/`.sup-bottom-left-stack`),
-   nunca como una barra lateral en el flujo normal del documento.
-   `--sup-header-h` sigue viviendo aquí (no en el componente
-   compartido, CSS no permite que un hijo exponga una variable hacia
-   su ancestro) - la usan los paneles flotantes para no quedar tapados
-   debajo del header; su valor debe coincidir con la altura real de
-   `.gg-panel-header` en `packages/ui/src/styles.css` (52px / 92px en
-   ≤860px). ── */
 .sup-float-main {
   position: fixed;
   inset: 0;
@@ -48,10 +35,6 @@
   height: 100%;
 }
 
-/* Panel de vidrio esmerilado - base visual compartida de todos los
-   flotantes (parada preventiva, menú, alertas, selector de modo,
-   vehículos, detalle) - mismos valores que `.dash-glass` en Admin,
-   para que ambos paneles se sientan la misma familia visual. */
 .sup-glass {
   background: rgba(20, 23, 28, 0.9);
   backdrop-filter: blur(8px);
@@ -60,12 +43,6 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
-/* El contenedor flex en sí no debe capturar clics/movimiento - su
-   caja (column + gap) es más grande que los paneles visibles que
-   contiene, y sin pointer-events:none el espacio "en blanco" entre
-   ellos intercepta el mouse, bloqueando el mapa debajo aunque no se
-   vea nada ahí (mismo bug ya documentado y corregido en Admin). Cada
-   hijo directo (los paneles reales) recupera pointer-events:auto. */
 .sup-left-stack {
   position: fixed;
   top: calc(var(--sup-header-h) + 12px);
@@ -74,10 +51,6 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* Ancho explícito (no shrink-to-fit como el menú de Admin) - a
-     diferencia de un menú de botones cortos, esta columna aloja
-     contenido denso y de longitud variable (lista de alertas, tabla
-     de historial con filtros) que necesita un ancho legible estable. */
   width: min(340px, calc(100vw - 400px));
   max-height: calc(100vh - var(--sup-header-h) - 24px);
   overflow: hidden;
@@ -108,7 +81,6 @@
   pointer-events: auto;
 }
 
-/* ── Columna izquierda: parada preventiva → menú de gestión → alertas ── */
 .sup-stop-section {
   flex-shrink: 0;
   padding: 16px;
@@ -131,10 +103,6 @@
   font-weight: 600;
 }
 
-/* Menú de Geocercas/Equipo estático/Mapas - mismo lenguaje "ghost
-   button, resalta al pasar el mouse" ya establecido en el menú
-   vertical de Admin (`.dash-actions .btn`/`.dash-menu-btn`), en vez
-   de botones sólidos azules repitiendo la misma atención. */
 .sup-menu-panel {
   flex-shrink: 0;
   display: flex;
@@ -170,10 +138,6 @@
   flex-shrink: 0;
 }
 
-/* Miembro flexible/scrolleable de .sup-left-stack - mismo
-   comportamiento de flex-grow que ya tenía como sección de la barra
-   lateral vieja, solo cambió el contenedor externo que lo posiciona
-   (fixed-stack en vez de sidebar en flujo normal). */
 .sup-alerts-section {
   display: flex;
   flex-direction: column;
@@ -313,8 +277,6 @@
   color: var(--sup-text-muted);
 }
 
-/* ── Columna derecha: selector de modo → vehículos → panel de crear
-   geocerca/equipo (GeoManagementPanel, condicional) ── */
 .gg-no-maps-banner {
   max-width: 320px;
 }
@@ -355,7 +317,6 @@
   color: #fff;
 }
 
-/* ── Columna inferior-izquierda: métricas ── */
 .sup-stats {
   display: flex;
   flex-wrap: wrap;
@@ -379,11 +340,6 @@
   color: var(--sup-warning);
 }
 
-/* ── Detalle de vehículo seleccionado - panel fijo independiente,
-   NO parte de .sup-right-stack a propósito: si viviera ahí junto con
-   la lista de vehículos y el panel de crear geocerca, los tres
-   podrían apilarse más allá del alto de la pantalla al mismo tiempo -
-   cada esquina queda con su propio límite de altura independiente. ── */
 .sup-vehicle-detail {
   position: fixed;
   bottom: 16px;
@@ -452,13 +408,6 @@
   cursor: pointer;
 }
 
-/* ── Geocercas/Equipo estático/Mapas (GeoManagementPanel.tsx) -
-   acceso completo del Supervisor dentro de su propio proyecto.
-   Entrada vía .sup-menu-panel (columna izquierda); panel de crear/
-   editar como hijo normal de .sup-right-stack (ya no necesita su
-   propio position:absolute - flota por vivir dentro de un stack ya
-   posicionado, igual que `.dash-float-panel` en Admin); tablas de
-   gestión dentro de los overlays Modal. ── */
 .sup-app .btn {
   background: var(--sup-accent);
   border: none;
@@ -605,10 +554,6 @@
   background: var(--sup-surface-2);
 }
 
-/* ── Adaptativo - pantalla angosta (tableta): mismo criterio que
-   Admin - los stacks pierden su ancho fijo y se estiran de borde a
-   borde, el header pasa a dos filas. Nada se oculta, solo cambia de
-   columnas fijas a franjas apiladas de ancho completo. ── */
 @media (max-width: 860px) {
   .sup-app {
     --sup-header-h: 92px;

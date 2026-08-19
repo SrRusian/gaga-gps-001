@@ -1,12 +1,3 @@
-/**
- * GeofenceEventRepository.ts
- *
- * Responsabilidad: Persistir eventos de entrada/salida de
- * geocercas para auditoría e historial - GeofenceAlertService ya
- * emite estas alertas en tiempo real vía Socket.io; este repositorio
- * las guarda además en PostgreSQL para poder consultarlas después
- * (reportes, cruce con el recorrido histórico de un vehículo).
- */
 import { query } from '../config/database';
 
 export interface GeofenceEventRow {
@@ -43,11 +34,6 @@ class GeofenceEventRepository {
     }
   }
 
-  /**
-   * Historial de eventos de un dispositivo en un rango de fechas -
-   * usado para cruzar contra el recorrido (route-zone-crossref) y
-   * para reportes de auditoría.
-   */
   async findByDeviceAndRange({
     deviceId,
     from,

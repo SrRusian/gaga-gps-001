@@ -29,8 +29,10 @@ function makeIncident(overrides: Partial<IncidentReportRow> = {}): IncidentRepor
   };
 }
 
+type BroadcastToProject = (projectId: number | null, event: string, payload: unknown) => void;
+
 describe('IncidentAlertService', () => {
-  let socketServer: { broadcastToProject: ReturnType<typeof vi.fn> };
+  let socketServer: { broadcastToProject: ReturnType<typeof vi.fn<BroadcastToProject>> };
   let incidentRepo: {
     create: ReturnType<typeof vi.fn>;
     resolve: ReturnType<typeof vi.fn>;
@@ -39,7 +41,7 @@ describe('IncidentAlertService', () => {
   let service: InstanceType<typeof IncidentAlertService>;
 
   beforeEach(() => {
-    socketServer = { broadcastToProject: vi.fn() };
+    socketServer = { broadcastToProject: vi.fn<BroadcastToProject>() };
     incidentRepo = { create: vi.fn(), resolve: vi.fn(), findAllOpen: vi.fn() };
     service = new IncidentAlertService({
       socketServer,

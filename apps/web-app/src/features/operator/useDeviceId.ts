@@ -9,12 +9,6 @@ interface DeviceLookupResponse {
   activeSession?: { userName: string; startedAt: string } | null;
 }
 
-/**
- * Identidad del vehículo - fija por configuración de kiosco, NO por
- * login. Se lee de ?device= en la URL (configurado una sola vez por
- * el técnico que instala la tableta) o, si falta, del valor guardado
- * en un arranque anterior.
- */
 function resolveDeviceId(): string | null {
   const params = new URLSearchParams(window.location.search);
   const fromUrl = params.get('device');
@@ -68,8 +62,6 @@ export function useDeviceId() {
     }
 
     localStorage.setItem('gaga_operator_device_id', trimmed);
-    // Refleja el valor en la URL para que, si esta pantalla se guarda
-    // como acceso directo/kiosco, quede ya configurado.
     const url = new URL(window.location.href);
     url.searchParams.set('device', trimmed);
     window.location.href = url.toString();

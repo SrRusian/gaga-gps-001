@@ -1,11 +1,3 @@
-/**
- * session.ts
- *
- * Sesión de autenticación - un solo login (apps/web-app,
- * features/auth) para los 3 roles, con navegación client-side vía
- * React Router (ver ProtectedRoute) en vez de recargar la página.
- */
-
 export const AUTH_TOKEN_KEY = 'gaga_auth_token';
 export const AUTH_USER_KEY = 'gaga_auth_user';
 
@@ -14,7 +6,6 @@ export interface AuthUser {
   email: string;
   name: string;
   role: string;
-  /** null = alcance global (solo admin); cualquier otro rol siempre trae un proyecto. */
   projectId: number | null;
 }
 
@@ -42,14 +33,6 @@ export function clearSession(): void {
   localStorage.removeItem(AUTH_USER_KEY);
 }
 
-/**
- * Recarga completa a la raíz (login) - reservado para el caso
- * excepcional de un 401 a media sesión (token vencido/revocado),
- * detectado fuera de un componente de React (dentro de
- * `createApiClient({ onUnauthorized })`, sin acceso a
- * `useNavigate()`). La navegación normal (login exitoso, logout,
- * ProtectedRoute) usa React Router y no recarga la página.
- */
 export function goToLogin(): void {
   window.location.href = '/';
 }

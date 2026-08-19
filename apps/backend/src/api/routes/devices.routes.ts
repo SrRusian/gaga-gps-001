@@ -1,14 +1,3 @@
-/**
- * devices.routes.ts
- *
- * CRUD completo de dispositivos (tabletas) en PostgreSQL.
- * Reemplaza la gestión de dispositivos del panel de Traccar.
- *
- * `/lookup/:uniqueId` es público (sin JWT) - lo consulta la
- * pantalla de configuración de ui-operator para validar el
- * dispositivo ANTES de pedir login, evitando que un ID inventado
- * o mal tecleado avance hasta el flujo de turno.
- */
 import type { RequestHandler } from 'express';
 import express from 'express';
 import DeviceRepository, { DeviceHasPositionsError } from '../../repositories/DeviceRepository';
@@ -69,9 +58,6 @@ export function buildDevicesRouter({
         ? await operatorSessionRepo.findActiveByDevice(req.params.uniqueId)
         : null;
 
-      // Visible incluso antes de iniciar sesión - así la pantalla de
-      // configuración de la tableta ya sabe "esto opera equipo X"
-      // desde el primer momento, no solo después de /start.
       const equipment = equipmentRepo
         ? await equipmentRepo.findByLinkedDevice(req.params.uniqueId)
         : null;
@@ -126,9 +112,6 @@ export function buildDevicesRouter({
     }
   });
 
-  // Crear dispositivos nuevos es exclusivo del Admin global - un
-  // Encargado de Proyecto puede editar/deshabilitar los de su
-  // proyecto, pero no da de alta equipo nuevo (ver plan de roles).
   router.post('/', authMiddleware, requireRole('admin'), async (req, res) => {
     try {
       const { uniqueId, name, type, projectId, attributes } = req.body;
@@ -143,12 +126,6 @@ export function buildDevicesRouter({
     }
   });
 
-  // Editar (nombre/tipo) es exclusivo de Admin/Encargado - un
-  // Supervisor de Proyecto solo observa la flota en vivo, nunca la
-  // modifica (antes esta ruta solo exigía sesión válida, sin
-  // restricción de rol - cualquier rol autenticado, incluido
-  // Supervisor u Operador, podía renombrar un dispositivo por API
-  // directa aunque ningún panel expusiera el botón).
   router.patch('/:id', authMiddleware, requireRole('admin', 'project_manager'), async (req, res) => {
     try {
       const existing = await deviceRepo.findById(Number(req.params.id));
@@ -158,7 +135,6 @@ export function buildDevicesRouter({
       }
 
       const { name, type, attributes } = req.body;
-      // Reasignar de proyecto es exclusivo del Admin global.
       const projectId = req.user!.role === 'admin' ? req.body.projectId : undefined;
       const device = await deviceRepo.update(Number(req.params.id), {
         name,
@@ -175,64 +151,30 @@ export function buildDevicesRouter({
 
   router.delete('/:id', authMiddleware, requireRole('admin'), async (req, res) => {
     try {
-      // Se resuelve el unique_id ANTES de borrar - es la clave que
-      // usa Redis (última posición conocida) y la que identifica al
-      // dispositivo en el estado en memoria de los servicios de
-      // alerta, distinta al id numérico de PostgreSQL usado en la URL.
       const device = await deviceRepo.findById(Number(req.params.id));
-
-      // Los demás dispositivos conocidos hacen falta para limpiar
-      // colisión/proximidad (alertas por PAR) - se toman ANTES de
-      // eliminar este, no después.
       const otherDeviceIds = device
         ? (await deviceRepo.findAll())
             .filter((d) => d.id !== device.id)
             .map((d) => d.unique_id)
         : [];
 
-      // Los incidentes abiertos de este dispositivo se resuelven
-      // ANTES de deviceRepo.delete() - resolve() hace un UPDATE que
-      // necesita que la fila de incident_reports todavía exista; si
-      // se llamara después de purgada, no limpiaría ni el estado en
-      // memoria ni avisaría en vivo a Supervisor (ver
-      // IncidentAlertService.resolveDeviceIncidents).
       if (device && incidentAlertService) {
         await incidentAlertService.resolveDeviceIncidents(device.unique_id);
       }
 
-      // ?force=true purga también el historial de posiciones -
-      // acción destructiva explícita, no es el comportamiento
-      // por defecto (se preserva el historial para auditoría).
       const force = req.query.force === 'true';
       await deviceRepo.delete(Number(req.params.id), { force });
 
-      // Un dispositivo eliminado de PostgreSQL no debe seguir
-      // "vivo" en el mapa - Redis solo cachea la última posición
-      // conocida y nunca expira sola, así que hay que limpiarla
-      // explícitamente para no dejar dispositivos fantasma que ya
-      // no existen en la base de datos.
       if (fleetState && device) {
         await fleetState.remove(device.unique_id);
       }
 
-      // Cualquier otra alerta activa (geocerca/señal perdida/colisión/
-      // proximidad) también debe resolverse en vivo - sin esto, el
-      // estado en memoria de cada servicio queda "fantasma" para
-      // siempre (solo se limpia normalmente cuando el dispositivo
-      // vuelve a reportar, y uno eliminado nunca lo hará), y un
-      // Supervisor ya conectado seguiría viendo una alerta activa de
-      // un vehículo que ya no existe.
       if (device) {
         geofenceAlertService?.clearDevice(device.unique_id, device.project_id);
         signalLostService?.clearDevice(device.unique_id);
         collisionRiskService?.clearDevice(device.unique_id, otherDeviceIds);
         vehicleProximityService?.clearDevice(device.unique_id, otherDeviceIds);
 
-        // La FK de linked_device_id ya limpia la columna en Postgres
-        // (ON DELETE SET NULL), pero el mapa en memoria de
-        // equipmentManager no se entera solo - si esta tableta estaba
-        // vinculada a un equipo, desvincularla ahí también y avisar
-        // en vivo (mismo criterio que el resto de esta limpieza).
         const unlinkedEquipment = equipmentManager?.clearDeviceLink(device.unique_id);
         if (unlinkedEquipment && socketServer && equipmentManager) {
           const scoped = Object.values(equipmentManager.equipment).filter(

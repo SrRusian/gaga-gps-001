@@ -1,8 +1,28 @@
-// Test de caracterización de geometry.ts - convertido a TypeScript
-// en la Fase 1 del plan de migración; este archivo verifica que el
-// comportamiento no cambió, solo el lenguaje.
 import { describe, expect, it } from 'vitest';
+import type { LineString, Polygon } from 'geojson';
+import type { CircleGeofence, Geofence, PolygonGeofence, PolylineGeofence } from '@gaga-gps/shared-types';
 import * as geometry from './geometry';
+
+const GEOFENCE_BASE = { id: 1, name: 'test', type: 'warning' as const, projectId: null };
+
+function circleGeofence(
+  center: { lat: number; lon: number },
+  radiusMeters: number,
+): CircleGeofence {
+  return { ...GEOFENCE_BASE, shapeType: 'circle', center, radiusMeters };
+}
+
+function polygonGeofence(geometry: Polygon): PolygonGeofence {
+  return { ...GEOFENCE_BASE, shapeType: 'polygon', geometry };
+}
+
+function polylineGeofence(
+  geometry: LineString,
+  corridorWidthMeters: number,
+  corridorDangerMarginMeters?: number,
+): PolylineGeofence {
+  return { ...GEOFENCE_BASE, shapeType: 'polyline', geometry, corridorWidthMeters, corridorDangerMarginMeters };
+}
 
 describe('haversineDistance', () => {
   it('devuelve 0 para el mismo punto', () => {
@@ -17,7 +37,7 @@ describe('haversineDistance', () => {
 });
 
 describe('isPointInPolygon', () => {
-  const square = {
+  const square: Polygon = {
     type: 'Polygon',
     coordinates: [
       [
@@ -40,7 +60,7 @@ describe('isPointInPolygon', () => {
 });
 
 describe('distancePointToLineMeters', () => {
-  const line = {
+  const line: LineString = {
     type: 'LineString',
     coordinates: [
       [-103.6, 19.3],
@@ -53,7 +73,6 @@ describe('distancePointToLineMeters', () => {
   });
 
   it('calcula la distancia perpendicular a un punto fuera de la línea', () => {
-    // ~0.01 grados de latitud de separación ≈ 1113m
     const d = geometry.distancePointToLineMeters(19.31, -103.55, line);
     expect(d).toBeGreaterThan(1000);
     expect(d).toBeLessThan(1200);
@@ -62,18 +81,13 @@ describe('distancePointToLineMeters', () => {
 
 describe('isInsideGeofence', () => {
   it('círculo - dentro del radio', () => {
-    const geofence = {
-      shapeType: 'circle',
-      center: { lat: 19.35, lon: -103.56 },
-      radiusMeters: 100,
-    };
+    const geofence = circleGeofence({ lat: 19.35, lon: -103.56 }, 100);
     expect(geometry.isInsideGeofence(19.35, -103.56, geofence)).toBe(true);
   });
 
   it('círculo - justo en el borde (<=) cuenta como dentro', () => {
-    // Construimos un punto a ~100m exactos hacia el norte
     const center = { lat: 19.35, lon: -103.56 };
-    const geofence = { shapeType: 'circle', center, radiusMeters: 100 };
+    const geofence = circleGeofence(center, 100);
     const oneDegLat = 111320;
     const dLat = 100 / oneDegLat;
     const edgePoint = { lat: center.lat + dLat, lon: center.lon };
@@ -88,66 +102,59 @@ describe('isInsideGeofence', () => {
   });
 
   it('círculo - fuera del radio', () => {
-    const geofence = {
-      shapeType: 'circle',
-      center: { lat: 19.35, lon: -103.56 },
-      radiusMeters: 10,
-    };
+    const geofence = circleGeofence({ lat: 19.35, lon: -103.56 }, 10);
     expect(geometry.isInsideGeofence(19.4, -103.56, geofence)).toBe(false);
   });
 
   it('default sin shapeType se trata como círculo', () => {
-    const geofence = { center: { lat: 19.35, lon: -103.56 }, radiusMeters: 100 };
+    const geofence = { center: { lat: 19.35, lon: -103.56 }, radiusMeters: 100 } as unknown as Geofence;
     expect(geometry.isInsideGeofence(19.35, -103.56, geofence)).toBe(true);
   });
 
   it('polígono delega en isPointInPolygon', () => {
-    const geofence = {
-      shapeType: 'polygon',
-      geometry: {
-        type: 'Polygon',
-        coordinates: [
-          [
-            [-103.6, 19.3],
-            [-103.5, 19.3],
-            [-103.5, 19.4],
-            [-103.6, 19.4],
-            [-103.6, 19.3],
-          ],
+    const geofence = polygonGeofence({
+      type: 'Polygon',
+      coordinates: [
+        [
+          [-103.6, 19.3],
+          [-103.5, 19.3],
+          [-103.5, 19.4],
+          [-103.6, 19.4],
+          [-103.6, 19.3],
         ],
-      },
-    };
+      ],
+    });
     expect(geometry.isInsideGeofence(19.35, -103.55, geofence)).toBe(true);
     expect(geometry.isInsideGeofence(19.35, -103.9, geofence)).toBe(false);
   });
 
   it('polilínea - dentro del ancho del corredor cuenta como dentro', () => {
-    const geofence = {
-      shapeType: 'polyline',
-      corridorWidthMeters: 50,
-      geometry: {
+    const geofence = polylineGeofence(
+      {
         type: 'LineString',
         coordinates: [
           [-103.6, 19.3],
           [-103.5, 19.3],
         ],
       },
-    };
+      50,
+    );
     expect(geometry.isInsideGeofence(19.3, -103.55, geofence)).toBe(true);
   });
 });
 
 describe('getCorridorSeverity', () => {
+  const corridorLine: LineString = {
+    type: 'LineString',
+    coordinates: [
+      [-103.6, 19.3],
+      [-103.5, 19.3],
+    ],
+  };
   const geofence = {
     corridorWidthMeters: 50,
     corridorDangerMarginMeters: 30,
-    geometry: {
-      type: 'LineString',
-      coordinates: [
-        [-103.6, 19.3],
-        [-103.5, 19.3],
-      ],
-    },
+    geometry: corridorLine,
   };
 
   it('null cuando está dentro del ancho del corredor', () => {
@@ -155,7 +162,6 @@ describe('getCorridorSeverity', () => {
   });
 
   it('"warning" entre el ancho del corredor y el margen de peligro', () => {
-    // ~65m del eje: dentro de corridorWidth(50) + dangerMargin(30) = 80
     const oneDegLat = 111320;
     const lat = 19.3 + 65 / oneDegLat;
     expect(geometry.getCorridorSeverity(lat, -103.55, geofence)).toBe('warning');

@@ -1,12 +1,3 @@
-/**
- * database.ts
- *
- * Responsabilidad: Exponer un pool de conexiones a PostgreSQL
- * (con PostGIS + TimescaleDB) y utilidades básicas de consulta.
- *
- * Reemplaza la base de datos de Traccar - toda la persistencia
- * de dispositivos, posiciones, geocercas y usuarios vive aquí.
- */
 import { Pool, type QueryResult, type QueryResultRow } from 'pg';
 
 export const pool = new Pool({
@@ -28,9 +19,6 @@ pool.on('error', (err: Error) => {
   console.error('PostgreSQL - error inesperado en cliente inactivo:', err.message);
 });
 
-/**
- * Ejecuta una consulta usando el pool compartido
- */
 export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params?: unknown[],
@@ -43,9 +31,6 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   }
 }
 
-/**
- * Verifica conectividad - usado por el health check
- */
 export async function checkConnection(): Promise<boolean> {
   try {
     await pool.query('SELECT 1');

@@ -15,6 +15,7 @@ function north(meters: number) {
 
 const corridor = {
   id: 1,
+  projectId: null,
   name: 'Ruta autorizada',
   type: 'warning' as const,
   shapeType: 'polyline' as const,
@@ -29,11 +30,11 @@ const corridor = {
 };
 
 describe('VehicleProximityService', () => {
-  let io: { emit: ReturnType<typeof vi.fn> };
+  let io: { emit: ReturnType<typeof vi.fn<(event: string, payload: unknown) => void>> };
   let service: InstanceType<typeof VehicleProximityService>;
 
   beforeEach(() => {
-    io = { emit: vi.fn() };
+    io = { emit: vi.fn<(event: string, payload: unknown) => void>() };
     service = new VehicleProximityService({ io });
   });
 
@@ -43,8 +44,6 @@ describe('VehicleProximityService', () => {
   });
 
   it('emite proximity:distance_update en tiempo real dentro del rango de visibilidad, sin alertar todavía', () => {
-    // 120m: por debajo de VISIBILITY_METERS (150) pero por encima de
-    // WARNING_METERS (80) - solo debe actualizar el HUD, sin alerta.
     service.evaluate(pos('CAMION-01', north(120)), { 'CAMION-02': pos('CAMION-02', LAT) }, []);
 
     expect(io.emit).toHaveBeenCalledWith(
@@ -89,7 +88,7 @@ describe('VehicleProximityService', () => {
     io.emit.mockClear();
 
     service.evaluate(pos('CAMION-01', north(55)), { 'CAMION-02': pos('CAMION-02', LAT) }, []);
-    expect(io.emit.mock.calls.some(([event]: [string]) => event === 'proximity:warning')).toBe(
+    expect(io.emit.mock.calls.some(([event]) => event === 'proximity:warning')).toBe(
       false,
     );
   });
@@ -111,7 +110,7 @@ describe('VehicleProximityService', () => {
 
   it('no evalúa nada si el vehículo propio está dentro de un corredor autorizado', () => {
     service.evaluate(
-      pos('CAMION-01', 19.3, -103.55), // dentro del corredor
+      pos('CAMION-01', 19.3, -103.55),
       { 'CAMION-02': pos('CAMION-02', 19.3, -103.55) },
       [corridor],
     );
@@ -122,7 +121,7 @@ describe('VehicleProximityService', () => {
     const farFromCorridor = 19.3 + 500 / METERS_PER_DEG_LAT;
     service.evaluate(
       pos('CAMION-01', farFromCorridor, -103.55),
-      { 'CAMION-02': pos('CAMION-02', 19.3, -103.55) }, // dentro del corredor
+      { 'CAMION-02': pos('CAMION-02', 19.3, -103.55) },
       [corridor],
     );
     expect(io.emit).not.toHaveBeenCalled();
@@ -137,7 +136,7 @@ describe('VehicleProximityService', () => {
 
     io.emit.mockClear();
     service.evaluate(pos('V9', north(28)), { V10: pos('V10', LAT) });
-    expect(io.emit.mock.calls.some(([event]: [string]) => event === 'proximity:critical')).toBe(
+    expect(io.emit.mock.calls.some(([event]) => event === 'proximity:critical')).toBe(
       false,
     );
   });

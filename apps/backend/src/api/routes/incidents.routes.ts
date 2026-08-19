@@ -1,12 +1,3 @@
-/**
- * incidents.routes.ts
- *
- * Alertas de incidente en tiempo real estilo Waze/Uber - cualquier
- * operador autenticado puede reportar; resolverlo es exclusivo de
- * roles de supervisión/administración. El aislamiento por proyecto
- * se resuelve del lado del servidor a partir del propio dispositivo
- * (nunca se confía en un projectId que mande el cliente).
- */
 import type { RequestHandler } from 'express';
 import express from 'express';
 import type DeviceRepository from '../../repositories/DeviceRepository';
@@ -58,8 +49,6 @@ export function buildIncidentsRouter({
         return res.status(400).json({ error: `category inválida - use: ${VALID_CATEGORIES.join(', ')}` });
       }
 
-      // El proyecto se resuelve del dispositivo, no del cliente - un
-      // reporte nunca puede terminar en un proyecto que no es el suyo.
       const device = await deviceRepo.findByUniqueId(deviceId);
       if (!device || device.project_id === null) {
         return res.status(400).json({ error: 'El dispositivo no está registrado en ningún proyecto' });

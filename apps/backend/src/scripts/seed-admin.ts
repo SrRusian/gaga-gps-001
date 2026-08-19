@@ -1,18 +1,3 @@
-/**
- * seed-admin.ts
- *
- * Script de utilidad para crear el primer usuario admin del
- * panel /administrator. Uso:
- *
- *   node dist/scripts/seed-admin.js <email> <password> [nombre]
- *
- * Ejemplo:
- *   node dist/scripts/seed-admin.js admin@gaga.com MiPassword123 "Admin GAGA"
- *
- * Requiere que PostgreSQL esté accesible con las variables de
- * entorno del .env de la raíz del repo (DB_HOST, DB_PORT, DB_NAME,
- * DB_USER, DB_PASSWORD).
- */
 import '../config/loadEnv';
 import bcrypt from 'bcryptjs';
 import { pool } from '../config/database';

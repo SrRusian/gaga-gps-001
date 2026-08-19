@@ -1,14 +1,3 @@
-/**
- * Contrato de eventos de Socket.io entre el backend y las 3 apps
- * web. Pensado para usarse con los generics propios de socket.io /
- * socket.io-client (`Server<ClientToServerEvents, ServerToClientEvents>`,
- * `Socket<ServerToClientEvents, ClientToServerEvents>`) - ver
- * packages/client/src/socket.ts.
- *
- * El backend nunca escucha eventos de los clientes (todas las
- * acciones van por REST) - ClientToServerEvents queda vacío a
- * propósito, no es un olvido.
- */
 import type {
   AlertEventEntry,
   CollisionClearPayload,
@@ -96,7 +85,6 @@ export interface ServerToClientEvents {
   'incident:nearby': (payload: IncidentNearbyPayload) => void;
   'supervisor:incident': (payload: SupervisorIncidentPayload) => void;
 
-  /** Alertas "normales" (no incidente) ya abiertas al momento de conectar - ver AlertEventRepository. */
   'alerts:snapshot': (entries: AlertEventEntry[]) => void;
 }
 

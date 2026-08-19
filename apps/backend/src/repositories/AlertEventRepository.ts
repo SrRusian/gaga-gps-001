@@ -1,14 +1,3 @@
-/**
- * AlertEventRepository.ts
- *
- * Responsabilidad: historial unificado de las 6 familias de alerta
- * (geocerca, señal perdida, colisión, proximidad, parada preventiva,
- * incidente) - una sola tabla (`alert_events`) alimenta tanto
- * "Activas" (resolved_at IS NULL) como "Historial" con filtros en el
- * panel de Supervisor. No reemplaza `geofence_events`/`incident_reports`
- * (siguen siendo la fuente operativa de cada uno); esta tabla es
- * puramente el log para la UI.
- */
 import { query } from '../config/database';
 
 export type AlertType =
@@ -35,12 +24,6 @@ export interface AlertEventRow {
 }
 
 class AlertEventRepository {
-  /**
-   * Registra una alerta nueva, o si ya hay una fila abierta para el
-   * mismo (alertType, deviceId, deviceId2), la actualiza en vez de
-   * duplicarla - así una escalada (ej. señal perdida nivel1→nivel2)
-   * no deja un "fantasma" abierto para siempre cuando se resuelva.
-   */
   async recordOrEscalate({
     alertType,
     severity,
@@ -85,7 +68,6 @@ class AlertEventRepository {
     }
   }
 
-  /** Cierra la fila abierta que coincida - no hace nada si no hay ninguna. */
   async resolveOpen({
     alertType,
     deviceId = null,
@@ -110,12 +92,6 @@ class AlertEventRepository {
     }
   }
 
-  /**
-   * Alertas activas visibles para `projectId` - `null` (admin) trae
-   * todo. Incluye las de `project_id IS NULL` (parada preventiva,
-   * evento global) para cualquier proyecto, igual que ya hace
-   * `broadcastToProject` en tiempo real.
-   */
   async findActive(projectId: number | null): Promise<AlertEventRow[]> {
     try {
       const { rows } = await query<AlertEventRow>(
@@ -193,15 +169,6 @@ class AlertEventRepository {
     }
   }
 
-  /**
-   * Registro dedicado para incidentes - a diferencia de las demás
-   * familias (donde `deviceId` sí identifica de forma única la
-   * alerta abierta), un mismo dispositivo puede tener varios
-   * incidentes distintos abiertos a la vez, así que no se puede usar
-   * `recordOrEscalate` (matchea por deviceId, fusionaría dos
-   * incidentes distintos del mismo reportero en una sola fila).
-   * Siempre inserta - cada incidente ya es único por su propio id.
-   */
   async recordIncident({
     projectId,
     deviceId,

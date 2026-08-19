@@ -1,11 +1,3 @@
-/**
- * operator-sessions.routes.ts
- *
- * Registro de turnos operador-vehículo. `/active` es pública (la
- * consulta la propia UI de operador antes de iniciar sesión, para
- * saber si ya hay alguien en turno en ese dispositivo) - el resto
- * requiere JWT, igual que el panel admin.
- */
 import type { RequestHandler } from 'express';
 import express from 'express';
 import OperatorSessionRepository, {
@@ -55,12 +47,6 @@ export function buildOperatorSessionsRouter({
 }: OperatorSessionsRouterDeps) {
   const router = express.Router();
 
-  // El estado real de un equipo con tableta vinculada se deriva 100%
-  // de si hay turno activo en esa tableta ahora mismo - una sola
-  // fuente de verdad (ver CLAUDE.md, decisión confirmada con el
-  // usuario). `PATCH /api/equipment/:id/status` sigue existiendo para
-  // equipo SIN tableta vinculada (la UI de Admin ya no lo ofrece
-  // cuando sí la tiene).
   async function setEquipmentStatusForDevice(
     deviceId: string,
     status: 'active_pause' | 'inactive',
@@ -94,9 +80,6 @@ export function buildOperatorSessionsRouter({
       const { deviceId } = req.body;
       if (!deviceId) return res.status(400).json({ error: 'deviceId es requerido' });
 
-      // Resuelve el turno programado (shift) que aplica ahora mismo
-      // para el proyecto de este dispositivo - el operador no elige
-      // nada, es automático por horario (ver ShiftResolverService).
       const device = await deviceRepo.findByUniqueId(deviceId);
       const shiftId =
         device?.project_id != null ? await shiftResolver.resolveForProject(device.project_id) : null;
@@ -131,10 +114,6 @@ export function buildOperatorSessionsRouter({
     }
   });
 
-  // Heartbeat periódico desde la UI de operador - mientras siga
-  // llegando, el turno se considera activo indefinidamente; si deja
-  // de llegar por más de N días, se cierra automáticamente (ver
-  // OperatorSessionRepository.closeStaleSessions, llamado desde app.js).
   router.post('/:id/heartbeat', authMiddleware, async (req, res) => {
     try {
       const session = await operatorSessionRepo.touch(Number(req.params.id));
@@ -145,9 +124,7 @@ export function buildOperatorSessionsRouter({
       res.status(500).json({ error: 'Error registrando actividad' });
     }
   });
-
-  // Reporte de horas trabajadas - por operador y/o por vehículo,
-  // solo para supervisión/administración.
+  
   router.get(
     '/report',
     authMiddleware,

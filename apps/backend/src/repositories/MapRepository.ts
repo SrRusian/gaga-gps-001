@@ -1,10 +1,3 @@
-/**
- * MapRepository.ts
- *
- * Responsabilidad: CRUD de mapas satelitales/drone importados
- * (tabla `maps`, ver db/migrations/007_maps.sql) - metadata del
- * pipeline TIF/TFW → MBTiles, no el archivo en sí.
- */
 import { query } from '../config/database';
 
 export type MapStatus = 'processing' | 'ready' | 'failed';
@@ -37,7 +30,6 @@ export interface MapRow {
 }
 
 class MapRepository {
-  /** `projectId` opcional - sin filtro (Admin) trae todo, igual que geocercas/equipo. */
   async findAll(projectId?: number | null): Promise<MapRow[]> {
     try {
       const { rows } =
@@ -64,11 +56,6 @@ class MapRepository {
     }
   }
 
-  /**
-   * Crea la fila antes de conocer los nombres finales de archivo -
-   * el id (necesario para la carpeta maps/sources/<id>/ donde se
-   * guardan) solo existe después de este INSERT.
-   */
   async create({
     name,
     projectId,
@@ -123,11 +110,6 @@ class MapRepository {
     }
   }
 
-  /**
-   * Actualiza el resultado del pipeline - a 'ready' con
-   * bounds/mbtilesFilename/sizeMb/minZoom/maxZoom, o a 'failed' con
-   * errorMessage.
-   */
   async updateResult(
     id: number,
     {
@@ -185,12 +167,6 @@ class MapRepository {
     }
   }
 
-  /**
-   * Activa o desactiva un mapa como capa visible - varios mapas
-   * pueden estar activos a la vez (se apilan en el frontend, ver
-   * findActiveReady). Ya no es exclusivo (antes solo uno podía estar
-   * activo, servido en un archivo fijo).
-   */
   async setActive(id: number, active: boolean): Promise<MapRow | null> {
     try {
       const { rows } = await query<MapRow>(
@@ -204,11 +180,6 @@ class MapRepository {
     }
   }
 
-  /**
-   * Mapas activos y listos, del más viejo al más nuevo - el
-   * frontend agrega las capas en este orden, así el mapa creado más
-   * recientemente termina agregado al final = visualmente arriba.
-   */
   async findActiveReady(projectId?: number | null): Promise<MapRow[]> {
     try {
       const { rows } =

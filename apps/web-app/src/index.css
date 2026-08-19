@@ -1,8 +1,3 @@
-/* Reset global mínimo - cada feature (features/*​/*.css) define su
-   propio contenedor raíz con su propio fondo/layout, en vez de
-   depender de reglas compartidas en #root o body (evita que el CSS
-   de un rol pise el de otro si ambos llegaran a estar cargados a la
-   vez en el documento). */
 * {
   margin: 0;
   padding: 0;

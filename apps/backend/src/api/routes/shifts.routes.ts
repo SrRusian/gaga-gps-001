@@ -1,13 +1,3 @@
-/**
- * shifts.routes.ts
- *
- * CRUD de turnos programados (horario recurrente diario por
- * proyecto) - Admin y Encargado de Proyecto los crean/editan y
- * asignan un Supervisor de Proyecto a cada uno. `/mine` es lo que
- * consulta el panel de un Supervisor de Proyecto para saber qué
- * turno le tocó y qué vehículos/operadores están activos en él
- * ahora mismo - no elige nada, solo se le informa.
- */
 import type { RequestHandler } from 'express';
 import express from 'express';
 import type OperatorSessionRepository from '../../repositories/OperatorSessionRepository';
@@ -29,9 +19,6 @@ export function buildShiftsRouter({
 
   const canManage = requireRole('admin', 'project_manager');
 
-  // Turno(s) asignado(s) al Supervisor de Proyecto que hace la
-  // consulta, con el roster de operadores/vehículos activos ahora
-  // mismo bajo cada uno.
   router.get('/mine', requireRole('project_supervisor'), async (req, res) => {
     try {
       const shifts = await shiftRepo.findBySupervisor(req.user!.id);

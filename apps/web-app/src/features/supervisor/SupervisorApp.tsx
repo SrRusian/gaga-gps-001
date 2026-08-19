@@ -43,8 +43,6 @@ function formatDuration(from: string, to: string): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-// ProtectedRoute (features/auth) ya garantizó una sesión válida con
-// rol "project_supervisor" antes de montar este componente.
 export default function SupervisorApp() {
   const navigate = useNavigate();
   const user = getStoredUser()!;
@@ -67,11 +65,6 @@ export default function SupervisorApp() {
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const mapRef = useRef<MapViewHandle>(null);
-  // Geocercas/Equipo estático/Mapas - acceso completo del Supervisor
-  // de Proyecto dentro de su propio proyecto (GeoManagementPanel).
-  // `rawMap` es la instancia real de maplibregl que MapView entrega
-  // una sola vez lista (`onMapReady`) - MapView sigue sin saber nada
-  // de dibujo/CRUD, solo la comparte con su hermano.
   const [rawMap, setRawMap] = useState<maplibregl.Map | null>(null);
   const geoManagementRef = useRef<GeoManagementPanelHandle>(null);
 
@@ -85,16 +78,6 @@ export default function SupervisorApp() {
     searchHistory(historyFilters);
   }
 
-  // Un Supervisor de Proyecto solo ve el mapa/lista de vehículos de
-  // su propio turno asignado por el Encargado - no todos los turnos
-  // del proyecto (eso es lo que sí ve el Encargado, sin este filtro).
-  // `null` para el Supervisor "clásico" - ahí no se filtra nada,
-  // comportamiento de siempre. Las alertas activas (`alerts`) NO se
-  // filtran aquí a propósito: los servicios que las generan
-  // (colisión/proximidad/geocercas) todavía no distinguen ni
-  // proyecto ni turno internamente (gap ya documentado en README/
-  // CLAUDE.md desde la Fase A) - filtrarlas solo en este componente
-  // daría una falsa sensación de aislamiento que no existe de verdad.
   const myShiftDeviceIds = useMyShift(isProjectSupervisor);
   const fleet = useMemo(() => {
     if (!myShiftDeviceIds) return fullFleet;
@@ -157,7 +140,7 @@ export default function SupervisorApp() {
         userName={user.name}
         userRoleLabel={roleLabel(user.role)}
         onLogout={logout}
-      />{/* Sin children a propósito - Supervisor es una sola vista, sin secciones a las que navegar (a diferencia del nav Dashboard/Reportes/Sistema de Admin/Encargado). */}
+      />{}
 
       <main className="sup-float-main">
         <div className="sup-map-bg">
@@ -192,15 +175,7 @@ export default function SupervisorApp() {
             </div>
           </div>
 
-          {/* Acceso completo dentro de su propio proyecto - un
-              Supervisor de Proyecto nunca crea/edita/elimina
-              dispositivos ni usuarios, nunca ve historial de
-              recorridos ni Reportes/Sistema (esas opciones
-              simplemente no existen en este panel), pero sí
-              administra Geocercas/Equipo estático/Mapas por completo.
-              Supervisor "clásico" (sin proyecto) no ve este menú -
-              mismo criterio de visibilidad que el resto de este
-              panel. */}
+          {}
           {isProjectSupervisor && (
             <div className="sup-menu-panel sup-glass">
               <button className="sup-menu-btn" onClick={() => geoManagementRef.current?.open('geofences')}>

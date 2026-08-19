@@ -1,37 +1,3 @@
-/**
- * PositionFilterService.ts
- *
- * Responsabilidad: Descartar posiciones físicamente imposibles
- * ("teletransportes") causadas por pérdida momentánea de la
- * corrección RTK/NTRIP - el receptor pierde la corrección ~1s,
- * reporta un punto a decenas de metros de la ruta real, y el
- * siguiente fix vuelve a la posición correcta.
- *
- * No hay dato de calidad de fix (RTK Fixed/Float, HDOP) disponible
- * en el protocolo OsmAnd que usan las tabletas - el filtro es
- * puramente cinemático: compara cada posición nueva contra la
- * última posición ACEPTADA del mismo dispositivo (distancia
- * Haversine / tiempo transcurrido = velocidad implícita).
- *
- * El umbral es adaptativo por dispositivo (no un límite fijo de
- * "tipo de vehículo"): se basa en la velocidad reciente del propio
- * dispositivo, con piso y techo de seguridad. Así, maquinaria
- * pesada lenta rechaza saltos con mucho margen, y un vehículo
- * ligero que ya circula rápido conserva margen para acelerar sin
- * disparar falsos rechazos.
- *
- * Estado en memoria por dispositivo - mismo patrón que
- * CollisionRiskService/SignalLostService (sin Redis).
- *
- * Misma lógica, copia independiente en `packages/map-core` (usada
- * por `useDeviceGeolocation` en el navegador para filtrar el sensor
- * local del operador) - no comparten un paquete en común porque
- * `map-core` no lo puede consumir el backend (deps de React/MapLibre)
- * y una clase con estado no puede vivir en `shared-types` (paquete
- * consumido en tiempo de ejecución real por Node al importar valores,
- * no solo tipos - ver intento revertido). Si se ajusta el criterio
- * aquí, replicar el cambio en `packages/map-core/src/positionFilter.ts`.
- */
 import { haversineDistance } from '../../utils/geometry';
 
 export interface PositionFilterOptions {
@@ -92,12 +58,6 @@ class PositionFilterService {
     this.deviceState = {};
   }
 
-  /**
-   * Evalúa una posición entrante contra el historial del dispositivo.
-   * No lanza excepciones - en caso de duda, deja pasar (fail-open),
-   * ya que congelar a un vehículo fuera del mapa es peor que un
-   * salto ocasional visible.
-   */
   evaluate(position: FilterablePosition): FilterResult {
     const { deviceId, latitude, longitude } = position;
     const fixTime =
@@ -105,8 +65,6 @@ class PositionFilterService {
 
     const state = this.deviceState[deviceId];
 
-    // Primer fix de este dispositivo (nuevo, o backend recién reiniciado)
-    // - nada contra qué comparar, se acepta y se inicializa el estado.
     if (!state || !state.lastAccepted) {
       this._accept(deviceId, { lat: latitude, lon: longitude, fixTime }, null);
       return this._result(true, null, null, null, null, false);
@@ -114,8 +72,6 @@ class PositionFilterService {
 
     const dtSeconds = (fixTime.getTime() - state.lastAccepted.fixTime.getTime()) / 1000;
 
-    // Fix duplicado/desordenado - no es un "salto", simplemente se
-    // descarta sin afectar el contador de rechazos consecutivos.
     if (dtSeconds <= 0) {
       return this._result(false, 'out_of_order', null, null, null, false);
     }
@@ -127,8 +83,6 @@ class PositionFilterService {
       longitude,
     );
 
-    // Ruido GPS típico con el vehículo detenido - se acepta directo,
-    // evita falsos positivos por dt muy pequeño.
     if (distanceMeters < this.jitterRadiusMeters) {
       this._accept(
         deviceId,
@@ -146,13 +100,9 @@ class PositionFilterService {
       return this._result(true, null, impliedSpeedKmh, allowedMaxKmh, distanceMeters, false);
     }
 
-    // Salto por encima de lo plausible - candidato a rechazo
     state.consecutiveRejects += 1;
 
     if (state.consecutiveRejects >= this.maxConsecutiveRejects) {
-      // Fail-open: tras varios rechazos seguidos, se asume que el
-      // dispositivo de verdad se movió (o volvió tras perder señal)
-      // y se resincroniza - evita dejarlo "congelado" en el mapa.
       this._accept(
         deviceId,
         { lat: latitude, lon: longitude, fixTime },
@@ -197,8 +147,6 @@ class PositionFilterService {
     state.consecutiveRejects = 0;
 
     if (resync) {
-      // El historial de velocidades previo ya no es una base
-      // confiable tras varios rechazos seguidos - se reinicia.
       state.recentSpeedsKmh = speedKmh != null ? [speedKmh] : [];
     } else if (speedKmh != null) {
       state.recentSpeedsKmh.push(speedKmh);

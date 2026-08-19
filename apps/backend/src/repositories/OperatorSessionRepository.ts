@@ -1,11 +1,3 @@
-/**
- * OperatorSessionRepository.ts
- *
- * Responsabilidad: Registrar turnos operador-vehículo - quién
- * operó qué dispositivo y durante cuánto tiempo, independiente
- * del historial de posiciones GPS (positions) y del login del
- * panel admin. Ver db/migrations/004_operator_sessions.sql.
- */
 import { pool, query } from '../config/database';
 
 export interface OperatorSessionRow {
@@ -27,12 +19,6 @@ export interface OperatorSessionReportRow extends OperatorSessionWithUser {
   duration_seconds: number;
 }
 
-/**
- * Error específico cuando se intenta iniciar un turno en un
- * dispositivo que todavía no ha reportado ninguna posición GPS
- * (no auto-registrado aún en `devices`) - permite a la ruta
- * responder con un mensaje claro en vez de un 500 genérico.
- */
 export class DeviceNotRegisteredError extends Error {
   code = 'DEVICE_NOT_REGISTERED';
 
@@ -44,12 +30,6 @@ export class DeviceNotRegisteredError extends Error {
 }
 
 class OperatorSessionRepository {
-  /**
-   * Inicia un turno. Si el dispositivo ya tenía un turno abierto
-   * (p. ej. el operador anterior olvidó cerrar sesión), se cierra
-   * automáticamente antes de abrir el nuevo - evita turnos
-   * superpuestos que ensuciarían los reportes de horas trabajadas.
-   */
   async start({
     userId,
     deviceId,
@@ -75,7 +55,6 @@ class OperatorSessionRepository {
       return rows[0];
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
-      // 23503 = foreign_key_violation - el device_id aún no existe en `devices`
       if ((err as { code?: string }).code === '23503') {
         throw new DeviceNotRegisteredError(deviceId);
       }
@@ -86,9 +65,6 @@ class OperatorSessionRepository {
     }
   }
 
-  /**
-   * Cierra un turno explícitamente (botón "Finalizar turno").
-   */
   async end(sessionId: number): Promise<OperatorSessionRow | null> {
     try {
       const { rows } = await query<OperatorSessionRow>(
@@ -103,13 +79,6 @@ class OperatorSessionRepository {
     }
   }
 
-  /**
-   * Marca actividad reciente en un turno (heartbeat periódico desde
-   * la UI de operador mientras la pestaña sigue abierta) - es lo
-   * que permite que el turno persista indefinidamente durante uso
-   * normal, mientras closeStaleSessions() descarta los realmente
-   * abandonados.
-   */
   async touch(sessionId: number): Promise<OperatorSessionRow | null> {
     try {
       const { rows } = await query<OperatorSessionRow>(
@@ -124,13 +93,6 @@ class OperatorSessionRepository {
     }
   }
 
-  /**
-   * Cierra automáticamente turnos sin actividad (sin heartbeat) por
-   * más de `maxIdleDays` - protege contra tabletas perdidas/app
-   * cerrada sin cerrar turno. Se cierra con la marca de tiempo de la
-   * última actividad real (last_seen_at), no "ahora", para que el
-   * reporte de horas refleje cuándo realmente se dejó de usar.
-   */
   async closeStaleSessions(
     maxIdleDays: number,
   ): Promise<Pick<OperatorSessionRow, 'id' | 'device_id' | 'user_id'>[]> {
@@ -153,10 +115,6 @@ class OperatorSessionRepository {
     }
   }
 
-  /**
-   * Turno actualmente abierto de un dispositivo (si lo hay) - usado
-   * al cargar la UI de operador para saber si ya hay alguien en turno.
-   */
   async findActiveByDevice(deviceId: string): Promise<OperatorSessionWithUser | null> {
     try {
       const { rows } = await query<OperatorSessionWithUser>(
@@ -173,10 +131,6 @@ class OperatorSessionRepository {
     }
   }
 
-  /**
-   * Turnos de operador actualmente abiertos bajo un turno programado
-   * (shift) - el roster que ve un Supervisor de Proyecto en su panel.
-   */
   async findActiveByShift(shiftId: number): Promise<OperatorSessionWithUser[]> {
     try {
       const { rows } = await query<OperatorSessionWithUser>(
@@ -193,11 +147,6 @@ class OperatorSessionRepository {
     }
   }
 
-  /**
-   * Reporte de turnos - filtrable por operador y/o dispositivo y
-   * rango de fechas, con duración calculada en segundos. Base para
-   * "horas trabajadas por persona" y "quién operó este vehículo".
-   */
   async findReport({
     userId,
     deviceId,

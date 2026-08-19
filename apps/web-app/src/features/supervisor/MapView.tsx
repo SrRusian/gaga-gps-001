@@ -23,19 +23,10 @@ export interface MapViewProps {
   fleet: Record<string, FleetVehicle>;
   geofences: Geofence[];
   incidents?: IncidentMarkerData[];
-  /** Equipo estático del proyecto (radio de giro/seguridad) - dispositivos vinculados no se dibujan como vehículo, ver abajo. */
   equipment?: EquipmentMarkerData[];
   activeMaps: ActiveMap[];
   mapMode: MapMode;
   onVehicleClick: (deviceId: string) => void;
-  /**
-   * Entrega la instancia real de `maplibregl.Map` una sola vez, apenas
-   * el mapa termina de cargar - permite que un componente hermano
-   * (`GeoManagementPanel`, geocercas/equipo/mapas) monte su propio
-   * `MapboxDraw`/manejo de clics contra el mismo mapa sin que este
-   * archivo tenga que saber nada de dibujo o de CRUD - sigue siendo
-   * puramente un renderizador en vivo.
-   */
   onMapReady?: (map: maplibregl.Map) => void;
 }
 
@@ -73,14 +64,9 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     [map],
   );
 
-  // Marcadores de vehículo - imperativos (maplibregl.Marker no es JSX).
   useEffect(() => {
     if (!map || !loaded) return;
 
-    // Un dispositivo vinculado a equipo estático ya se representa con
-    // los dos anillos de useEquipmentLayer, en su posición registrada
-    // - no se dibuja también como "vehículo" encima del mismo punto
-    // (mismo criterio ya aplicado en Operador).
     const linkedDeviceIds = new Set(
       equipment.filter((eq) => eq.linkedDeviceId).map((eq) => eq.linkedDeviceId as string),
     );

@@ -1,11 +1,3 @@
-/**
- * alerts.routes.ts
- *
- * Historial unificado de alertas (ver alert_events / AlertEventRepository)
- * - "Activas" ya llega por socket (`alerts:snapshot` + eventos `supervisor:*`
- * en vivo); esto es específicamente la pestaña "Historial" con filtros
- * del panel de Supervisor.
- */
 import type { RequestHandler } from 'express';
 import express from 'express';
 import type AlertEventRepository from '../../repositories/AlertEventRepository';
@@ -29,17 +21,6 @@ export interface AlertsRouterDeps {
   shiftResolver: ShiftResolverService;
 }
 
-/**
- * Async (a diferencia del antiguo `parseFilters` síncrono) porque
- * acotar `from` al turno de un Supervisor de Proyecto requiere
- * resolverlo primero contra la base (`shiftRepo.findBySupervisor`).
- * Solo cambia `from`, solo para `project_supervisor`, y solo hacia
- * arriba - nunca afloja un `from` que el propio caller ya mandó más
- * estricto (más reciente) que el inicio de su turno. Las alertas
- * ACTIVAS (vista "Activas", vía socket) no pasan por aquí en absoluto
- * y no se acotan por turno a propósito - una alerta abierta desde un
- * turno anterior debe seguir viéndose hasta que se resuelva.
- */
 async function computeFilters(req: express.Request, shiftResolver: ShiftResolverService) {
   const { type, severity, deviceId, from, to, limit, offset } = req.query;
 
@@ -128,7 +109,6 @@ export function buildAlertsRouter({ alertEventRepo, requireRole, shiftResolver }
   return router;
 }
 
-/** Mismo criterio de escape que reports.routes.ts (evita inyección de fórmulas y rompe columnas). */
 function csvEscape(value: unknown): string {
   let str = String(value ?? '');
   if (/^[=+\-@]/.test(str)) {

@@ -18,9 +18,6 @@ import { useOperatorAuth } from './useOperatorAuth';
 import { useOperatorSocket } from './useOperatorSocket';
 
 const AUTO_FOLLOW_STORAGE_KEY = 'gaga_operator_auto_follow';
-// Cuánto se mantiene el mapa encuadrando la amenaza antes de retomar
-// el auto-seguimiento normal, aunque la alerta siga activa - evita
-// quedar encajado en el encuadre amplio indefinidamente.
 const THREAT_FRAME_HOLD_MS = 8000;
 
 function useAutoFollow(): [boolean, (next: boolean) => void] {
@@ -38,13 +35,8 @@ function useAutoFollow(): [boolean, (next: boolean) => void] {
   return [autoFollow, setAutoFollow];
 }
 
-// ProtectedRoute (features/auth) ya garantizó una sesión válida con
-// rol "operator" antes de montar este componente.
 export default function OperatorApp() {
   const navigate = useNavigate();
-  // Identidad de la cuenta (login único) - independiente de si ya
-  // hay turno activo (`session`, más abajo) o no. Se muestra siempre;
-  // "session" en cambio solo existe una vez que el turno arrancó.
   const user = getStoredUser()!;
   const { deviceId, saveDeviceSetup, error: deviceError, verifying } = useDeviceId();
   const { session, operatingEquipment, needsShiftStart, shiftStartError, checking, startShift, endShift } =
@@ -72,16 +64,10 @@ export default function OperatorApp() {
   const { report: reportIncident, submitting: reportingIncident, error: reportIncidentError } =
     useIncidentReporter(deviceId);
 
-  // GPS del navegador - Función Telemetría Local, sobrevive sin conexión al servidor.
   const { position: localGeo, error: geoError, supported: geoSupported } = useDeviceGeolocation();
   const batteryLevel = useBatteryLevel();
-  // Función Telemetría Extendida - captura de sensores del navegador
   useDeviceSensorReporter(deviceId);
 
-  // Fusión: mi propia posición viene del sensor local si está
-  // disponible (siempre, online u offline); el resto de la flota
-  // sigue viniendo del servidor. Sin esto, "yo" se congela al perder
-  // el socket igual que cualquier otro vehículo.
   const displayFleet = useMemo(() => {
     if (!deviceId || !localGeo) return fleet;
     const base = fleet[deviceId];
@@ -102,14 +88,6 @@ export default function OperatorApp() {
 
   const myDisplay = deviceId ? (displayFleet[deviceId] ?? null) : null;
 
-  // Vecino más cercano - recalculado en el cliente con la posición
-  // LOCAL propia (myDisplay, que ya prioriza el sensor del navegador
-  // sobre el dato relevado por el servidor) contra la última posición
-  // conocida de cada vehículo, esté online u offline. Es puramente
-  // informativo para el HUD; la alerta de proximidad/colisión sigue
-  // siendo la que dispara el servidor (`threat`, sin tocar) - no se
-  // duplica lógica de seguridad, solo se adelanta el número que ve
-  // el operador sin esperar al siguiente tick del servidor.
   const liveNearest = useMemo(() => {
     if (!myDisplay) return null;
     let best: { deviceId: string; distanceM: number; stale: boolean } | null = null;
@@ -129,14 +107,8 @@ export default function OperatorApp() {
     return best;
   }, [myDisplay, displayFleet, deviceId]);
 
-  // Se abre sola si todavía no hay vehículo asignado; el operador
-  // puede cerrarla para ver el mapa (vacío) y volver a abrirla
-  // después con "Registrar vehículo" en la barra superior.
   const [showDeviceSetup, setShowDeviceSetup] = useState(!deviceId);
 
-  // Primera posición: centrado con zoom de "llegada" (flyTo). De ahí
-  // en más, mientras el auto-seguimiento esté activo, se sigue con
-  // `follow` (sin forzar zoom) - así no pelea con un zoom manual.
   useEffect(() => {
     if (!myDisplay) return;
     if (!hasCenteredRef.current) {
@@ -149,9 +121,6 @@ export default function OperatorApp() {
     }
   }, [myDisplay, autoFollow, framingThreat]);
 
-  // Encuadra ambos vehículos cuando aparece una amenaza crítica
-  // (colisión/proximidad fuera de ruta) - suspende el auto-seguimiento
-  // normal mientras dura, para no pelear con el encuadre amplio.
   useEffect(() => {
     if (!threat || !myDisplay) {
       setFramingThreat(false);
@@ -167,7 +136,7 @@ export default function OperatorApp() {
     );
     const timeout = setTimeout(() => setFramingThreat(false), THREAT_FRAME_HOLD_MS);
     return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- se dispara una sola vez por amenaza nueva (identidad de `threat`), no en cada tick de myDisplay/fleet
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threat]);
 
   function centerOnMyPosition() {
@@ -181,9 +150,6 @@ export default function OperatorApp() {
   }
 
   function logout() {
-    // Cierra la sesión de la cuenta (login único) - distinto de
-    // "Finalizar turno", que solo cierra el turno del vehículo y
-    // mantiene la sesión iniciada.
     clearSession();
     navigate('/', { replace: true });
   }
@@ -253,9 +219,6 @@ export default function OperatorApp() {
               myDeviceId={deviceId}
               threatDeviceId={
                 threat?.deviceId ??
-                // Mismo umbral que VehicleProximityService.WARNING_METERS (backend) -
-                // resalta al más cercano solo cuando ya está en rango de alerta,
-                // no simplemente "visible" en el HUD.
                 (nearestVehicle && nearestVehicle.distance <= 80 ? nearestVehicle.deviceId : null)
               }
               highlightedGeofenceId={activeGeofenceId}
@@ -266,7 +229,7 @@ export default function OperatorApp() {
               <MapModeSelector mode={mapMode} onChange={setMapMode} />
             </div>
 
-            {/* Sin vehículo registrado no hay "mi posición" que centrar/seguir. */}
+            {}
             {deviceId && (
               <div className="op-floating-actions">
                 <button
@@ -309,8 +272,7 @@ export default function OperatorApp() {
             )}
           </div>
 
-          {/* Sin vehículo registrado no hay flota/alertas/geocercas que
-              mostrar en el HUD - solo el mapa base. */}
+          {}
           {deviceId && (
             <footer id="op-info-bar">
               <div className="op-info-item">
@@ -354,9 +316,7 @@ export default function OperatorApp() {
         </>
       )}
 
-      {/* 'info' (zona de estacionamiento) no usa el borde pulsante de
-          pantalla completa - ese lenguaje visual se reserva para
-          warning/danger. El banner de mensaje sí aplica a las 3. */}
+      {}
       <div
         id="op-alert-overlay"
         className={alert.severity === 'info' ? '' : (alert.severity ?? '')}

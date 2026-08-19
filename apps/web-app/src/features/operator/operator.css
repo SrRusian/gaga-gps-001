@@ -20,9 +20,6 @@
   font-size: 14px;
 }
 
-/* ── Encabezado - dos filas que se acomodan solas, nunca se recortan
-   ni se sobreponen porque reservan su propio espacio real (flexbox),
-   no coordenadas fijas adivinadas. ── */
 .op-header {
   flex-shrink: 0;
   background: var(--op-surface);
@@ -60,9 +57,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Mismo color que el núcleo de equipo estático en el mapa
-   (EQUIPMENT_CORE_COLOR) - identidad visual consistente entre "esto
-   es equipo, no vehículo" en el HUD y en el propio marcador. */
 #op-equipment-badge {
   font-size: 11px;
   font-weight: 600;
@@ -127,10 +121,6 @@
   color: var(--op-danger);
 }
 
-/* ── Área del mapa - único hijo flexible; todo lo flotante (selector
-   de mapa, botones de centrado/seguimiento) vive DENTRO de esta
-   misma caja, así nunca puede quedar por encima de la barra inferior
-   sin importar cuántas filas ocupe esa barra. ── */
 .op-map-area {
   position: relative;
   flex: 1 1 auto;
@@ -204,10 +194,6 @@
   color: var(--op-warning);
 }
 
-/* ── Barra inferior de información - grid que se reacomoda solo en
-   pantallas angostas (7") en vez de comprimir texto hasta que se
-   traslape. Altura mínima, no fija, para que crecer a 2 filas nunca
-   recorte contenido. ── */
 #op-info-bar {
   flex-shrink: 0;
   background: var(--op-surface);
@@ -250,9 +236,6 @@
   color: var(--op-warning);
 }
 
-/* ── Alertas de pantalla completa - siguen fijas sobre todo lo demás
-   a propósito (deben verse sin importar qué esté pasando en el resto
-   del panel), pero con la paleta profesional en vez de neón. ── */
 #op-alert-overlay {
   display: none;
   position: fixed;
@@ -327,7 +310,6 @@
   }
 }
 
-/* ── Overlays de configuración/turno - misma paleta profesional ── */
 .op-full-overlay {
   display: none;
   position: fixed;
@@ -420,7 +402,6 @@
   }
 }
 
-/* ── Adaptativo - tableta angosta en vertical (7" portrait ~600px) ── */
 @media (max-width: 640px) {
   .op-app {
     font-size: 13px;
@@ -444,7 +425,6 @@
   }
 }
 
-/* ── Adaptativo - muy poca altura (7" landscape ~480-600px) ── */
 @media (max-height: 520px) {
   .op-header {
     padding: 6px 12px;
