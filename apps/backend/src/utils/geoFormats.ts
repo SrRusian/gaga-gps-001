@@ -112,6 +112,20 @@ interface FeatureConversionResult {
   error?: string;
 }
 
+// KML (Google Earth, drones) siempre trae altitud en cada coordenada - la columna PostGIS es
+// 2D, así que hay que descartarla antes de guardar (si no, "Geometry has Z dimension...")
+function force2DPosition(pos: number[]): [number, number] {
+  return [pos[0], pos[1]];
+}
+
+function force2DPolygon(geom: Polygon): Polygon {
+  return { type: 'Polygon', coordinates: geom.coordinates.map((ring) => ring.map(force2DPosition)) };
+}
+
+function force2DLineString(geom: LineString): LineString {
+  return { type: 'LineString', coordinates: geom.coordinates.map(force2DPosition) };
+}
+
 function featureToGeofenceInput(
   feature: Feature<Geometry | null>,
   index: number,
@@ -136,7 +150,9 @@ function featureToGeofenceInput(
   }
 
   if (geometry.type === 'Polygon') {
-    return { input: { name, type, shapeType: 'polygon', geometry: geometry as Polygon } };
+    return {
+      input: { name, type, shapeType: 'polygon', geometry: force2DPolygon(geometry as Polygon) },
+    };
   }
 
   if (geometry.type === 'LineString') {
@@ -151,7 +167,7 @@ function featureToGeofenceInput(
         name,
         type,
         shapeType: 'polyline',
-        geometry: geometry as LineString,
+        geometry: force2DLineString(geometry as LineString),
         corridorWidthMeters,
       },
     };

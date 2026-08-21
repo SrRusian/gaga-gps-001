@@ -312,6 +312,7 @@ export function DashboardSection() {
   const [mapImportModal, setMapImportModal] = useState(false);
   const [mapImportForm, setMapImportForm] = useState({ name: '', crs: 'EPSG:32613', projectId: '' });
   const [mapImportError, setMapImportError] = useState('');
+  const [mapImporting, setMapImporting] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const worldInputRef = useRef<HTMLInputElement>(null);
   const mapsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1629,6 +1630,7 @@ export function DashboardSection() {
   }
 
   async function importMap() {
+    if (mapImporting) return;
     setMapImportError('');
     const effectiveProjectId =
       typeof scope === 'number'
@@ -1654,6 +1656,7 @@ export function DashboardSection() {
     formData.append('image', imageFile);
     formData.append('worldFile', worldFile);
 
+    setMapImporting(true);
     try {
       const token = getStoredToken();
       const res = await fetch('/api/maps', {
@@ -1672,6 +1675,8 @@ export function DashboardSection() {
       loadMaps();
     } catch (err) {
       setMapImportError(err instanceof Error ? err.message : 'Error importando el mapa');
+    } finally {
+      setMapImporting(false);
     }
   }
 
@@ -2939,11 +2944,15 @@ export function DashboardSection() {
         </div>
         {mapImportError && <div style={{ color: '#e5484d', fontSize: 12 }}>{mapImportError}</div>}
         <div className="gg-modal-actions">
-          <button className="btn btn-sm" onClick={() => setMapImportModal(false)}>
+          <button
+            className="btn btn-sm"
+            onClick={() => setMapImportModal(false)}
+            disabled={mapImporting}
+          >
             Cancelar
           </button>
-          <button className="btn btn-sm" onClick={importMap}>
-            Importar
+          <button className="btn btn-sm" onClick={importMap} disabled={mapImporting}>
+            {mapImporting ? 'Subiendo...' : 'Importar'}
           </button>
         </div>
       </Modal>
