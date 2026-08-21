@@ -7,6 +7,7 @@ export interface DeviceRow {
   type: string;
   status: string;
   project_id: number | null;
+  group_id: number | null;
   attributes: Record<string, unknown>;
   last_update: Date | null;
   created_at: Date;
@@ -123,11 +124,13 @@ class DeviceRepository {
       name,
       type,
       projectId,
+      groupId,
       attributes,
     }: {
       name?: string;
       type?: string;
       projectId?: number | null;
+      groupId?: number | null;
       attributes?: Record<string, unknown>;
     },
   ): Promise<DeviceRow | null> {
@@ -145,6 +148,10 @@ class DeviceRepository {
     if (projectId !== undefined) {
       values.push(projectId);
       sets.push(`project_id = $${values.length}`);
+    }
+    if (groupId !== undefined) {
+      values.push(groupId);
+      sets.push(`group_id = $${values.length}`);
     }
     if (attributes !== undefined) {
       values.push(attributes);
@@ -199,6 +206,12 @@ class DeviceRepository {
           await client.query('DELETE FROM device_sensor_snapshots WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM geofence_events WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM incident_reports WHERE device_id = $1', [uniqueId]);
+          await client.query('DELETE FROM device_project_history WHERE device_id = $1', [uniqueId]);
+          await client.query('DELETE FROM equipment_variable_readings WHERE device_id = $1', [uniqueId]);
+          await client.query('DELETE FROM equipment_variable_thresholds WHERE device_id = $1', [uniqueId]);
+          await client.query('DELETE FROM equipment_activity_segments WHERE device_id = $1', [uniqueId]);
+          await client.query('DELETE FROM production_records WHERE device_id = $1', [uniqueId]);
+          await client.query('DELETE FROM pay_rates WHERE device_id = $1', [uniqueId]);
           await client.query(
             'DELETE FROM alert_events WHERE device_id = $1 OR device_id_2 = $1',
             [uniqueId],

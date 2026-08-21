@@ -1,6 +1,8 @@
+import type { RequestHandler } from 'express';
 import express from 'express';
 import { DeviceAlreadyLinkedError } from '../../repositories/EquipmentRepository';
 import type EquipmentRepository from '../../repositories/EquipmentRepository';
+import type { UserRole } from '../../repositories/UserRepository';
 import type StaticEquipmentManager from '../../services/static_equipment/StaticEquipmentManager';
 
 interface SocketServerLike {
@@ -12,14 +14,18 @@ export interface EquipmentRouterDeps {
   equipmentRepo: EquipmentRepository;
   equipmentManager: StaticEquipmentManager;
   socketServer: SocketServerLike;
+  requireRole: (...roles: UserRole[]) => RequestHandler;
 }
 
 export function buildEquipmentRouter({
   equipmentRepo,
   equipmentManager,
   socketServer,
+  requireRole,
 }: EquipmentRouterDeps) {
   const router = express.Router();
+  const canView = requireRole('admin', 'project_administrator', 'project_supervisor', 'project_manager');
+  const canManage = requireRole('admin', 'project_administrator');
 
   function broadcastEquipmentUpdate(projectId: number | null) {
     const scoped = Object.values(equipmentManager.equipment).filter(
@@ -28,7 +34,7 @@ export function buildEquipmentRouter({
     socketServer.broadcastToProject(projectId, 'equipment:update', scoped);
   }
 
-  router.get('/', async (req, res) => {
+  router.get('/', canView, async (req, res) => {
     try {
       const equipment = await equipmentRepo.findAll(req.user?.projectId);
       res.json(equipment);
@@ -38,7 +44,7 @@ export function buildEquipmentRouter({
     }
   });
 
-  router.post('/', async (req, res) => {
+  router.post('/', canManage, async (req, res) => {
     try {
       const { name, type, latitude, longitude, swingRadius, safetyRadius, status, linkedDeviceId } =
         req.body;
@@ -94,8 +100,14 @@ export function buildEquipmentRouter({
     }
   });
 
-  router.patch('/:id', async (req, res) => {
+  router.patch('/:id', canManage, async (req, res) => {
     try {
+      const id = Number(req.params.id);
+      const currentProjectId = equipmentManager.equipment[id]?.projectId ?? null;
+      if (req.user!.projectId != null && currentProjectId !== req.user!.projectId) {
+        return res.status(404).json({ error: 'Equipo no encontrado' });
+      }
+
       const { name, type, latitude, longitude, swingRadius, safetyRadius, linkedDeviceId } = req.body;
       const eq = await equipmentRepo.update(Number(req.params.id), {
         name,
@@ -133,8 +145,14 @@ export function buildEquipmentRouter({
     }
   });
 
-  router.patch('/:id/status', async (req, res) => {
+  router.patch('/:id/status', canManage, async (req, res) => {
     try {
+      const id = Number(req.params.id);
+      const currentProjectId = equipmentManager.equipment[id]?.projectId ?? null;
+      if (req.user!.projectId != null && currentProjectId !== req.user!.projectId) {
+        return res.status(404).json({ error: 'Equipo no encontrado' });
+      }
+
       const { status } = req.body;
       const eq = await equipmentRepo.updateStatus(Number(req.params.id), status);
       if (!eq) return res.status(404).json({ error: 'Equipo no encontrado' });
@@ -147,10 +165,13 @@ export function buildEquipmentRouter({
     }
   });
 
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', canManage, async (req, res) => {
     try {
       const id = Number(req.params.id);
       const projectId = equipmentManager.equipment[id]?.projectId ?? null;
+      if (req.user!.projectId != null && projectId !== req.user!.projectId) {
+        return res.status(404).json({ error: 'Equipo no encontrado' });
+      }
       await equipmentRepo.delete(id);
       equipmentManager.clearEquipment(id);
       broadcastEquipmentUpdate(projectId);

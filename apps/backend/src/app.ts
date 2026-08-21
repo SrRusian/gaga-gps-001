@@ -23,6 +23,14 @@ import MapRepository from './repositories/MapRepository';
 import ShiftRepository from './repositories/ShiftRepository';
 import IncidentReportRepository from './repositories/IncidentReportRepository';
 import AlertEventRepository from './repositories/AlertEventRepository';
+import SystemSettingsRepository from './repositories/SystemSettingsRepository';
+import DeviceProjectHistoryRepository from './repositories/DeviceProjectHistoryRepository';
+import UserProjectHistoryRepository from './repositories/UserProjectHistoryRepository';
+import DeviceGroupRepository from './repositories/DeviceGroupRepository';
+import EquipmentVariableRepository from './repositories/EquipmentVariableRepository';
+import EquipmentActivityRepository from './repositories/EquipmentActivityRepository';
+import ProductionRecordRepository from './repositories/ProductionRecordRepository';
+import PayRateRepository from './repositories/PayRateRepository';
 
 // ── Servicios de seguridad - NO se modifican, solo se integran ─
 import GeofenceAlertService from './services/alerts/GeofenceAlertService';
@@ -69,6 +77,10 @@ import buildProjectsRouter from './api/routes/projects.routes';
 import buildShiftsRouter from './api/routes/shifts.routes';
 import buildIncidentsRouter from './api/routes/incidents.routes';
 import buildAlertsRouter from './api/routes/alerts.routes';
+import buildSettingsRouter from './api/routes/settings.routes';
+import buildDeviceGroupsRouter from './api/routes/device-groups.routes';
+import buildEquipmentVariablesRouter from './api/routes/equipment-variables.routes';
+import buildProductionRouter from './api/routes/production.routes';
 import MapPipelineService from './services/maps/MapPipelineService';
 
 const app = express();
@@ -97,6 +109,14 @@ const projectRepo = new ProjectRepository();
 const shiftRepo = new ShiftRepository();
 const shiftResolver = new ShiftResolverService({ shiftRepo });
 const incidentRepo = new IncidentReportRepository();
+const settingsRepo = new SystemSettingsRepository();
+const deviceProjectHistoryRepo = new DeviceProjectHistoryRepository();
+const userProjectHistoryRepo = new UserProjectHistoryRepository();
+const deviceGroupRepo = new DeviceGroupRepository();
+const equipmentVariableRepo = new EquipmentVariableRepository();
+const equipmentActivityRepo = new EquipmentActivityRepository();
+const productionRecordRepo = new ProductionRecordRepository();
+const payRateRepo = new PayRateRepository();
 const alertEventRepo = new AlertEventRepository();
 
 const authMiddleware = buildAuthMiddleware({ userRepo });
@@ -180,13 +200,13 @@ app.use('/tiles', mapsRouter);
 app.use(
   '/api/maps',
   authMiddleware,
-  requireRole('admin', 'project_manager', 'project_supervisor'),
   buildMapsAdminRouter({
     mapRepo,
     mapPipelineService,
     mapsDir: resolvedMapsDir,
     invalidateTilesCache: mapsRouter.invalidateCache,
     socketServer,
+    requireRole,
   }),
 );
 
@@ -197,7 +217,7 @@ app.use('/api/auth', authLimiter, buildAuthRouter({ userRepo }));
 app.use(
   '/api/projects',
   authMiddleware,
-  requireRole('admin', 'project_manager'),
+  requireRole('admin', 'project_administrator'),
   buildProjectsRouter({
     projectRepo,
     mapRepo,
@@ -228,6 +248,7 @@ app.use(
     incidentAlertService,
     equipmentRepo,
     equipmentManager,
+    deviceProjectHistoryRepo,
     socketServer,
   }),
 );
@@ -245,8 +266,7 @@ app.use(
 app.use(
   '/api/equipment',
   authMiddleware,
-  requireRole('admin', 'project_manager', 'project_supervisor'),
-  buildEquipmentRouter({ equipmentRepo, equipmentManager, socketServer }),
+  buildEquipmentRouter({ equipmentRepo, equipmentManager, socketServer, requireRole }),
 );
 app.use(
   '/api/reports',
@@ -263,7 +283,38 @@ app.use(
   buildAlertsRouter({ alertEventRepo, requireRole, shiftResolver }),
 );
 // chequeo de rol por-ruta dentro del router, no aquí - ver users.routes.ts
-app.use('/api/users', authMiddleware, buildUsersRouter({ userRepo, requireRole }));
+app.use(
+  '/api/users',
+  authMiddleware,
+  buildUsersRouter({ userRepo, requireRole, userProjectHistoryRepo }),
+);
+app.use('/api/settings', buildSettingsRouter({ settingsRepo, authMiddleware, requireRole }));
+app.use(
+  '/api/device-groups',
+  authMiddleware,
+  buildDeviceGroupsRouter({ deviceGroupRepo, requireRole }),
+);
+// clave compartida en POST /, no JWT - ver equipment-variables.routes.ts
+app.use(
+  '/api/equipment-variables',
+  buildEquipmentVariablesRouter({
+    equipmentVariableRepo,
+    deviceRepo,
+    alertEventRepo,
+    authMiddleware,
+    requireRole,
+  }),
+);
+app.use(
+  '/api/production',
+  buildProductionRouter({
+    equipmentActivityRepo,
+    productionRecordRepo,
+    payRateRepo,
+    authMiddleware,
+    requireRole,
+  }),
+);
 
 app.use(
   '/api/operator-sessions',
@@ -280,7 +331,7 @@ app.use(
 );
 app.use(
   '/api/devices',
-  buildDeviceSensorsRouter({ sensorRepo, authMiddleware, requireRole }),
+  buildDeviceSensorsRouter({ sensorRepo, deviceRepo, authMiddleware, requireRole }),
 );
 
 app.use(
@@ -329,9 +380,15 @@ async function ensureDefaultAdmin(): Promise<void> {
   console.warn(' ══════════════════════════════════════════════════════════');
 }
 
+async function loadSettingsOverrides(): Promise<void> {
+  const stored = await settingsRepo.get('telemetrySharedSecret');
+  if (stored !== null) env.telemetrySharedSecret = stored;
+}
+
 async function loadPersistedState(): Promise<void> {
   try {
     await ensureDefaultAdmin();
+    await loadSettingsOverrides();
 
     const geofences = await geofenceRepo.findAllActive();
     geofences.forEach((g) => geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(g)));

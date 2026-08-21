@@ -33,9 +33,10 @@ export function buildGeofencesRouter({
   requireRole,
 }: GeofencesRouterDeps) {
   const router = express.Router();
-  const canManage = requireRole('admin', 'project_manager', 'project_supervisor');
+  const canView = requireRole('admin', 'project_administrator', 'project_supervisor', 'project_manager');
+  const canManage = requireRole('admin', 'project_administrator');
 
-  router.get('/', authMiddleware, canManage, async (req, res) => {
+  router.get('/', authMiddleware, canView, async (req, res) => {
     try {
       const geofences = await geofenceRepo.findAllActive(req.user?.projectId);
       res.json(geofences);
@@ -108,6 +109,12 @@ export function buildGeofencesRouter({
 
   router.patch('/:id', authMiddleware, canManage, async (req, res) => {
     try {
+      const existing = await geofenceRepo.findById(Number(req.params.id));
+      if (!existing) return res.status(404).json({ error: 'Geocerca no encontrada' });
+      if (req.user!.projectId != null && existing.project_id !== req.user!.projectId) {
+        return res.status(404).json({ error: 'Geocerca no encontrada' });
+      }
+
       const {
         name,
         type,
@@ -155,6 +162,10 @@ export function buildGeofencesRouter({
     try {
       const id = Number(req.params.id);
       const existing = await geofenceRepo.findById(id);
+      if (!existing) return res.status(404).json({ error: 'Geocerca no encontrada' });
+      if (req.user!.projectId != null && existing.project_id !== req.user!.projectId) {
+        return res.status(404).json({ error: 'Geocerca no encontrada' });
+      }
       await geofenceRepo.delete(id);
       geofenceService.removeGeofence(id);
       socketServer.broadcastToProject(
@@ -177,7 +188,7 @@ export function buildGeofencesRouter({
     return ids.length > 0 ? geofenceRepo.findByIds(ids) : geofenceRepo.findAllActive();
   }
 
-  router.get('/export.geojson', downloadAuthMiddleware, canManage, async (req, res) => {
+  router.get('/export.geojson', downloadAuthMiddleware, canView, async (req, res) => {
     try {
       const geofences = await resolveGeofences(req);
       res.setHeader('Content-Type', 'application/geo+json');
@@ -189,7 +200,7 @@ export function buildGeofencesRouter({
     }
   });
 
-  router.get('/export.kml', downloadAuthMiddleware, canManage, async (req, res) => {
+  router.get('/export.kml', downloadAuthMiddleware, canView, async (req, res) => {
     try {
       const geofences = await resolveGeofences(req);
       res.setHeader('Content-Type', 'application/vnd.google-earth.kml+xml');

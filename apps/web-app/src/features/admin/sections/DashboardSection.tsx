@@ -1,10 +1,11 @@
 import { createSocket, getStoredToken, roleEntries, roleLabel } from '@gaga-gps/client';
 import {
   circleToPolygon,
+  createVehicleMarkerElement,
   EQUIPMENT_CORE_COLOR,
   EQUIPMENT_OUTER_COLOR,
   lineToBufferPolygon,
-  shortVehicleLabel,
+  updateVehicleMarkerHeading,
   useEquipmentLayer,
   useGeofenceLayer,
   useMapLibreMap,
@@ -542,11 +543,15 @@ export function DashboardSection() {
       const existing = vehicleMarkersRef.current[pos.deviceId];
       if (existing) {
         existing.setLngLat(lngLat);
+        updateVehicleMarkerHeading(existing.getElement(), pos.deviceId, pos.course, pos.speed);
         return;
       }
-      const el = document.createElement('div');
-      el.className = 'dash-vehicle-marker';
-      el.textContent = shortVehicleLabel(pos.deviceId);
+      const el = createVehicleMarkerElement({
+        deviceId: pos.deviceId,
+        isMine: false,
+        color: 'var(--ad-accent)',
+      });
+      updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed);
       vehicleMarkersRef.current[pos.deviceId] = new maplibregl.Marker({ element: el })
         .setLngLat(lngLat)
         .addTo(map);
@@ -2268,11 +2273,9 @@ export function DashboardSection() {
             value={deviceSearch}
             onChange={(e) => setDeviceSearch(e.target.value)}
           />
-          {isAdmin && (
-            <button className="btn btn-sm" onClick={openCreateDevice}>
-              + Nuevo
-            </button>
-          )}
+          <button className="btn btn-sm" onClick={openCreateDevice}>
+            + Nuevo
+          </button>
         </div>
         {scopedDevices.length === 0 ? (
           <div className="org-empty">Sin dispositivos todavía.</div>
@@ -2304,11 +2307,9 @@ export function DashboardSection() {
                     <button className="btn btn-sm" onClick={() => openEditDevice(d)}>
                       Editar
                     </button>
-                    {isAdmin && (
-                      <button className="btn btn-sm btn-danger" onClick={() => deleteDevice(d)}>
-                        Eliminar
-                      </button>
-                    )}
+                    <button className="btn btn-sm btn-danger" onClick={() => deleteDevice(d)}>
+                      Eliminar
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -2329,11 +2330,9 @@ export function DashboardSection() {
             value={userSearch}
             onChange={(e) => setUserSearch(e.target.value)}
           />
-          {isAdmin && (
-            <button className="btn btn-sm" onClick={openCreateUser}>
-              + Nuevo
-            </button>
-          )}
+          <button className="btn btn-sm" onClick={openCreateUser}>
+            + Nuevo
+          </button>
         </div>
         {scopedUsers.length === 0 ? (
           <div className="org-empty">Sin usuarios todavía.</div>
@@ -2371,7 +2370,7 @@ export function DashboardSection() {
                         {u.active ? 'Desactivar' : 'Activar'}
                       </button>
                     )}
-                    {isAdmin && (
+                    {(isAdmin || u.id !== me.id) && u.role !== 'admin' && (
                       <button className="btn btn-sm btn-danger" onClick={() => deleteUser(u)}>
                         Eliminar
                       </button>

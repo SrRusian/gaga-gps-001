@@ -5,15 +5,17 @@ import UserRepository, {
   UserHasSessionsError,
 } from '../../repositories/UserRepository';
 import type { UserRow, UserRole } from '../../repositories/UserRepository';
+import type UserProjectHistoryRepository from '../../repositories/UserProjectHistoryRepository';
 
 export interface UsersRouterDeps {
   userRepo: UserRepository;
   requireRole: (...roles: UserRole[]) => import('express').RequestHandler;
+  userProjectHistoryRepo?: UserProjectHistoryRepository;
 }
 
-export function buildUsersRouter({ userRepo, requireRole }: UsersRouterDeps) {
+export function buildUsersRouter({ userRepo, requireRole, userProjectHistoryRepo }: UsersRouterDeps) {
   const router = express.Router();
-  const canManage = requireRole('admin', 'project_manager');
+  const canManage = requireRole('admin', 'project_administrator');
 
   async function wouldRemoveLastActiveAdmin(existing: UserRow): Promise<boolean> {
     if (existing.role !== 'admin' || !existing.active) return false;
@@ -34,20 +36,27 @@ export function buildUsersRouter({ userRepo, requireRole }: UsersRouterDeps) {
     }
   });
 
-  router.post('/', requireRole('admin'), async (req, res) => {
+  router.post('/', requireRole('admin', 'project_administrator'), async (req, res) => {
     try {
-      const { email, password, name, role, projectId } = req.body;
+      const { email, password, name, role } = req.body;
       if (!email || !password || !name) {
         return res.status(400).json({ error: 'email, password y name son requeridos' });
       }
+      const isAdmin = req.user!.role === 'admin';
+      if (!isAdmin && role === 'admin') {
+        return res.status(403).json({ error: 'No tiene permiso para asignar el rol admin' });
+      }
       const passwordHash = await bcrypt.hash(password, 10);
-      const user = await userRepo.create({
-        email,
-        passwordHash,
-        name,
-        role,
-        projectId: role === 'admin' ? null : projectId,
-      });
+      // no-admin nunca origina un usuario fuera de su propio proyecto
+      const projectId = role === 'admin' ? null : isAdmin ? req.body.projectId : req.user!.projectId;
+      const user = await userRepo.create({ email, passwordHash, name, role, projectId });
+      if (user.project_id != null) {
+        await userProjectHistoryRepo?.recordChange({
+          userId: user.id,
+          projectId: user.project_id,
+          changedBy: req.user!.id,
+        });
+      }
       res.status(201).json(user);
     } catch (err) {
       console.error('users.routes POST /:', (err as Error).message);
@@ -98,6 +107,13 @@ export function buildUsersRouter({ userRepo, requireRole }: UsersRouterDeps) {
         active,
         projectId,
       });
+      if (isAdmin && projectId !== undefined && projectId !== existing.project_id && user) {
+        await userProjectHistoryRepo?.recordChange({
+          userId: user.id,
+          projectId: user.project_id,
+          changedBy: req.user!.id,
+        });
+      }
       res.json(user);
     } catch (err) {
       if (err instanceof EmailAlreadyExistsError) {
@@ -108,8 +124,17 @@ export function buildUsersRouter({ userRepo, requireRole }: UsersRouterDeps) {
     }
   });
 
-  router.post('/:id/password', requireRole('admin'), async (req, res) => {
+  router.post('/:id/password', requireRole('admin', 'project_administrator'), async (req, res) => {
     try {
+      const existing = await userRepo.findById(Number(req.params.id));
+      if (!existing) return res.status(404).json({ error: 'Usuario no encontrado' });
+      if (req.user!.projectId != null && existing.project_id !== req.user!.projectId) {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+      if (req.user!.role !== 'admin' && existing.role === 'admin') {
+        return res.status(403).json({ error: 'No tiene permiso sobre este usuario' });
+      }
+
       const { password } = req.body;
       if (!password) return res.status(400).json({ error: 'password requerido' });
       const passwordHash = await bcrypt.hash(password, 10);
@@ -121,10 +146,16 @@ export function buildUsersRouter({ userRepo, requireRole }: UsersRouterDeps) {
     }
   });
 
-  router.delete('/:id', requireRole('admin'), async (req, res) => {
+  router.delete('/:id', requireRole('admin', 'project_administrator'), async (req, res) => {
     try {
       const existing = await userRepo.findById(Number(req.params.id));
       if (!existing) return res.status(404).json({ error: 'Usuario no encontrado' });
+      if (req.user!.projectId != null && existing.project_id !== req.user!.projectId) {
+        return res.status(404).json({ error: 'Usuario no encontrado' });
+      }
+      if (req.user!.role !== 'admin' && existing.role === 'admin') {
+        return res.status(403).json({ error: 'No tiene permiso sobre este usuario' });
+      }
       if (await wouldRemoveLastActiveAdmin(existing)) {
         return res.status(400).json({
           error: 'No puede eliminar al único admin activo - cree/active otro admin antes de continuar',

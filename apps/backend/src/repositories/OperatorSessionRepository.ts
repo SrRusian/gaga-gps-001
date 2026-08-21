@@ -5,6 +5,7 @@ export interface OperatorSessionRow {
   user_id: number;
   device_id: string;
   shift_id: number | null;
+  project_id: number | null;
   started_at: Date;
   ended_at: Date | null;
   last_seen_at: Date;
@@ -34,10 +35,12 @@ class OperatorSessionRepository {
     userId,
     deviceId,
     shiftId = null,
+    projectId = null,
   }: {
     userId: number;
     deviceId: string;
     shiftId?: number | null;
+    projectId?: number | null;
   }): Promise<OperatorSessionRow> {
     const client = await pool.connect();
     try {
@@ -47,9 +50,9 @@ class OperatorSessionRepository {
         [deviceId],
       );
       const { rows } = await client.query<OperatorSessionRow>(
-        `INSERT INTO operator_sessions (user_id, device_id, shift_id)
-         VALUES ($1, $2, $3) RETURNING *`,
-        [userId, deviceId, shiftId],
+        `INSERT INTO operator_sessions (user_id, device_id, shift_id, project_id)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [userId, deviceId, shiftId, projectId],
       );
       await client.query('COMMIT');
       return rows[0];

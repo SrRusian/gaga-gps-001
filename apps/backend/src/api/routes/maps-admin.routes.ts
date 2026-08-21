@@ -1,4 +1,4 @@
-import type { Request } from 'express';
+import type { Request, RequestHandler } from 'express';
 import express from 'express';
 import fs from 'fs/promises';
 import fsSync from 'fs';
@@ -6,6 +6,7 @@ import multer from 'multer';
 import path from 'path';
 import { env } from '../../config';
 import type MapRepository from '../../repositories/MapRepository';
+import type { UserRole } from '../../repositories/UserRepository';
 import type MapPipelineService from '../../services/maps/MapPipelineService';
 import { toPublicShape } from '../../services/maps/mapShape';
 
@@ -24,6 +25,7 @@ export interface MapsAdminRouterDeps {
   mapsDir: string;
   invalidateTilesCache: (mapId: number) => void;
   socketServer: SocketServerLike;
+  requireRole: (...roles: UserRole[]) => RequestHandler;
 }
 
 export function buildMapsAdminRouter({
@@ -32,10 +34,13 @@ export function buildMapsAdminRouter({
   mapsDir,
   invalidateTilesCache,
   socketServer,
+  requireRole,
 }: MapsAdminRouterDeps) {
   const router = express.Router();
   const sourcesDir = path.join(mapsDir, 'sources');
   const uploadTmpDir = path.join(mapsDir, 'tmp-uploads');
+  const canView = requireRole('admin', 'project_administrator', 'project_supervisor', 'project_manager');
+  const canManage = requireRole('admin', 'project_administrator');
 
   function hasProjectAccess(req: Request, mapProjectId: number | null): boolean {
     return req.user!.projectId == null || req.user!.projectId === mapProjectId;
@@ -69,7 +74,7 @@ export function buildMapsAdminRouter({
     },
   });
 
-  router.get('/', async (req, res) => {
+  router.get('/', canView, async (req, res) => {
     try {
       const maps = await mapRepo.findAll(req.user?.projectId);
       res.json(maps);
@@ -81,6 +86,7 @@ export function buildMapsAdminRouter({
 
   router.post(
     '/',
+    canManage,
     upload.fields([
       { name: 'image', maxCount: 1 },
       { name: 'worldFile', maxCount: 1 },
@@ -135,7 +141,7 @@ export function buildMapsAdminRouter({
     },
   );
 
-  router.patch('/:id', async (req, res) => {
+  router.patch('/:id', canManage, async (req, res) => {
     try {
       const { name } = req.body;
       if (!name) return res.status(400).json({ error: 'name es requerido' });
@@ -152,7 +158,7 @@ export function buildMapsAdminRouter({
     }
   });
 
-  router.post('/:id/activate', async (req, res) => {
+  router.post('/:id/activate', canManage, async (req, res) => {
     try {
       const map = await mapRepo.findById(Number(req.params.id));
       if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
@@ -173,7 +179,7 @@ export function buildMapsAdminRouter({
     }
   });
 
-  router.post('/:id/deactivate', async (req, res) => {
+  router.post('/:id/deactivate', canManage, async (req, res) => {
     try {
       const map = await mapRepo.findById(Number(req.params.id));
       if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
@@ -191,7 +197,7 @@ export function buildMapsAdminRouter({
     }
   });
 
-  router.delete('/:id', async (req, res) => {
+  router.delete('/:id', canManage, async (req, res) => {
     try {
       const map = await mapRepo.findById(Number(req.params.id));
       if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });

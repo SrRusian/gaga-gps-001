@@ -25,7 +25,7 @@ export function buildReportsRouter({
   requireRole,
 }: ReportsRouterDeps) {
   const router = express.Router();
-  const canView = requireRole('admin', 'project_manager');
+  const canView = requireRole('admin', 'project_administrator', 'project_manager');
 
   async function resolveDeviceForHistory(
     req: Request,

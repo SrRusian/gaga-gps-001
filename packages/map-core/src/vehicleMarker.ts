@@ -1,5 +1,5 @@
 const MIN_MOVING_SPEED_MPS = 0.5;
-const MARKER_SIZE = 40;
+const ARROW_SIZE = 34;
 const lastKnownCourse = new Map<string, number>();
 
 export function shortVehicleLabel(deviceId: string): string {
@@ -36,20 +36,21 @@ export function createHeadingArrow(color: string): HTMLDivElement {
   const arrow = document.createElement('div');
   arrow.className = 'vehicle-marker__arrow';
   arrow.style.position = 'absolute';
-  arrow.style.inset = '0';
-  arrow.style.display = 'flex';
-  arrow.style.justifyContent = 'center';
+  arrow.style.top = '50%';
+  arrow.style.left = '50%';
+  arrow.style.width = `${ARROW_SIZE}px`;
+  arrow.style.height = `${ARROW_SIZE}px`;
+  arrow.style.marginLeft = `-${ARROW_SIZE / 2}px`;
+  arrow.style.marginTop = `-${ARROW_SIZE / 2}px`;
   arrow.style.pointerEvents = 'none';
   arrow.style.transition = 'opacity 0.3s ease';
-
-  const chevron = document.createElement('div');
-  chevron.style.width = '0';
-  chevron.style.height = '0';
-  chevron.style.marginTop = '-9px';
-  chevron.style.borderLeft = '6px solid transparent';
-  chevron.style.borderRight = '6px solid transparent';
-  chevron.style.borderBottom = `9px solid ${color}`;
-  arrow.appendChild(chevron);
+  arrow.style.filter = `drop-shadow(0 0 4px ${color}) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6))`;
+  arrow.innerHTML = `
+    <svg viewBox="0 0 24 24" width="${ARROW_SIZE}" height="${ARROW_SIZE}">
+      <path d="M12 2L4.5 20.29 5.21 21 12 18 18.79 21 19.5 20.29z"
+            fill="${color}" stroke="#0b0d10" stroke-width="1.5" stroke-linejoin="round" />
+    </svg>
+  `;
 
   return arrow;
 }
@@ -58,22 +59,30 @@ export function createVehicleMarkerElement({ deviceId, isMine, color }: VehicleM
   const el = document.createElement('div');
   el.className = 'vehicle-marker';
   el.style.position = 'relative';
-  el.style.width = `${MARKER_SIZE}px`;
-  el.style.height = `${MARKER_SIZE}px`;
-  el.style.borderRadius = '50%';
-  el.style.border = `3px solid ${color}`;
-  el.style.background = isMine ? '#003322' : '#330a00';
-  el.style.color = color;
-  el.style.fontSize = '10px';
-  el.style.fontWeight = 'bold';
-  el.style.display = 'flex';
-  el.style.alignItems = 'center';
-  el.style.justifyContent = 'center';
+  el.style.width = `${ARROW_SIZE}px`;
+  el.style.height = `${ARROW_SIZE}px`;
   el.style.cursor = 'pointer';
-  el.style.boxShadow = `0 0 8px ${color}`;
-  el.textContent = isMine ? 'YO' : shortVehicleLabel(deviceId);
 
   el.appendChild(createHeadingArrow(color));
+
+  const label = document.createElement('div');
+  label.className = 'vehicle-marker__label';
+  label.style.position = 'absolute';
+  label.style.top = '100%';
+  label.style.left = '50%';
+  label.style.transform = 'translateX(-50%)';
+  label.style.marginTop = '2px';
+  label.style.padding = '1px 5px';
+  label.style.borderRadius = '4px';
+  label.style.background = 'rgba(11, 13, 16, 0.85)';
+  label.style.color = color;
+  label.style.fontSize = '10px';
+  label.style.fontWeight = 'bold';
+  label.style.whiteSpace = 'nowrap';
+  label.style.pointerEvents = 'none';
+  label.textContent = isMine ? 'YO' : shortVehicleLabel(deviceId);
+  el.appendChild(label);
+
   return el;
 }
 
@@ -88,7 +97,7 @@ export function updateVehicleMarkerHeading(
 
   const { course: resolvedCourse, stopped } = resolveVehicleCourse(deviceId, course, speed);
   arrow.style.transform = `rotate(${resolvedCourse}deg)`;
-  arrow.style.opacity = stopped ? '0.4' : '1';
+  arrow.style.opacity = stopped ? '0.55' : '1';
 }
 
 export function setVehicleMarkerThreat(el: HTMLElement, isThreat: boolean): void {

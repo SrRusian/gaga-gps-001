@@ -50,9 +50,9 @@ export default function App() {
             }
           />
           <Route
-            path="/manager/*"
+            path="/project-admin/*"
             element={
-              <ProtectedRoute role="project_manager">
+              <ProtectedRoute role="project_administrator">
                 <AdminApp />
               </ProtectedRoute>
             }
@@ -61,6 +61,14 @@ export default function App() {
             path="/supervisor"
             element={
               <ProtectedRoute role="project_supervisor">
+                <SupervisorApp />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/manager"
+            element={
+              <ProtectedRoute role="project_manager">
                 <SupervisorApp />
               </ProtectedRoute>
             }

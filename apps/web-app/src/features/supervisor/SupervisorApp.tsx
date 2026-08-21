@@ -11,11 +11,9 @@ import {
   StatCard,
   VehicleCard,
 } from '@gaga-gps/ui';
-import maplibregl from 'maplibre-gl';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './supervisor.css';
-import { GeoManagementPanel, type GeoManagementPanelHandle } from './GeoManagementPanel';
 import { MapView, type MapViewHandle } from './MapView';
 import { useActiveOperatorSession } from './useActiveOperatorSession';
 import { EMPTY_FILTERS, useAlertHistory } from './useAlertHistory';
@@ -65,8 +63,6 @@ export default function SupervisorApp() {
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const mapRef = useRef<MapViewHandle>(null);
-  const [rawMap, setRawMap] = useState<maplibregl.Map | null>(null);
-  const geoManagementRef = useRef<GeoManagementPanelHandle>(null);
 
   const [alertsView, setAlertsView] = useState<'active' | 'history'>('active');
   const [historyFilters, setHistoryFilters] = useState(EMPTY_FILTERS);
@@ -153,42 +149,27 @@ export default function SupervisorApp() {
             activeMaps={activeMaps}
             mapMode={mapMode}
             onVehicleClick={selectVehicle}
-            onMapReady={setRawMap}
           />
         </div>
 
         <div className="sup-left-stack">
           <div className="sup-stop-section sup-glass">
-            {!stopStatus.active ? (
-              <Button variant="danger" className="sup-stop-btn" onClick={handleActivateStop}>
-                Parada preventiva colectiva
-              </Button>
-            ) : (
-              <Button variant="primary" className="sup-stop-btn" onClick={handleDeactivateStop}>
-                Reanudar operación
-              </Button>
-            )}
+            {isProjectSupervisor &&
+              (!stopStatus.active ? (
+                <Button variant="danger" className="sup-stop-btn" onClick={handleActivateStop}>
+                  Parada preventiva colectiva
+                </Button>
+              ) : (
+                <Button variant="primary" className="sup-stop-btn" onClick={handleDeactivateStop}>
+                  Reanudar operación
+                </Button>
+              ))}
             <div className={`sup-stop-status${stopStatus.active ? ' active' : ''}`}>
               {stopStatus.active
                 ? `Activa${stopStatus.reason ? ` - ${stopStatus.reason}` : ''}`
                 : 'Sistema en operación normal'}
             </div>
           </div>
-
-          {}
-          {isProjectSupervisor && (
-            <div className="sup-menu-panel sup-glass">
-              <button className="sup-menu-btn" onClick={() => geoManagementRef.current?.open('geofences')}>
-                Geocercas
-              </button>
-              <button className="sup-menu-btn" onClick={() => geoManagementRef.current?.open('equipment')}>
-                Equipo estático
-              </button>
-              <button className="sup-menu-btn" onClick={() => geoManagementRef.current?.open('maps')}>
-                Mapas
-              </button>
-            </div>
-          )}
 
           <div className="sup-alerts-section sup-glass">
             <div className="sup-section-header sup-alerts-header">
@@ -218,7 +199,9 @@ export default function SupervisorApp() {
                       message={a.message}
                       time={`Desde ${a.since}`}
                       onResolve={
-                        a.incidentId !== undefined ? () => resolveIncident(a.incidentId!) : undefined
+                        isProjectSupervisor && a.incidentId !== undefined
+                          ? () => resolveIncident(a.incidentId!)
+                          : undefined
                       }
                     />
                   ))
@@ -353,10 +336,6 @@ export default function SupervisorApp() {
               })}
             </div>
           </div>
-
-          {isProjectSupervisor && (
-            <GeoManagementPanel ref={geoManagementRef} map={rawMap} geofences={geofences} />
-          )}
         </div>
 
         <div className="sup-bottom-left-stack">

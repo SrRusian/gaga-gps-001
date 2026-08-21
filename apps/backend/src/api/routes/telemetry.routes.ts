@@ -1,6 +1,6 @@
-import nodeCrypto from 'crypto';
 import express, { type Request, type Response } from 'express';
 import { env } from '../../config';
+import { isValidSharedSecret } from '../../utils/sharedSecret';
 import type PositionProcessor from '../../services/telemetry/PositionProcessor';
 
 export function buildTelemetryRouter({
@@ -14,7 +14,7 @@ export function buildTelemetryRouter({
     try {
       const params: Record<string, unknown> = { ...req.query, ...req.body };
 
-      if (env.telemetrySharedSecret && !isValidSharedSecret(params.key)) {
+      if (env.telemetrySharedSecret && !isValidSharedSecret(env.telemetrySharedSecret, params.key)) {
         return res.status(401).send('Clave de telemetría inválida');
       }
 
@@ -65,14 +65,6 @@ export function buildTelemetryRouter({
   router.post('/gps', handleGps);
 
   return router;
-}
-
-function isValidSharedSecret(providedKey: unknown): boolean {
-  if (!providedKey) return false;
-  const expected = Buffer.from(env.telemetrySharedSecret as string);
-  const provided = Buffer.from(String(providedKey));
-  if (expected.length !== provided.length) return false;
-  return nodeCrypto.timingSafeEqual(expected, provided);
 }
 
 function parseFloatOrDefault<T extends number | null>(value: unknown, fallback: T): number | T {

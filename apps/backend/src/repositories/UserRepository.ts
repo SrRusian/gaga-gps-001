@@ -207,7 +207,12 @@ class UserRepository {
           'UPDATE incident_reports SET resolved_by = NULL WHERE resolved_by = $1',
           [id],
         );
+        // referencias de auditoría ("quién hizo el cambio"), no el sujeto de la fila - se anonimizan, no se borran
+        await client.query('UPDATE device_project_history SET changed_by = NULL WHERE changed_by = $1', [id]);
+        await client.query('UPDATE user_project_history SET changed_by = NULL WHERE changed_by = $1', [id]);
+        await client.query('UPDATE system_settings SET updated_by = NULL WHERE updated_by = $1', [id]);
         await client.query('DELETE FROM operator_sessions WHERE user_id = $1', [id]);
+        await client.query('DELETE FROM user_project_history WHERE user_id = $1', [id]);
         await client.query('DELETE FROM users WHERE id = $1', [id]);
         await client.query('COMMIT');
       } else {

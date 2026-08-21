@@ -118,7 +118,11 @@ export function buildSocketAuthMiddleware({ userRepo }: { userRepo: UserReposito
 
       next();
     } catch (err) {
-      next(err as Error);
+      // .data marca el error como falla de autenticación (no de red) para que el cliente
+      // no reintente indefinidamente - ver createSocket() en packages/client/src/socket.ts
+      const socketError = new Error((err as Error).message) as Error & { data?: { code: string } };
+      socketError.data = { code: 'AUTH_FAILED' };
+      next(socketError);
     }
   };
 }

@@ -11,6 +11,7 @@ import type VehicleProximityService from '../../services/alerts/VehicleProximity
 import type IncidentAlertService from '../../services/alerts/IncidentAlertService';
 import type StaticEquipmentManager from '../../services/static_equipment/StaticEquipmentManager';
 import type EquipmentRepository from '../../repositories/EquipmentRepository';
+import type DeviceProjectHistoryRepository from '../../repositories/DeviceProjectHistoryRepository';
 
 interface SocketServerLike {
   broadcastToProject(projectId: number | null, event: string, payload: unknown): void;
@@ -30,6 +31,7 @@ export interface DevicesRouterDeps {
   equipmentRepo?: EquipmentRepository;
   equipmentManager?: StaticEquipmentManager;
   socketServer?: SocketServerLike;
+  deviceProjectHistoryRepo?: DeviceProjectHistoryRepository;
 }
 
 export function buildDevicesRouter({
@@ -46,6 +48,7 @@ export function buildDevicesRouter({
   equipmentRepo,
   equipmentManager,
   socketServer,
+  deviceProjectHistoryRepo,
 }: DevicesRouterDeps) {
   const router = express.Router();
 
@@ -112,13 +115,22 @@ export function buildDevicesRouter({
     }
   });
 
-  router.post('/', authMiddleware, requireRole('admin'), async (req, res) => {
+  router.post('/', authMiddleware, requireRole('admin', 'project_administrator'), async (req, res) => {
     try {
-      const { uniqueId, name, type, projectId, attributes } = req.body;
+      const { uniqueId, name, type, attributes } = req.body;
       if (!uniqueId || !name) {
         return res.status(400).json({ error: 'uniqueId y name son requeridos' });
       }
+      // no-admin nunca origina un dispositivo fuera de su propio proyecto
+      const projectId = req.user!.role === 'admin' ? req.body.projectId : req.user!.projectId;
       const device = await deviceRepo.create({ uniqueId, name, type, projectId, attributes });
+      if (device.project_id != null) {
+        await deviceProjectHistoryRepo?.recordChange({
+          deviceId: device.unique_id,
+          projectId: device.project_id,
+          changedBy: req.user!.id,
+        });
+      }
       res.status(201).json(device);
     } catch (err) {
       console.error('devices.routes POST /:', (err as Error).message);
@@ -126,7 +138,7 @@ export function buildDevicesRouter({
     }
   });
 
-  router.patch('/:id', authMiddleware, requireRole('admin', 'project_manager'), async (req, res) => {
+  router.patch('/:id', authMiddleware, requireRole('admin', 'project_administrator'), async (req, res) => {
     try {
       const existing = await deviceRepo.findById(Number(req.params.id));
       if (!existing) return res.status(404).json({ error: 'Dispositivo no encontrado' });
@@ -142,6 +154,18 @@ export function buildDevicesRouter({
         projectId,
         attributes,
       });
+      if (
+        req.user!.role === 'admin' &&
+        req.body.projectId !== undefined &&
+        req.body.projectId !== existing.project_id &&
+        device
+      ) {
+        await deviceProjectHistoryRepo?.recordChange({
+          deviceId: device.unique_id,
+          projectId: device.project_id,
+          changedBy: req.user!.id,
+        });
+      }
       res.json(device);
     } catch (err) {
       console.error('devices.routes PATCH /:id:', (err as Error).message);
@@ -149,9 +173,13 @@ export function buildDevicesRouter({
     }
   });
 
-  router.delete('/:id', authMiddleware, requireRole('admin'), async (req, res) => {
+  router.delete('/:id', authMiddleware, requireRole('admin', 'project_administrator'), async (req, res) => {
     try {
       const device = await deviceRepo.findById(Number(req.params.id));
+      if (!device) return res.status(404).json({ error: 'Dispositivo no encontrado' });
+      if (req.user!.projectId != null && device.project_id !== req.user!.projectId) {
+        return res.status(404).json({ error: 'Dispositivo no encontrado' });
+      }
       const otherDeviceIds = device
         ? (await deviceRepo.findAll())
             .filter((d) => d.id !== device.id)

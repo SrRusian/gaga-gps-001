@@ -17,7 +17,8 @@ export function buildShiftsRouter({
 }: ShiftsRouterDeps) {
   const router = express.Router();
 
-  const canManage = requireRole('admin', 'project_manager');
+  const canManage = requireRole('admin', 'project_administrator');
+  const canView = requireRole('admin', 'project_administrator', 'project_manager');
 
   router.get('/mine', requireRole('project_supervisor'), async (req, res) => {
     try {
@@ -35,7 +36,7 @@ export function buildShiftsRouter({
     }
   });
 
-  router.get('/', canManage, async (req, res) => {
+  router.get('/', canView, async (req, res) => {
     try {
       const projectId = req.user!.projectId ?? Number(req.query.projectId);
       if (!projectId) {

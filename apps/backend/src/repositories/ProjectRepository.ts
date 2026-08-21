@@ -74,6 +74,15 @@ class ProjectRepository {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // cerrar el historial abierto ANTES del unlink - una vez project_id = NULL se pierde la señal
+      await client.query(
+        'UPDATE user_project_history SET valid_to = NOW() WHERE project_id = $1 AND valid_to IS NULL',
+        [id],
+      );
+      await client.query(
+        'UPDATE device_project_history SET valid_to = NOW() WHERE project_id = $1 AND valid_to IS NULL',
+        [id],
+      );
       await client.query(
         'UPDATE users SET project_id = NULL, active = false WHERE project_id = $1',
         [id],

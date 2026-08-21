@@ -84,7 +84,12 @@ export function buildOperatorSessionsRouter({
       const shiftId =
         device?.project_id != null ? await shiftResolver.resolveForProject(device.project_id) : null;
 
-      const session = await operatorSessionRepo.start({ userId: req.user!.id, deviceId, shiftId });
+      const session = await operatorSessionRepo.start({
+        userId: req.user!.id,
+        deviceId,
+        shiftId,
+        projectId: device?.project_id ?? null,
+      });
 
       const equipment = await equipmentRepo.findByLinkedDevice(deviceId);
       if (equipment) await setEquipmentStatusForDevice(deviceId, 'active_pause');
@@ -128,7 +133,7 @@ export function buildOperatorSessionsRouter({
   router.get(
     '/report',
     authMiddleware,
-    requireRole('admin', 'project_manager', 'project_supervisor'),
+    requireRole('admin', 'project_administrator', 'project_supervisor', 'project_manager'),
     async (req, res) => {
       try {
         const { userId, deviceId, from, to } = req.query;

@@ -75,7 +75,7 @@ export function buildIncidentsRouter({
   router.post(
     '/:id/resolve',
     authMiddleware,
-    requireRole('admin', 'project_manager', 'project_supervisor'),
+    requireRole('admin', 'project_administrator', 'project_supervisor'),
     async (req, res) => {
       try {
         const incident = await incidentAlertService.resolve(Number(req.params.id), req.user!.id);

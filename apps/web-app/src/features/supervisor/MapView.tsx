@@ -1,6 +1,5 @@
 import {
-  createHeadingArrow,
-  shortVehicleLabel,
+  createVehicleMarkerElement,
   updateVehicleMarkerHeading,
   useEquipmentLayer,
   useGeofenceLayer,
@@ -91,11 +90,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         return;
       }
 
-      const el = document.createElement('div');
-      el.className = 'sup-vehicle-marker';
-      el.textContent = shortVehicleLabel(v.deviceId);
+      const el = createVehicleMarkerElement({ deviceId: v.deviceId, isMine: false, color: colors.accent });
       el.onclick = () => onVehicleClickRef.current(v.deviceId);
-      el.appendChild(createHeadingArrow(colors.accent));
       updateVehicleMarkerHeading(el, v.deviceId, v.course, v.speed);
 
       markersRef.current[id] = new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map);

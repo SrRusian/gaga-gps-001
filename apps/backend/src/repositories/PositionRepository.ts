@@ -3,6 +3,7 @@ import { query } from '../config/database';
 export interface PositionRow {
   id: number;
   device_id: string;
+  project_id: number | null;
   latitude: number;
   longitude: number;
   altitude: number;
@@ -18,6 +19,7 @@ export interface PositionRow {
 
 export interface PositionInput {
   deviceId: string;
+  projectId?: number | null;
   latitude: number;
   longitude: number;
   altitude?: number;
@@ -36,12 +38,13 @@ class PositionRepository {
     try {
       const { rows } = await query<PositionRow>(
         `INSERT INTO positions
-           (device_id, latitude, longitude, altitude, speed, course,
+           (device_id, project_id, latitude, longitude, altitude, speed, course,
             accuracy, battery, fix_time, protocol, valid, attributes)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          RETURNING *`,
         [
           position.deviceId,
+          position.projectId ?? null,
           position.latitude,
           position.longitude,
           position.altitude || 0,

@@ -60,11 +60,14 @@ tiempo real a tres interfaces web, detrás de un login único:
 
 - **Operador** (`/operator`) - vista en campo, en la tableta del
   vehículo: mapa, alertas, posición/velocidad propia.
-- **Supervisor** (`/supervisor`) - sala de control: toda la flota de
-  su turno, alertas activas, parada preventiva colectiva.
-- **Admin** (`/administrator`, o `/manager` para el rol acotado a un
-  proyecto) - gestión: proyectos, dispositivos, geocercas, equipo
-  estático, usuarios, turnos, historial/reportes, mapas satelitales.
+- **Supervisor** (`/supervisor`) y **Encargado** (`/manager`) - sala
+  de control de solo lectura: mapa, flota, alertas, historial. El
+  Supervisor se acota a su turno programado; el Encargado ve todo el
+  proyecto y todos sus turnos.
+- **Admin** (`/administrator`, o `/project-admin` para el rol
+  acotado a un proyecto) - gestión: proyectos, dispositivos,
+  geocercas, equipo estático, usuarios, turnos, historial/reportes,
+  mapas satelitales, configuración global.
 
 ## Arquitectura
 
@@ -180,15 +183,17 @@ separados por rol.
         ▼
 navigate(`/${resolveRolePath(role)}`)
         │
-        ├─ role="admin"               → /administrator
-        ├─ role="project_manager"     → /manager       (mismo panel que admin, acotado a un proyecto)
-        ├─ role="project_supervisor"  → /supervisor
-        └─ role="operator"            → /operator
+        ├─ role="admin"                  → /administrator
+        ├─ role="project_administrator"  → /project-admin (mismo panel que admin, acotado a un proyecto)
+        ├─ role="project_manager"        → /manager       (mismo panel que supervisor, solo lectura de todo el proyecto)
+        ├─ role="project_supervisor"     → /supervisor
+        └─ role="operator"               → /operator
 ```
 
-Solo 4 roles reales. `admin` y `project_manager` comparten
-literalmente el mismo componente de panel - dos rutas separadas solo
-para que la URL refleje con qué rol se entró.
+5 roles reales. `admin`/`project_administrator` comparten literalmente el
+mismo componente de panel, y `project_supervisor`/`project_manager`
+comparten el otro - la ruta separada solo existe para que la URL
+refleje con qué rol se entró y cada uno reciba sus permisos.
 
 **Roles genéricos, no una lista fija** - `users.role` es texto libre
 sin restricción a nivel de base de datos. Agregar un rol nuevo no
@@ -207,7 +212,7 @@ protegida más.
 - Los sockets también requieren JWT válido en el *handshake* de
   conexión.
 - `POST /api/fleet/stop`/`/resume` (parada preventiva colectiva)
-  requieren rol `admin`, `project_manager` o `project_supervisor`;
+  requieren rol `admin`, `project_administrator` o `project_supervisor`;
   `GET /api/fleet/state` y `/stop/status` son de solo lectura y
   públicos.
 
@@ -249,20 +254,26 @@ alcance global - todos los demás roles siempre tienen un proyecto.
 
 **Roles de proyecto**:
 
-- **`project_manager` (Encargado de Proyecto)** - equivalente a un
-  Admin, acotado a su propio proyecto. Acceso total (crear/editar/
-  eliminar) a Geocercas, Equipo estático, Turnos e Historial de su
-  proyecto. Sobre Dispositivos/Usuarios: nunca crea ni elimina
-  ninguno (exclusivo de `admin`); de un dispositivo solo edita
-  nombre/tipo; de un usuario solo activa/desactiva y cambia el rol
-  (nunca a `admin`).
+- **`project_administrator` (Administrador de Proyecto)** - equivalente a
+  un Admin, acotado a su propio proyecto. Acceso total
+  (crear/editar/eliminar) a Dispositivos, Usuarios, Geocercas, Equipo
+  estático, Mapas, Turnos e Historial de su proyecto. Nunca puede
+  mover un dispositivo/usuario a OTRO proyecto (exclusivo de
+  `admin`), ni asignar el rol `admin` a un usuario.
+- **`project_manager` (Encargado de Proyecto)** - mismo panel que Supervisor, pero
+  sin ninguna capacidad de edición y sin acotarse a un turno: ve la
+  flota completa del proyecto en tiempo real, todos los turnos
+  programados y el historial completo de alertas.
 - **`project_supervisor` (Supervisor de Proyecto)** - panel propio
   (sala de control), con el mapa y la lista de vehículos acotados a
-  su **turno programado asignado**, no a todo el proyecto. Acceso
-  total a Geocercas/Equipo estático/Mapas de su proyecto. Sin acceso
-  a Dispositivos, Usuarios, Historial de recorridos, Reportes ni
-  Sistema. El historial de alertas (no de posiciones) se acota a su
-  propio turno, salvo una alerta todavía activa de un turno anterior.
+  su **turno programado asignado**, no a todo el proyecto. Solo
+  lectura - sin acceso a Dispositivos, Usuarios, Geocercas, Equipo
+  estático, Mapas, Historial de recorridos, Reportes ni Sistema
+  (conserva parada preventiva colectiva y resolver incidentes, por
+  ser acciones operativas de seguridad en vivo, no edición de
+  configuración). El historial de alertas (no de posiciones) se
+  acota a su propio turno, salvo una alerta todavía activa de un
+  turno anterior.
 
 **Admin → Dashboard** es un mapa grande con toda la operación en
 tiempo real - "Global" por defecto (todos los proyectos a la vez), o
@@ -282,6 +293,15 @@ historial de alertas (incluidos los `.mbtiles` de sus mapas). Nunca
 elimina usuarios ni dispositivos - se desvinculan
 (`project_id = NULL`); los usuarios además se desactivan. Toda la
 operación corre en una sola transacción.
+
+**Historial de proyecto por dispositivo/usuario** - mover un
+dispositivo u operador de un proyecto a otro (solo `admin`) queda
+registrado con fecha exacta en `device_project_history`/
+`user_project_history`, para poder saber a futuro en qué proyecto
+(y con qué turno) estuvo un dispositivo/operador en una fecha
+pasada, incluso después de reasignarlo. `positions.project_id` y
+`operator_sessions.project_id` guardan el proyecto vigente al
+momento de cada registro por el mismo motivo.
 
 ## Modelo de datos
 
@@ -303,6 +323,9 @@ la primera vez que se crea el volumen de PostgreSQL.
 | `alert_events`             | Historial unificado de las 6 familias de alerta, para "Activas"/"Historial" del panel de Supervisor |
 | `maps`                     | Mapas satelitales/drone importados (metadata del pipeline, no el archivo en sí)                     |
 | `device_sensor_snapshots`  | Sensores del navegador del Operador (batería, red, memoria) - hypertable separada de `positions`     |
+| `device_project_history`   | Historial temporal de a qué proyecto perteneció cada dispositivo (`valid_from`/`valid_to`)           |
+| `user_project_history`     | Historial temporal de a qué proyecto perteneció cada usuario (`valid_from`/`valid_to`)               |
+| `system_settings`          | Configuración editable desde el panel de Admin en tiempo real (ej. clave compartida de telemetría)   |
 
 ## Funcionalidades
 
@@ -374,7 +397,7 @@ Supervisor: Calles (OSM), Satelital (solo capas importadas) o Mixto.
 ### Turnos de operador
 
 Ver [Turnos y vinculación de dispositivo](#turnos-y-vinculación-de-dispositivo).
-El Encargado de Proyecto crea los turnos programados y asigna un
+El Administrador de Proyecto crea los turnos programados y asigna un
 Supervisor a cada uno; al iniciar un turno de operador, el sistema
 resuelve solo a qué turno programado pertenece según la hora actual.
 
@@ -419,15 +442,18 @@ definida.
 
 ## Paneles
 
-**Admin/Encargado** (`/administrator`, `/manager`) - Dashboard (mapa
-grande con toda la operación, overlays de Proyectos/Turnos/
-Dispositivos/Usuarios/Geocercas/Equipo/Mapas), Reportes (exportación
-CSV), Sistema (health check en vivo). Historial de recorridos vive
+**Admin/Administrador de Proyecto** (`/administrator`,
+`/project-admin`) - Dashboard (mapa grande con toda la operación,
+overlays de Proyectos/Turnos/Dispositivos/Usuarios/Geocercas/Equipo/
+Mapas), Reportes (exportación CSV), Sistema (configuración global -
+solo Admin - y health check en vivo). Historial de recorridos vive
 como modo dentro de Dashboard.
 
-**Supervisor** (`/supervisor`) - sala de control con mapa, lista de
-vehículos de su turno, alertas activas/historial y botón de parada
-preventiva colectiva.
+**Supervisor/Encargado** (`/supervisor`, `/manager`) - mismo panel,
+sala de control con mapa, lista de vehículos, alertas activas/
+historial. Supervisor ve solo su turno programado y conserva el
+botón de parada preventiva colectiva; Encargado ve todo el proyecto
+y todos los turnos, sin ninguna acción de edición.
 
 **Operador** (`/operator`) - vista en campo. Principio de diseño:
 *local complementa, nunca reemplaza* - la posición/velocidad propia
@@ -611,40 +637,40 @@ Todas las rutas bajo `/api/*` (excepto `/api/auth/login` y
 | GET/POST | `/gps`                                    | Clave compartida opcional    | Receptor de telemetría (protocolo OsmAnd)                                       |
 | GET      | `/tiles/maps/:mapId/:z/:x/:y.png`         | No                            | Tiles offline (MBTiles) de un mapa específico                                   |
 | GET      | `/tiles/active-maps.json`                 | JWT opcional                 | Lista de mapas activos+listos - sin token, todos; con token, filtrado por proyecto |
-| GET      | `/api/maps`                               | JWT (`admin`/`project_manager`) | Listar mapas importados con su estado                                        |
-| POST     | `/api/maps`                               | JWT (`admin`/`project_manager`) | Importar mapa - multipart `name`, `image`, `worldFile`, `sourceCrs`          |
-| PATCH    | `/api/maps/:id`                           | JWT (`admin`/`project_manager`) | Renombrar un mapa                                                            |
-| POST     | `/api/maps/:id/activate`                  | JWT (`admin`/`project_manager`) | Activa este mapa como capa visible                                          |
-| POST     | `/api/maps/:id/deactivate`                | JWT (`admin`/`project_manager`) | Desactiva este mapa                                                         |
-| DELETE   | `/api/maps/:id`                           | JWT (`admin`/`project_manager`) | Eliminar un mapa (rechaza si está activo)                                   |
+| GET      | `/api/maps`                               | JWT (cualquier rol de proyecto) | Listar mapas importados con su estado                                        |
+| POST     | `/api/maps`                               | JWT (`admin`/`project_administrator`) | Importar mapa - multipart `name`, `image`, `worldFile`, `sourceCrs`          |
+| PATCH    | `/api/maps/:id`                           | JWT (`admin`/`project_administrator`) | Renombrar un mapa                                                            |
+| POST     | `/api/maps/:id/activate`                  | JWT (`admin`/`project_administrator`) | Activa este mapa como capa visible                                          |
+| POST     | `/api/maps/:id/deactivate`                | JWT (`admin`/`project_administrator`) | Desactiva este mapa                                                         |
+| DELETE   | `/api/maps/:id`                           | JWT (`admin`/`project_administrator`) | Eliminar un mapa (rechaza si está activo)                                   |
 | POST     | `/api/auth/login`                         | No                            | Login único - devuelve JWT + rol                                                |
 | POST     | `/api/auth/logout`                        | No                            | Logout (invalidación es responsabilidad del cliente)                           |
 | GET      | `/api/devices/lookup/:uniqueId`           | No                            | Verifica si un dispositivo existe y si tiene turno activo                       |
 | GET      | `/api/devices`                            | JWT                           | Listar dispositivos                                                            |
 | GET      | `/api/devices/:id`                        | JWT                           | Detalle de un dispositivo                                                      |
-| POST     | `/api/devices`                            | JWT (`admin`)                 | Crear dispositivo                                                              |
-| PATCH    | `/api/devices/:id`                        | JWT                           | Editar dispositivo                                                            |
-| DELETE   | `/api/devices/:id?force=true`             | JWT (`admin`)                 | Eliminar dispositivo (`force=true` purga también su historial)                  |
-| GET      | `/api/geofences`                          | JWT                           | Listar geocercas activas                                                       |
-| POST     | `/api/geofences`                          | JWT                           | Crear geocerca - `shapeType`: `circle`\|`polygon`\|`polyline`                    |
-| PATCH    | `/api/geofences/:id`                      | JWT                           | Editar geocerca                                                                |
-| DELETE   | `/api/geofences/:id`                      | JWT                           | Eliminar geocerca                                                              |
+| POST     | `/api/devices`                            | JWT (`admin`/`project_administrator`) | Crear dispositivo (no-admin siempre dentro de su propio proyecto)            |
+| PATCH    | `/api/devices/:id`                        | JWT (`admin`/`project_administrator`) | Editar dispositivo (mover a OTRO proyecto es exclusivo de `admin`)           |
+| DELETE   | `/api/devices/:id?force=true`             | JWT (`admin`/`project_administrator`) | Eliminar dispositivo (`force=true` purga también su historial)                  |
+| GET      | `/api/geofences`                          | JWT (cualquier rol de proyecto) | Listar geocercas activas                                                       |
+| POST     | `/api/geofences`                          | JWT (`admin`/`project_administrator`) | Crear geocerca - `shapeType`: `circle`\|`polygon`\|`polyline`                    |
+| PATCH    | `/api/geofences/:id`                      | JWT (`admin`/`project_administrator`) | Editar geocerca                                                                |
+| DELETE   | `/api/geofences/:id`                      | JWT (`admin`/`project_administrator`) | Eliminar geocerca                                                              |
 | GET      | `/api/geofences/export.geojson`           | JWT (header o `?token=`)      | Exportar geocercas activas en GeoJSON                                          |
 | GET      | `/api/geofences/export.kml`               | JWT (header o `?token=`)      | Exportar geocercas activas en KML                                              |
-| POST     | `/api/geofences/import`                   | JWT                           | Importar geocercas - body `{ format: 'geojson'\|'kml', data }`                   |
-| GET      | `/api/equipment`                          | JWT                           | Listar equipo estático                                                         |
-| POST     | `/api/equipment`                          | JWT                           | Crear equipo estático                                                          |
-| PATCH    | `/api/equipment/:id`                      | JWT                           | Editar nombre/tipo/posición/radios/dispositivo vinculado                        |
-| PATCH    | `/api/equipment/:id/status`               | JWT                           | Cambiar estado manualmente (ignorado si el equipo tiene tableta vinculada)       |
-| DELETE   | `/api/equipment/:id`                      | JWT                           | Eliminar equipo                                                                |
+| POST     | `/api/geofences/import`                   | JWT (`admin`/`project_administrator`) | Importar geocercas - body `{ format: 'geojson'\|'kml', data }`                   |
+| GET      | `/api/equipment`                          | JWT (cualquier rol de proyecto) | Listar equipo estático                                                         |
+| POST     | `/api/equipment`                          | JWT (`admin`/`project_administrator`) | Crear equipo estático                                                          |
+| PATCH    | `/api/equipment/:id`                      | JWT (`admin`/`project_administrator`) | Editar nombre/tipo/posición/radios/dispositivo vinculado                        |
+| PATCH    | `/api/equipment/:id/status`               | JWT (`admin`/`project_administrator`) | Cambiar estado manualmente (ignorado si el equipo tiene tableta vinculada)       |
+| DELETE   | `/api/equipment/:id`                      | JWT (`admin`/`project_administrator`) | Eliminar equipo                                                                |
 | GET      | `/api/reports/history`                    | JWT                           | Historial de posiciones por dispositivo y rango de fechas                       |
 | GET      | `/api/reports/history-with-zones`         | JWT                           | Igual, anotando en qué geocerca estaba cada posición                            |
 | GET      | `/api/reports/history/csv`                | JWT                           | Exportar historial a CSV                                                        |
-| GET      | `/api/users`                              | JWT (`admin`)                 | Listar usuarios                                                                 |
-| POST     | `/api/users`                              | JWT (`admin`)                 | Crear usuario                                                                   |
-| PATCH    | `/api/users/:id`                          | JWT                           | Editar usuario (nombre, rol, activo)                                           |
-| POST     | `/api/users/:id/password`                 | JWT (`admin`)                 | Cambiar contraseña                                                              |
-| DELETE   | `/api/users/:id`                          | JWT (`admin`)                 | Eliminar usuario                                                                |
+| GET      | `/api/users`                              | JWT (`admin`/`project_administrator`) | Listar usuarios                                                                 |
+| POST     | `/api/users`                              | JWT (`admin`/`project_administrator`) | Crear usuario (no-admin siempre dentro de su propio proyecto, nunca rol `admin`) |
+| PATCH    | `/api/users/:id`                          | JWT (`admin`/`project_administrator`) | Editar usuario (mover a OTRO proyecto y asignar rol `admin` son exclusivos de `admin`) |
+| POST     | `/api/users/:id/password`                 | JWT (`admin`/`project_administrator`) | Cambiar contraseña                                                              |
+| DELETE   | `/api/users/:id`                          | JWT (`admin`/`project_administrator`) | Eliminar usuario                                                                |
 | GET      | `/api/operator-sessions/active?deviceId=` | No                            | Turno activo (si lo hay) de un dispositivo                                      |
 | POST     | `/api/operator-sessions/start`            | JWT                           | Inicia turno del usuario autenticado en un dispositivo                          |
 | POST     | `/api/operator-sessions/:id/end`          | JWT                           | Cierra el turno explícitamente                                                  |
@@ -654,6 +680,8 @@ Todas las rutas bajo `/api/*` (excepto `/api/auth/login` y
 | POST     | `/api/fleet/stop`                         | JWT (rol de supervisión)      | Activar parada preventiva colectiva                                            |
 | POST     | `/api/fleet/resume`                       | JWT (rol de supervisión)      | Desactivar parada preventiva                                                    |
 | GET      | `/api/fleet/stop/status`                  | No                            | Estado actual de la parada preventiva                                          |
+| GET      | `/api/settings`                           | JWT (`admin`)                 | Configuración global editable (ej. `telemetrySharedSecret`)                    |
+| PATCH    | `/api/settings`                           | JWT (`admin`)                 | Actualiza un valor - aplica en caliente, sin reiniciar el proceso                |
 | GET      | `/health`                                 | No                            | Estado de PostgreSQL/Redis y de la parada preventiva                            |
 
 ## Eventos de Socket.io

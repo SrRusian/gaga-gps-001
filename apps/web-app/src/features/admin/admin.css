@@ -622,19 +622,6 @@ tbody tr:hover {
   border-color: var(--ad-accent);
 }
 
-.dash-vehicle-marker {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: var(--ad-accent);
-  color: #0b0d10;
-  font-size: 11px;
-  font-weight: 700;
-  border: 2px solid #0b0d10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 .btn.active {
   background: var(--ad-accent);
   color: #0b0d10;

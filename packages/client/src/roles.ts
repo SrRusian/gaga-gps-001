@@ -1,5 +1,6 @@
 const ROLE_PATH: Record<string, string> = {
   admin: 'administrator',
+  project_administrator: 'project-admin',
   project_manager: 'manager',
   project_supervisor: 'supervisor',
   operator: 'operator',
@@ -13,6 +14,7 @@ const ROLE_LABEL: Record<string, string> = {
   operator: 'Operador',
   project_supervisor: 'Supervisor de Proyecto',
   project_manager: 'Encargado de Proyecto',
+  project_administrator: 'Administrador de Proyecto',
   admin: 'Administrador',
 };
 
