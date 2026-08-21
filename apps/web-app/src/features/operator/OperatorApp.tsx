@@ -1,7 +1,7 @@
 import { clearSession, getStoredUser } from '@gaga-gps/client';
 import { haversineMeters, useMapMode } from '@gaga-gps/map-core';
 import type { Position } from '@gaga-gps/shared-types';
-import { ConnectionStatusDot, MapModeSelector } from '@gaga-gps/ui';
+import { ConnectionStatusDot, MapModeSelector, VehicleDetailPanel } from '@gaga-gps/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './operator.css';
@@ -16,9 +16,11 @@ import { useDeviceId } from './useDeviceId';
 import { useIncidentReporter } from './useIncidentReporter';
 import { useOperatorAuth } from './useOperatorAuth';
 import { useOperatorSocket } from './useOperatorSocket';
+import { useActiveOperatorSession } from '../../hooks/useActiveOperatorSession';
 
 const AUTO_FOLLOW_STORAGE_KEY = 'gaga_operator_auto_follow';
 const THREAT_FRAME_HOLD_MS = 8000;
+const OFFLINE_THRESHOLD_MS = 45000;
 
 function useAutoFollow(): [boolean, (next: boolean) => void] {
   const [autoFollow, setAutoFollowState] = useState<boolean>(() => {
@@ -109,6 +111,12 @@ export default function OperatorApp() {
   }, [myDisplay, displayFleet, deviceId]);
 
   const [showDeviceSetup, setShowDeviceSetup] = useState(!deviceId);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  const selectedVehicle = selectedVehicleId ? (displayFleet[selectedVehicleId] ?? null) : null;
+  const selectedVehicleOffline = selectedVehicle
+    ? Date.now() - new Date(selectedVehicle.fixTime).getTime() > OFFLINE_THRESHOLD_MS
+    : false;
+  const selectedVehicleSession = useActiveOperatorSession(selectedVehicleId);
 
   useEffect(() => {
     if (!myDisplay) return;
@@ -223,6 +231,8 @@ export default function OperatorApp() {
                 (nearestVehicle && nearestVehicle.distance <= 80 ? nearestVehicle.deviceId : null)
               }
               highlightedGeofenceId={activeGeofenceId}
+              selectedVehicleId={selectedVehicleId}
+              onVehicleClick={setSelectedVehicleId}
               onUserInteraction={() => setAutoFollow(false)}
             />
 
@@ -343,6 +353,14 @@ export default function OperatorApp() {
           onClose={() => setShowReportIncident(false)}
           error={reportIncidentError}
           submitting={reportingIncident}
+        />
+      )}
+      {selectedVehicle && (
+        <VehicleDetailPanel
+          vehicle={selectedVehicle}
+          offline={selectedVehicleOffline}
+          operatorSession={selectedVehicleSession}
+          onClose={() => setSelectedVehicleId(null)}
         />
       )}
     </div>

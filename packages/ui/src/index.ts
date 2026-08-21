@@ -8,4 +8,5 @@ export * from './VehicleCard';
 export * from './StatCard';
 export * from './ConnectionStatusDot';
 export * from './PanelHeader';
+export * from './VehicleDetailPanel';
 import './styles.css';

@@ -4,18 +4,17 @@ import type { AlertEventType } from '@gaga-gps/shared-types';
 import {
   AlertBanner,
   Button,
-  ConnectionStatusDot,
-  formatAccuracy,
   MapModeSelector,
   PanelHeader,
   StatCard,
   VehicleCard,
+  VehicleDetailPanel,
 } from '@gaga-gps/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './supervisor.css';
 import { MapView, type MapViewHandle } from './MapView';
-import { useActiveOperatorSession } from './useActiveOperatorSession';
+import { useActiveOperatorSession } from '../../hooks/useActiveOperatorSession';
 import { EMPTY_FILTERS, useAlertHistory } from './useAlertHistory';
 import { useMyShift } from './useMyShift';
 import { useSupervisorSocket } from './useSupervisorSocket';
@@ -148,6 +147,7 @@ export default function SupervisorApp() {
             equipment={equipment}
             activeMaps={activeMaps}
             mapMode={mapMode}
+            selectedVehicleId={selectedVehicle}
             onVehicleClick={selectVehicle}
           />
         </div>
@@ -348,83 +348,12 @@ export default function SupervisorApp() {
         </div>
 
         {detail && (
-            <div className="sup-vehicle-detail sup-glass">
-              <div className="sup-detail-title">
-                <span>
-                  {detail.deviceName
-                    ? `${detail.deviceName}${detail.deviceType ? ` (${detail.deviceType})` : ''}`
-                    : `Vehículo ${detail.deviceId}`}
-                </span>
-                <button className="sup-btn-close" onClick={() => setSelectedVehicle(null)}>
-                  X
-                </button>
-              </div>
-              <div className="sup-detail-row">
-                <span className="sup-detail-label">Estado</span>
-                <span className="sup-detail-value sup-detail-status">
-                  <ConnectionStatusDot connected={!detailOffline} />
-                  {detailOffline ? 'Sin señal' : 'En línea'}
-                </span>
-              </div>
-              <div className="sup-detail-row">
-                <span className="sup-detail-label">Operador</span>
-                <span className="sup-detail-value">
-                  {activeSession ? activeSession.user_name : 'Sin turno abierto'}
-                </span>
-              </div>
-              {activeSession && (
-                <div className="sup-detail-row">
-                  <span className="sup-detail-label">Turno iniciado</span>
-                  <span className="sup-detail-value">
-                    {new Date(activeSession.started_at).toLocaleString('es-MX')}
-                  </span>
-                </div>
-              )}
-              <div className="sup-detail-row">
-                <span className="sup-detail-label">Velocidad</span>
-                <span className="sup-detail-value">
-                  {Math.round((detail.speed || 0) * 3.6)} km/h
-                </span>
-              </div>
-              <div className="sup-detail-row">
-                <span className="sup-detail-label">Rumbo</span>
-                <span className="sup-detail-value">
-                  {detail.course !== undefined ? `${Math.round(detail.course)}°` : '--'}
-                </span>
-              </div>
-              <div className="sup-detail-row">
-                <span className="sup-detail-label">Latitud</span>
-                <span className="sup-detail-value">{detail.latitude?.toFixed(6)}</span>
-              </div>
-              <div className="sup-detail-row">
-                <span className="sup-detail-label">Longitud</span>
-                <span className="sup-detail-value">{detail.longitude?.toFixed(6)}</span>
-              </div>
-              <div className="sup-detail-row">
-                <span className="sup-detail-label">Precisión GPS</span>
-                <span className="sup-detail-value">{formatAccuracy(detail.accuracy)}</span>
-              </div>
-              <div className="sup-detail-row">
-                <span className="sup-detail-label">Altitud</span>
-                <span className="sup-detail-value">
-                  {detail.altitude !== undefined ? `${Math.round(detail.altitude)} m` : '--'}
-                </span>
-              </div>
-              <div className="sup-detail-row">
-                <span className="sup-detail-label">Batería</span>
-                <span className="sup-detail-value">
-                  {detail.battery !== undefined && detail.battery !== null
-                    ? `${Math.round(detail.battery)}%`
-                    : '--'}
-                </span>
-              </div>
-              <div className="sup-detail-row">
-                <span className="sup-detail-label">Última actualización</span>
-                <span className="sup-detail-value">
-                  {new Date(detail.fixTime || Date.now()).toLocaleTimeString('es-MX')}
-                </span>
-              </div>
-            </div>
+          <VehicleDetailPanel
+            vehicle={detail}
+            offline={detailOffline}
+            operatorSession={activeSession}
+            onClose={() => setSelectedVehicle(null)}
+          />
         )}
       </main>
     </div>

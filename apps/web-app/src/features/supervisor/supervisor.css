@@ -340,58 +340,6 @@
   color: var(--sup-warning);
 }
 
-.sup-vehicle-detail {
-  position: fixed;
-  bottom: 16px;
-  right: 16px;
-  z-index: 30;
-  width: min(300px, calc(100vw - 32px));
-  max-height: calc(100vh - var(--sup-header-h) - 48px);
-  overflow-y: auto;
-  padding: 16px;
-}
-.sup-detail-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--sup-text);
-  margin-bottom: 12px;
-  display: flex;
-  justify-content: space-between;
-}
-.sup-btn-close {
-  background: none;
-  border: none;
-  color: var(--sup-text-muted);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-}
-.sup-btn-close:hover {
-  color: var(--sup-text);
-}
-.sup-detail-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 5px 0;
-  font-size: 12px;
-  border-bottom: 1px solid var(--sup-border);
-}
-.sup-detail-row:last-child {
-  border-bottom: none;
-}
-.sup-detail-label {
-  color: var(--sup-text-muted);
-}
-.sup-detail-value {
-  color: var(--sup-text);
-  font-weight: 500;
-}
-.sup-detail-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .sup-app .btn {
   background: var(--sup-accent);
   border: none;
@@ -551,9 +499,7 @@
     max-width: none;
     align-items: stretch;
   }
-  .sup-vehicle-panel,
-  .sup-vehicle-detail,
-  .sup-float-panel {
+  .sup-vehicle-panel {
     width: 100%;
     max-width: none;
   }

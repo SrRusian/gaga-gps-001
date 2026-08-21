@@ -5,15 +5,18 @@ import {
   EQUIPMENT_CORE_COLOR,
   EQUIPMENT_OUTER_COLOR,
   lineToBufferPolygon,
+  setVehicleMarkerSelected,
+  setVehicleMarkerStale,
   updateVehicleMarkerHeading,
   useEquipmentLayer,
   useGeofenceLayer,
   useMapLibreMap,
   useMapMode,
   useSatelliteLayers,
+  useVehicleAccuracyLayer,
 } from '@gaga-gps/map-core';
 import type { EquipmentMarkerData } from '@gaga-gps/map-core';
-import { MapModeSelector, Modal, StatCard } from '@gaga-gps/ui';
+import { MapModeSelector, Modal, StatCard, VehicleDetailPanel } from '@gaga-gps/ui';
 import type { ActiveMap, Position } from '@gaga-gps/shared-types';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
@@ -23,6 +26,7 @@ import type { GeoJSONSource } from 'maplibre-gl';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { adminApi } from '../api';
 import { toGeofence } from '../geofenceMapper';
+import { useActiveOperatorSession } from '../../../hooks/useActiveOperatorSession';
 import type {
   DeviceRow,
   EquipmentRow,
@@ -40,6 +44,8 @@ function formatHistoryDateTime(iso: string): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
+
+const OFFLINE_THRESHOLD_MS = 45000;
 
 type Scope = 'global' | number;
 type Overlay =
@@ -262,6 +268,7 @@ export function DashboardSection() {
   const circleMarkerRef = useRef<maplibregl.Marker | null>(null);
   const equipmentMarkerRef = useRef<maplibregl.Marker | null>(null);
   const vehicleMarkersRef = useRef<Record<string, maplibregl.Marker>>({});
+  const selectVehicleRef = useRef<(deviceId: string) => void>(() => {});
   const [showGeoPanel, setShowGeoPanel] = useState(false);
   const [geoShape, setGeoShape] = useState<GeofenceShape>('circle');
   const [geoSelectedCenter, setGeoSelectedCenter] = useState<{ lat: number; lon: number } | null>(
@@ -308,6 +315,7 @@ export function DashboardSection() {
   const mapsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [livePositions, setLivePositions] = useState<Record<string, Position>>({});
+  const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
 
   const scope: Scope = isAdmin
     ? selectedProjectId === 'global' || selectedProjectId === ''
@@ -512,6 +520,12 @@ export function DashboardSection() {
     return Object.values(livePositions).filter((p) => ids.has(p.deviceId));
   }, [livePositions, scopedDevices]);
 
+  const detail = selectedVehicle ? (livePositions[selectedVehicle] ?? null) : null;
+  const detailOffline = detail
+    ? Date.now() - new Date(detail.fixTime).getTime() > OFFLINE_THRESHOLD_MS
+    : false;
+  const activeSession = useActiveOperatorSession(selectedVehicle);
+
   const hasMaps = scopedActiveMaps.length > 0;
   useEffect(() => {
     if (!hasMaps && mapMode !== 'streets') setMapMode('streets');
@@ -520,6 +534,18 @@ export function DashboardSection() {
 
   useGeofenceLayer(map, loaded, geofencesForLayer);
   useEquipmentLayer(map, loaded, historyMode ? [] : equipmentForLayer);
+  useVehicleAccuracyLayer(
+    map,
+    loaded,
+    historyMode
+      ? []
+      : scopedLivePositions.map((pos) => ({
+          deviceId: pos.deviceId,
+          latitude: pos.latitude,
+          longitude: pos.longitude,
+          accuracyMeters: pos.accuracy,
+        })),
+  );
   useSatelliteLayers(map, loaded, scopedActiveMaps, mapMode);
 
   useEffect(() => {
@@ -544,6 +570,10 @@ export function DashboardSection() {
       if (existing) {
         existing.setLngLat(lngLat);
         updateVehicleMarkerHeading(existing.getElement(), pos.deviceId, pos.course, pos.speed);
+        setVehicleMarkerStale(
+          existing.getElement(),
+          Date.now() - new Date(pos.fixTime).getTime() > OFFLINE_THRESHOLD_MS,
+        );
         return;
       }
       const el = createVehicleMarkerElement({
@@ -552,11 +582,26 @@ export function DashboardSection() {
         color: 'var(--ad-accent)',
       });
       updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed);
+      setVehicleMarkerStale(el, Date.now() - new Date(pos.fixTime).getTime() > OFFLINE_THRESHOLD_MS);
+      el.onclick = () => selectVehicleRef.current(pos.deviceId);
       vehicleMarkersRef.current[pos.deviceId] = new maplibregl.Marker({ element: el })
         .setLngLat(lngLat)
         .addTo(map);
     });
   }, [map, loaded, scopedLivePositions, historyMode]);
+
+  useEffect(() => {
+    Object.entries(vehicleMarkersRef.current).forEach(([deviceId, marker]) => {
+      setVehicleMarkerSelected(marker.getElement(), deviceId === selectedVehicle);
+    });
+  }, [selectedVehicle, scopedLivePositions]);
+
+  function selectVehicle(deviceId: string) {
+    setSelectedVehicle(deviceId);
+    const pos = livePositions[deviceId];
+    if (pos && map) map.flyTo({ center: [pos.longitude, pos.latitude], zoom: 18, duration: 800 });
+  }
+  selectVehicleRef.current = selectVehicle;
 
   function enterHistoryMode() {
     setHistoryMode(true);
@@ -2889,6 +2934,15 @@ export function DashboardSection() {
           </button>
         </div>
       </Modal>
+
+      {detail && (
+        <VehicleDetailPanel
+          vehicle={detail}
+          offline={detailOffline}
+          operatorSession={activeSession}
+          onClose={() => setSelectedVehicle(null)}
+        />
+      )}
     </>
   );
 }

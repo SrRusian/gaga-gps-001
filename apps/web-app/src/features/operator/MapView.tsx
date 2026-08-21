@@ -1,5 +1,6 @@
 import {
   createVehicleMarkerElement,
+  setVehicleMarkerSelected,
   setVehicleMarkerStale,
   setVehicleMarkerThreat,
   updateVehicleMarkerHeading,
@@ -8,6 +9,7 @@ import {
   useIncidentLayer,
   useMapLibreMap,
   useSatelliteLayers,
+  useVehicleAccuracyLayer,
 } from '@gaga-gps/map-core';
 import type { EquipmentMarkerData, IncidentMarkerData, MapMode } from '@gaga-gps/map-core';
 import { colors } from '@gaga-gps/ui';
@@ -37,6 +39,8 @@ export interface MapViewProps {
   myDeviceId: string | null;
   threatDeviceId?: string | null;
   highlightedGeofenceId?: number | null;
+  selectedVehicleId?: string | null;
+  onVehicleClick?: (deviceId: string) => void;
   onUserInteraction?: () => void;
 }
 
@@ -51,6 +55,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     myDeviceId,
     threatDeviceId,
     highlightedGeofenceId,
+    selectedVehicleId = null,
+    onVehicleClick,
     onUserInteraction,
   },
   ref,
@@ -63,6 +69,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const markersRef = useRef<Record<string, maplibregl.Marker>>({});
   const lastFixTimeRef = useRef<Record<string, number>>({});
   const glideFrameRef = useRef<Record<string, number>>({});
+  const onVehicleClickRef = useRef(onVehicleClick);
+  onVehicleClickRef.current = onVehicleClick;
 
   function glideMarkerTo(
     marker: maplibregl.Marker,
@@ -105,6 +113,16 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   }, []);
 
   useSatelliteLayers(map, loaded, activeMaps, mapMode, 'geofences-fill', true);
+  useVehicleAccuracyLayer(
+    map,
+    loaded,
+    Object.values(fleet).map((pos) => ({
+      deviceId: pos.deviceId,
+      latitude: pos.latitude,
+      longitude: pos.longitude,
+      accuracyMeters: pos.accuracy,
+    })),
+  );
   useGeofenceLayer(map, loaded, geofences, highlightedGeofenceId);
   useIncidentLayer(map, loaded, incidents);
   useEquipmentLayer(map, loaded, equipment);
@@ -147,6 +165,22 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       equipment.filter((eq) => eq.linkedDeviceId).map((eq) => eq.linkedDeviceId as string),
     );
 
+    const currentIds = new Set(
+      Object.values(fleet)
+        .filter((pos) => !linkedDeviceIds.has(pos.deviceId))
+        .map((pos) => `vehicle-${pos.deviceId}`),
+    );
+    Object.keys(markersRef.current).forEach((vehicleId) => {
+      if (!currentIds.has(vehicleId)) {
+        markersRef.current[vehicleId].remove();
+        delete markersRef.current[vehicleId];
+        delete lastFixTimeRef.current[vehicleId];
+        const frame = glideFrameRef.current[vehicleId];
+        if (frame) cancelAnimationFrame(frame);
+        delete glideFrameRef.current[vehicleId];
+      }
+    });
+
     Object.values(fleet).forEach((pos) => {
       const vehicleId = `vehicle-${pos.deviceId}`;
 
@@ -180,18 +214,9 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const color = isMine ? colors.myVehicle : colors.otherVehicle;
       const el = createVehicleMarkerElement({ deviceId: pos.deviceId, isMine, color });
       updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed);
+      el.onclick = () => onVehicleClickRef.current?.(pos.deviceId);
 
-      markersRef.current[vehicleId] = new maplibregl.Marker({ element: el })
-        .setLngLat(lngLat)
-        .setPopup(
-          new maplibregl.Popup({ offset: 25 }).setHTML(
-            `<b>${pos.deviceName || `Vehículo ${pos.deviceId}`}${pos.deviceType ? ` <small>(${pos.deviceType})</small>` : ''}</b><br>
-             Lat: ${pos.latitude.toFixed(6)}<br>
-             Lon: ${pos.longitude.toFixed(6)}<br>
-             Speed: ${((pos.speed ?? 0) * 3.6).toFixed(1)} km/h`,
-          ),
-        )
-        .addTo(map);
+      markersRef.current[vehicleId] = new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map);
     });
   }, [map, loaded, fleet, myDeviceId, equipment]);
 
@@ -199,8 +224,9 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     Object.entries(markersRef.current).forEach(([vehicleId, marker]) => {
       const deviceId = vehicleId.replace(/^vehicle-/, '');
       setVehicleMarkerThreat(marker.getElement(), deviceId === threatDeviceId);
+      setVehicleMarkerSelected(marker.getElement(), deviceId === selectedVehicleId);
     });
-  }, [threatDeviceId, fleet]);
+  }, [threatDeviceId, selectedVehicleId, fleet]);
 
   useEffect(() => {
     const interval = setInterval(() => {

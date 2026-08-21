@@ -21,7 +21,6 @@ export function createBaseMapStyle(): maplibregl.StyleSpecification {
         type: 'raster',
         source: 'osm',
         minzoom: 0,
-        maxzoom: 19,
       },
     ],
   };

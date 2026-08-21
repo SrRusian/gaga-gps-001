@@ -6,4 +6,5 @@ export * from './satelliteLayers';
 export * from './geofenceLayer';
 export * from './incidentLayer';
 export * from './equipmentLayer';
+export * from './accuracyLayer';
 export * from './vehicleMarker';
