@@ -18,3 +18,9 @@ export function haversineMeters(
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(a));
 }
+
+// metros por pixel de pantalla en Web Mercator, a una latitud/zoom dados - fórmula estándar,
+// usada para dibujar círculos de precisión GPS en tamaño de pantalla real (no geográfico)
+export function metersPerPixel(lat: number, zoom: number): number {
+  return (156543.03392 * Math.cos(toRad(lat))) / Math.pow(2, zoom);
+}

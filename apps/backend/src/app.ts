@@ -184,7 +184,17 @@ const positionProcessor = new PositionProcessor({
 const webAppRoot = path.join(__dirname, '../../web-app');
 const webAppDistDir = path.join(webAppRoot, 'dist');
 const webAppDir = fs.existsSync(path.join(webAppDistDir, 'index.html')) ? webAppDistDir : webAppRoot;
-app.use(express.static(webAppDir));
+// index.html sin cache - si no, un F5 puede seguir sirviendo una build vieja desde el cache del
+// navegador; los assets de Vite sí llevan hash en el nombre, esos cachean fuerte sin problema
+app.use(
+  express.static(webAppDir, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  }),
+);
 
 // ── Receptor de telemetría - GET /gps (protocolo OsmAnd) ────────
 app.use(telemetryLimiter, buildTelemetryRouter({ positionProcessor }));
@@ -356,6 +366,7 @@ app.get('/health', async (req, res) => {
 // ── Fallback de SPA ───────────────────────────────────────────────
 // debe ir al final - resuelve rutas de React Router a index.html; excluye /socket.io (lo maneja engine.io)
 app.get(/^\/(?!api|gps|tiles|health|socket\.io).*/, (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(webAppDir, 'index.html'));
 });
 

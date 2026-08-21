@@ -1,7 +1,7 @@
 import { clearSession, getStoredUser } from '@gaga-gps/client';
 import { haversineMeters, useMapMode } from '@gaga-gps/map-core';
 import type { Position } from '@gaga-gps/shared-types';
-import { ConnectionStatusDot, MapModeSelector, VehicleDetailPanel } from '@gaga-gps/ui';
+import { ConnectionStatusDot, MapModeSelector } from '@gaga-gps/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './operator.css';
@@ -16,11 +16,9 @@ import { useDeviceId } from './useDeviceId';
 import { useIncidentReporter } from './useIncidentReporter';
 import { useOperatorAuth } from './useOperatorAuth';
 import { useOperatorSocket } from './useOperatorSocket';
-import { useActiveOperatorSession } from '../../hooks/useActiveOperatorSession';
 
 const AUTO_FOLLOW_STORAGE_KEY = 'gaga_operator_auto_follow';
 const THREAT_FRAME_HOLD_MS = 8000;
-const OFFLINE_THRESHOLD_MS = 45000;
 
 function useAutoFollow(): [boolean, (next: boolean) => void] {
   const [autoFollow, setAutoFollowState] = useState<boolean>(() => {
@@ -50,7 +48,6 @@ export default function OperatorApp() {
     equipment,
     activeMaps,
     fleet,
-    myOnline,
     alert,
     nearestVehicle,
     threat,
@@ -62,7 +59,6 @@ export default function OperatorApp() {
   const [framingThreat, setFramingThreat] = useState(false);
   const [showReportIncident, setShowReportIncident] = useState(false);
   const mapRef = useRef<MapViewHandle>(null);
-  const hasCenteredRef = useRef(false);
   const { report: reportIncident, submitting: reportingIncident, error: reportIncidentError } =
     useIncidentReporter(deviceId);
 
@@ -111,23 +107,10 @@ export default function OperatorApp() {
   }, [myDisplay, displayFleet, deviceId]);
 
   const [showDeviceSetup, setShowDeviceSetup] = useState(!deviceId);
-  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
-  const selectedVehicle = selectedVehicleId ? (displayFleet[selectedVehicleId] ?? null) : null;
-  const selectedVehicleOffline = selectedVehicle
-    ? Date.now() - new Date(selectedVehicle.fixTime).getTime() > OFFLINE_THRESHOLD_MS
-    : false;
-  const selectedVehicleSession = useActiveOperatorSession(selectedVehicleId);
 
   useEffect(() => {
-    if (!myDisplay) return;
-    if (!hasCenteredRef.current) {
-      hasCenteredRef.current = true;
-      mapRef.current?.flyTo(myDisplay.latitude, myDisplay.longitude);
-      return;
-    }
-    if (autoFollow && !framingThreat) {
-      mapRef.current?.follow(myDisplay.latitude, myDisplay.longitude);
-    }
+    if (!myDisplay || !autoFollow || framingThreat) return;
+    mapRef.current?.follow(myDisplay.latitude, myDisplay.longitude);
   }, [myDisplay, autoFollow, framingThreat]);
 
   useEffect(() => {
@@ -150,6 +133,7 @@ export default function OperatorApp() {
 
   function centerOnMyPosition() {
     if (myDisplay) mapRef.current?.flyTo(myDisplay.latitude, myDisplay.longitude);
+    setAutoFollow(true);
   }
 
   async function handleReportIncident(category: Parameters<typeof reportIncident>[0], message: string) {
@@ -214,7 +198,7 @@ export default function OperatorApp() {
         </div>
       </header>
 
-      {!checking && (
+      {!checking && myDisplay && (
         <>
           <div className="op-map-area">
             <MapView
@@ -231,8 +215,7 @@ export default function OperatorApp() {
                 (nearestVehicle && nearestVehicle.distance <= 80 ? nearestVehicle.deviceId : null)
               }
               highlightedGeofenceId={activeGeofenceId}
-              selectedVehicleId={selectedVehicleId}
-              onVehicleClick={setSelectedVehicleId}
+              initialCenter={[myDisplay.longitude, myDisplay.latitude]}
               onUserInteraction={() => setAutoFollow(false)}
             />
 
@@ -244,10 +227,10 @@ export default function OperatorApp() {
             {deviceId && (
               <div className="op-floating-actions">
                 <button
-                  className="op-fab"
+                  className={`op-fab${autoFollow ? ' active' : ''}`}
                   onClick={centerOnMyPosition}
-                  title="Centrar en mi posición"
-                  aria-label="Centrar en mi posición"
+                  title={autoFollow ? 'Siguiendo mi posición' : 'Centrar y seguir mi posición'}
+                  aria-label="Centrar y seguir mi posición"
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="3" />
@@ -255,16 +238,6 @@ export default function OperatorApp() {
                     <line x1="12" y1="18" x2="12" y2="22" />
                     <line x1="2" y1="12" x2="6" y2="12" />
                     <line x1="18" y1="12" x2="22" y2="12" />
-                  </svg>
-                </button>
-                <button
-                  className={`op-fab${autoFollow ? ' active' : ''}`}
-                  onClick={() => setAutoFollow(!autoFollow)}
-                  title={autoFollow ? 'Auto-seguimiento activado' : 'Auto-seguimiento desactivado'}
-                  aria-label="Auto-seguimiento"
-                >
-                  <svg viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2 L19 21 L12 17 L5 21 Z" />
                   </svg>
                 </button>
                 <button
@@ -293,14 +266,6 @@ export default function OperatorApp() {
                 </span>
               </div>
               <div className="op-info-item">
-                <span className="op-info-label">Latitud</span>
-                <span className="op-info-value">{myDisplay?.latitude?.toFixed(5) ?? '--'}</span>
-              </div>
-              <div className="op-info-item">
-                <span className="op-info-label">Longitud</span>
-                <span className="op-info-value">{myDisplay?.longitude?.toFixed(5) ?? '--'}</span>
-              </div>
-              <div className="op-info-item">
                 <span className="op-info-label">Más cercano</span>
                 <span className="op-info-value">
                   {liveNearest ? `${Math.round(liveNearest.distanceM)} m` : '--'}
@@ -313,18 +278,12 @@ export default function OperatorApp() {
                   <span className="op-info-value">{batteryLevel}%</span>
                 </div>
               )}
-              <div className="op-info-item">
-                <span className="op-info-label">Estado</span>
-                <span
-                  className={`op-info-value ${myOnline ? 'op-info-value--online' : 'op-info-value--offline'}`}
-                >
-                  <ConnectionStatusDot connected={myOnline} />
-                  {myOnline ? 'En línea' : 'Offline'}
-                </span>
-              </div>
             </footer>
           )}
         </>
+      )}
+      {!checking && !myDisplay && (
+        <div className="op-map-loading">Obteniendo tu ubicación...</div>
       )}
 
       {}
@@ -353,14 +312,6 @@ export default function OperatorApp() {
           onClose={() => setShowReportIncident(false)}
           error={reportIncidentError}
           submitting={reportingIncident}
-        />
-      )}
-      {selectedVehicle && (
-        <VehicleDetailPanel
-          vehicle={selectedVehicle}
-          offline={selectedVehicleOffline}
-          operatorSession={selectedVehicleSession}
-          onClose={() => setSelectedVehicleId(null)}
         />
       )}
     </div>

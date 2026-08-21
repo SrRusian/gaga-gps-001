@@ -1,6 +1,7 @@
 import {
   createVehicleMarkerElement,
-  setVehicleMarkerSelected,
+  metersPerPixel,
+  setVehicleMarkerAccuracy,
   setVehicleMarkerStale,
   setVehicleMarkerThreat,
   updateVehicleMarkerHeading,
@@ -9,7 +10,6 @@ import {
   useIncidentLayer,
   useMapLibreMap,
   useSatelliteLayers,
-  useVehicleAccuracyLayer,
 } from '@gaga-gps/map-core';
 import type { EquipmentMarkerData, IncidentMarkerData, MapMode } from '@gaga-gps/map-core';
 import { colors } from '@gaga-gps/ui';
@@ -17,8 +17,8 @@ import type { ActiveMap, Geofence, Position } from '@gaga-gps/shared-types';
 import maplibregl from 'maplibre-gl';
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 
-const STALE_THRESHOLD_MS = 10000;
-const STALE_CHECK_INTERVAL_MS = 2000;
+const STALE_THRESHOLD_MS = 3000;
+const STALE_CHECK_INTERVAL_MS = 1000;
 const GLIDE_MAX_MS = 1000;
 const GLIDE_MIN_MS = 200;
 const GLIDE_FALLBACK_MS = 800;
@@ -39,8 +39,8 @@ export interface MapViewProps {
   myDeviceId: string | null;
   threatDeviceId?: string | null;
   highlightedGeofenceId?: number | null;
-  selectedVehicleId?: string | null;
-  onVehicleClick?: (deviceId: string) => void;
+  initialCenter: [number, number];
+  initialZoom?: number;
   onUserInteraction?: () => void;
 }
 
@@ -55,22 +55,22 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     myDeviceId,
     threatDeviceId,
     highlightedGeofenceId,
-    selectedVehicleId = null,
-    onVehicleClick,
+    initialCenter,
+    initialZoom = 17,
     onUserInteraction,
   },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { map, loaded } = useMapLibreMap(containerRef, {
-    center: [-103.56464, 19.35339],
-    zoom: 16,
+    center: initialCenter,
+    zoom: initialZoom,
   });
   const markersRef = useRef<Record<string, maplibregl.Marker>>({});
   const lastFixTimeRef = useRef<Record<string, number>>({});
+  const fixTimeRef = useRef<Record<string, number>>({});
+  const accuracyRef = useRef<Record<string, number | undefined>>({});
   const glideFrameRef = useRef<Record<string, number>>({});
-  const onVehicleClickRef = useRef(onVehicleClick);
-  onVehicleClickRef.current = onVehicleClick;
 
   function glideMarkerTo(
     marker: maplibregl.Marker,
@@ -113,16 +113,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   }, []);
 
   useSatelliteLayers(map, loaded, activeMaps, mapMode, 'geofences-fill', true);
-  useVehicleAccuracyLayer(
-    map,
-    loaded,
-    Object.values(fleet).map((pos) => ({
-      deviceId: pos.deviceId,
-      latitude: pos.latitude,
-      longitude: pos.longitude,
-      accuracyMeters: pos.accuracy,
-    })),
-  );
   useGeofenceLayer(map, loaded, geofences, highlightedGeofenceId);
   useIncidentLayer(map, loaded, incidents);
   useEquipmentLayer(map, loaded, equipment);
@@ -175,6 +165,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         markersRef.current[vehicleId].remove();
         delete markersRef.current[vehicleId];
         delete lastFixTimeRef.current[vehicleId];
+        delete fixTimeRef.current[vehicleId];
+        delete accuracyRef.current[vehicleId.replace(/^vehicle-/, '')];
         const frame = glideFrameRef.current[vehicleId];
         if (frame) cancelAnimationFrame(frame);
         delete glideFrameRef.current[vehicleId];
@@ -197,6 +189,15 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const now = Date.now();
       const previousFixAt = lastFixTimeRef.current[vehicleId];
       lastFixTimeRef.current[vehicleId] = now;
+      accuracyRef.current[pos.deviceId] = pos.accuracy;
+
+      // fixTime real del reporte (no "cuándo lo vio este navegador") - así al recargar la
+      // página un vehículo ya offline se marca de inmediato, sin esperar un umbral completo
+      const fixTimeMs = new Date(pos.fixTime).getTime();
+      fixTimeRef.current[vehicleId] = fixTimeMs;
+      const isStale = !isMine && now - fixTimeMs > STALE_THRESHOLD_MS;
+
+      const metersPerPx = metersPerPixel(pos.latitude, map.getZoom());
 
       if (markersRef.current[vehicleId]) {
         const marker = markersRef.current[vehicleId];
@@ -207,39 +208,70 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           previousFixAt ? now - previousFixAt : undefined,
         );
         updateVehicleMarkerHeading(marker.getElement(), pos.deviceId, pos.course, pos.speed);
-        setVehicleMarkerStale(marker.getElement(), false);
+        setVehicleMarkerStale(marker.getElement(), isStale);
+        setVehicleMarkerAccuracy(marker.getElement(), pos.accuracy, metersPerPx);
         return;
       }
 
       const color = isMine ? colors.myVehicle : colors.otherVehicle;
-      const el = createVehicleMarkerElement({ deviceId: pos.deviceId, isMine, color });
+      const el = createVehicleMarkerElement({ deviceId: pos.deviceId, isMine, color, clickable: false });
       updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed);
-      el.onclick = () => onVehicleClickRef.current?.(pos.deviceId);
+      setVehicleMarkerStale(el, isStale);
+      setVehicleMarkerAccuracy(el, pos.accuracy, metersPerPx);
 
       markersRef.current[vehicleId] = new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map);
     });
   }, [map, loaded, fleet, myDeviceId, equipment]);
 
+  // el círculo es en pixeles de pantalla real (no metros) - al hacer zoom hay que recalcular
+  // el tamaño de todos aunque no haya llegado una posición nueva
+  useEffect(() => {
+    if (!map) return;
+
+    const handler = () => {
+      const zoom = map.getZoom();
+      Object.entries(markersRef.current).forEach(([vehicleId, marker]) => {
+        const deviceId = vehicleId.replace(/^vehicle-/, '');
+        const lngLat = marker.getLngLat();
+        setVehicleMarkerAccuracy(
+          marker.getElement(),
+          accuracyRef.current[deviceId],
+          metersPerPixel(lngLat.lat, zoom),
+        );
+      });
+    };
+    map.on('zoom', handler);
+    return () => {
+      map.off('zoom', handler);
+    };
+  }, [map]);
+
   useEffect(() => {
     Object.entries(markersRef.current).forEach(([vehicleId, marker]) => {
       const deviceId = vehicleId.replace(/^vehicle-/, '');
       setVehicleMarkerThreat(marker.getElement(), deviceId === threatDeviceId);
-      setVehicleMarkerSelected(marker.getElement(), deviceId === selectedVehicleId);
     });
-  }, [threatDeviceId, selectedVehicleId, fleet]);
+  }, [threatDeviceId, fleet]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
       Object.entries(markersRef.current).forEach(([vehicleId, marker]) => {
-        const lastFix = lastFixTimeRef.current[vehicleId];
-        const isStale = !lastFix || now - lastFix > STALE_THRESHOLD_MS;
+        const deviceId = vehicleId.replace(/^vehicle-/, '');
+        if (deviceId === myDeviceId) {
+          // mi propio vehículo siempre se ve azul para mí, sin importar conexión/GPS - el rojo
+          // solo tiene sentido para saber si PERDÍ VISTA de otro vehículo, no de mí mismo
+          setVehicleMarkerStale(marker.getElement(), false);
+          return;
+        }
+        const fixTime = fixTimeRef.current[vehicleId];
+        const isStale = !fixTime || now - fixTime > STALE_THRESHOLD_MS;
         setVehicleMarkerStale(marker.getElement(), isStale);
       });
     }, STALE_CHECK_INTERVAL_MS);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [myDeviceId]);
 
   return <div id="op-map" ref={containerRef} />;
 });

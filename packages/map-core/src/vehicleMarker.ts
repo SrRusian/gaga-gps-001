@@ -5,6 +5,11 @@ const RING_SIZE = ARROW_SIZE + 14;
 // este paquete no depende de packages/ui (ver EQUIPMENT_CORE_COLOR/EQUIPMENT_OUTER_COLOR, mismo criterio)
 const SELECTED_RING_COLOR = '#ffd23f';
 const OFFLINE_COLOR = '#e5484d';
+const ACCURACY_COLOR = '#4f8ff0';
+// solo se usa cuando no hay accuracy reportada (undefined) - nunca reemplaza un valor real, por
+// chico o grande que sea, el círculo debe representar la precisión real del GPS sin piso artificial
+const DEFAULT_ACCURACY_METERS = 15;
+const ACCURACY_INITIAL_DIAMETER_PX = ARROW_SIZE + 10;
 const lastKnownCourse = new Map<string, number>();
 
 export function shortVehicleLabel(deviceId: string): string {
@@ -19,6 +24,7 @@ export interface VehicleMarkerOptions {
   deviceId: string;
   isMine: boolean;
   color: string;
+  clickable?: boolean;
 }
 
 export function resolveVehicleCourse(
@@ -85,36 +91,59 @@ function createSelectionRing(): HTMLDivElement {
   return ring;
 }
 
-export function createVehicleMarkerElement({ deviceId, isMine, color }: VehicleMarkerOptions): HTMLDivElement {
+// círculo de precisión GPS - hijo del propio marcador (no una capa de mapa aparte), así queda
+// SIEMPRE centrado en la flecha por construcción, sin depender de sincronizar dos sistemas de
+// coordenadas distintos (lo que causaba el desfase durante el deslizamiento suave del marcador)
+function createAccuracyCircle(): HTMLDivElement {
+  const circle = document.createElement('div');
+  circle.className = 'vehicle-marker__accuracy';
+  circle.style.position = 'absolute';
+  circle.style.top = '50%';
+  circle.style.left = '50%';
+  circle.style.transform = 'translate(-50%, -50%)';
+  circle.style.borderRadius = '50%';
+  circle.style.background = `${ACCURACY_COLOR}1f`;
+  circle.style.border = `1px solid ${ACCURACY_COLOR}66`;
+  circle.style.pointerEvents = 'none';
+  circle.style.transition = 'width 0.2s ease, height 0.2s ease';
+  circle.style.width = `${ACCURACY_INITIAL_DIAMETER_PX}px`;
+  circle.style.height = `${ACCURACY_INITIAL_DIAMETER_PX}px`;
+  return circle;
+}
+
+export function createVehicleMarkerElement({
+  color,
+  clickable = true,
+}: VehicleMarkerOptions): HTMLDivElement {
   const el = document.createElement('div');
   el.className = 'vehicle-marker';
   el.style.position = 'relative';
   el.style.width = `${ARROW_SIZE}px`;
   el.style.height = `${ARROW_SIZE}px`;
-  el.style.cursor = 'pointer';
+  el.style.cursor = clickable ? 'pointer' : 'default';
 
+  el.appendChild(createAccuracyCircle());
   el.appendChild(createSelectionRing());
   el.appendChild(createHeadingArrow(color));
 
-  const label = document.createElement('div');
-  label.className = 'vehicle-marker__label';
-  label.style.position = 'absolute';
-  label.style.top = '100%';
-  label.style.left = '50%';
-  label.style.transform = 'translateX(-50%)';
-  label.style.marginTop = '2px';
-  label.style.padding = '1px 5px';
-  label.style.borderRadius = '4px';
-  label.style.background = 'rgba(11, 13, 16, 0.85)';
-  label.style.color = color;
-  label.style.fontSize = '10px';
-  label.style.fontWeight = 'bold';
-  label.style.whiteSpace = 'nowrap';
-  label.style.pointerEvents = 'none';
-  label.textContent = isMine ? 'YO' : shortVehicleLabel(deviceId);
-  el.appendChild(label);
-
   return el;
+}
+
+// tamaño del círculo en PIXELES de pantalla reales, calculado desde metros reales de precisión
+// GPS - sin piso artificial: a un zoom bajo una precisión de 3m debe verse chica en pantalla
+// (porque 3m realmente ocupan pocos pixeles ahí), y grande al acercar, fiel al valor real
+export function setVehicleMarkerAccuracy(
+  el: HTMLElement,
+  accuracyMeters: number | undefined,
+  metersPerPx: number,
+): void {
+  const circle = el.querySelector<HTMLDivElement>('.vehicle-marker__accuracy');
+  if (!circle || !metersPerPx) return;
+
+  const radiusMeters = accuracyMeters ?? DEFAULT_ACCURACY_METERS;
+  const diameterPx = (radiusMeters / metersPerPx) * 2;
+  circle.style.width = `${diameterPx}px`;
+  circle.style.height = `${diameterPx}px`;
 }
 
 export function updateVehicleMarkerHeading(

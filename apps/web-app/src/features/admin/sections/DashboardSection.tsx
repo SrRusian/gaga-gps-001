@@ -5,6 +5,8 @@ import {
   EQUIPMENT_CORE_COLOR,
   EQUIPMENT_OUTER_COLOR,
   lineToBufferPolygon,
+  metersPerPixel,
+  setVehicleMarkerAccuracy,
   setVehicleMarkerSelected,
   setVehicleMarkerStale,
   updateVehicleMarkerHeading,
@@ -13,7 +15,6 @@ import {
   useMapLibreMap,
   useMapMode,
   useSatelliteLayers,
-  useVehicleAccuracyLayer,
 } from '@gaga-gps/map-core';
 import type { EquipmentMarkerData } from '@gaga-gps/map-core';
 import { MapModeSelector, Modal, StatCard, VehicleDetailPanel } from '@gaga-gps/ui';
@@ -268,6 +269,7 @@ export function DashboardSection() {
   const circleMarkerRef = useRef<maplibregl.Marker | null>(null);
   const equipmentMarkerRef = useRef<maplibregl.Marker | null>(null);
   const vehicleMarkersRef = useRef<Record<string, maplibregl.Marker>>({});
+  const accuracyRef = useRef<Record<string, number | undefined>>({});
   const selectVehicleRef = useRef<(deviceId: string) => void>(() => {});
   const [showGeoPanel, setShowGeoPanel] = useState(false);
   const [geoShape, setGeoShape] = useState<GeofenceShape>('circle');
@@ -534,18 +536,6 @@ export function DashboardSection() {
 
   useGeofenceLayer(map, loaded, geofencesForLayer);
   useEquipmentLayer(map, loaded, historyMode ? [] : equipmentForLayer);
-  useVehicleAccuracyLayer(
-    map,
-    loaded,
-    historyMode
-      ? []
-      : scopedLivePositions.map((pos) => ({
-          deviceId: pos.deviceId,
-          latitude: pos.latitude,
-          longitude: pos.longitude,
-          accuracyMeters: pos.accuracy,
-        })),
-  );
   useSatelliteLayers(map, loaded, scopedActiveMaps, mapMode);
 
   useEffect(() => {
@@ -562,10 +552,13 @@ export function DashboardSection() {
       if (!currentIds.has(id)) {
         vehicleMarkersRef.current[id].remove();
         delete vehicleMarkersRef.current[id];
+        delete accuracyRef.current[id];
       }
     });
     scopedLivePositions.forEach((pos) => {
       const lngLat: [number, number] = [pos.longitude, pos.latitude];
+      accuracyRef.current[pos.deviceId] = pos.accuracy;
+      const metersPerPx = metersPerPixel(pos.latitude, map.getZoom());
       const existing = vehicleMarkersRef.current[pos.deviceId];
       if (existing) {
         existing.setLngLat(lngLat);
@@ -574,6 +567,7 @@ export function DashboardSection() {
           existing.getElement(),
           Date.now() - new Date(pos.fixTime).getTime() > OFFLINE_THRESHOLD_MS,
         );
+        setVehicleMarkerAccuracy(existing.getElement(), pos.accuracy, metersPerPx);
         return;
       }
       const el = createVehicleMarkerElement({
@@ -583,12 +577,31 @@ export function DashboardSection() {
       });
       updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed);
       setVehicleMarkerStale(el, Date.now() - new Date(pos.fixTime).getTime() > OFFLINE_THRESHOLD_MS);
+      setVehicleMarkerAccuracy(el, pos.accuracy, metersPerPx);
       el.onclick = () => selectVehicleRef.current(pos.deviceId);
       vehicleMarkersRef.current[pos.deviceId] = new maplibregl.Marker({ element: el })
         .setLngLat(lngLat)
         .addTo(map);
     });
   }, [map, loaded, scopedLivePositions, historyMode]);
+
+  // el círculo es en pixeles de pantalla real (no metros) - al hacer zoom hay que recalcular
+  // el tamaño de todos aunque no haya llegado una posición nueva
+  useEffect(() => {
+    if (!map) return;
+
+    const handler = () => {
+      const zoom = map.getZoom();
+      Object.entries(vehicleMarkersRef.current).forEach(([deviceId, marker]) => {
+        const lngLat = marker.getLngLat();
+        setVehicleMarkerAccuracy(marker.getElement(), accuracyRef.current[deviceId], metersPerPixel(lngLat.lat, zoom));
+      });
+    };
+    map.on('zoom', handler);
+    return () => {
+      map.off('zoom', handler);
+    };
+  }, [map]);
 
   useEffect(() => {
     Object.entries(vehicleMarkersRef.current).forEach(([deviceId, marker]) => {
