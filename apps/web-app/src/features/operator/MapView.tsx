@@ -68,7 +68,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const markersRef = useRef<Record<string, maplibregl.Marker>>({});
   const lastFixTimeRef = useRef<Record<string, number>>({});
   const fixTimeRef = useRef<Record<string, number>>({});
-  const accuracyRef = useRef<Record<string, number | undefined>>({});
+  const accuracyRef = useRef<Record<string, number | undefined>>({}); // Módulo círculo de precisión del vehículo (No modificar)
   const glideFrameRef = useRef<Record<string, number>>({});
 
   function glideMarkerTo(
@@ -165,7 +165,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         delete markersRef.current[vehicleId];
         delete lastFixTimeRef.current[vehicleId];
         delete fixTimeRef.current[vehicleId];
-        delete accuracyRef.current[vehicleId.replace(/^vehicle-/, '')];
+        delete accuracyRef.current[vehicleId.replace(/^vehicle-/, '')]; // Módulo círculo de precisión del vehículo (No modificar)
         const frame = glideFrameRef.current[vehicleId];
         if (frame) cancelAnimationFrame(frame);
         delete glideFrameRef.current[vehicleId];
@@ -188,7 +188,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const now = Date.now();
       const previousFixAt = lastFixTimeRef.current[vehicleId];
       lastFixTimeRef.current[vehicleId] = now;
-      accuracyRef.current[pos.deviceId] = pos.accuracy;
+      accuracyRef.current[pos.deviceId] = pos.accuracy; // Módulo círculo de precisión del vehículo (No modificar)
 
       // fixTime real del reporte (no "cuándo lo vio este navegador") - así al recargar la
       // página un vehículo ya offline se marca de inmediato, sin esperar un umbral completo
@@ -206,6 +206,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         );
         updateVehicleMarkerHeading(marker.getElement(), pos.deviceId, pos.course, pos.speed);
         setVehicleMarkerStale(marker.getElement(), isStale);
+        // Módulo círculo de precisión del vehículo (No modificar)
         setVehicleMarkerAccuracy(marker.getElement(), map, pos.latitude, pos.longitude, pos.accuracy);
         return;
       }
@@ -214,12 +215,13 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const el = createVehicleMarkerElement({ deviceId: pos.deviceId, isMine, color, clickable: false });
       updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed);
       setVehicleMarkerStale(el, isStale);
-      setVehicleMarkerAccuracy(el, map, pos.latitude, pos.longitude, pos.accuracy);
+      setVehicleMarkerAccuracy(el, map, pos.latitude, pos.longitude, pos.accuracy); // Módulo círculo de precisión del vehículo (No modificar)
 
       markersRef.current[vehicleId] = new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map);
     });
   }, [map, loaded, fleet, myDeviceId, equipment]);
 
+  // Módulo círculo de precisión del vehículo (No modificar)
   // el círculo es en pixeles de pantalla real (no metros) - al hacer zoom hay que recalcular
   // el tamaño de todos aunque no haya llegado una posición nueva
   useEffect(() => {

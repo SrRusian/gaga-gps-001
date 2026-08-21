@@ -1,6 +1,7 @@
 import type { Map as MaplibreMap } from 'maplibre-gl';
 
 const MIN_MOVING_SPEED_MPS = 0.5;
+// Módulo círculo de precisión del vehículo (No modificar)
 // mismo criterio que packages/map-core/src/geofenceLayer.ts (duplicado a propósito, ver nota
 // de ese archivo) - para desplazar un punto una distancia real hacia el este
 const METERS_PER_DEG_LAT = 111320;
@@ -48,9 +49,6 @@ export function resolveVehicleCourse(
   return { course: remembered ?? course ?? 0, stopped: true };
 }
 
-// flecha de rumbo estilo navegación (ícono "navigation" de Material) - grande y perceptible a
-// simple vista, a diferencia del chevron chico de antes. 0deg = apunta al norte, coincide con
-// como ya se interpreta `course` (grados desde el norte) al aplicarlo directo como rotate(deg).
 export function createHeadingArrow(color: string): HTMLDivElement {
   const arrow = document.createElement('div');
   arrow.className = 'vehicle-marker__arrow';
@@ -96,6 +94,7 @@ function createSelectionRing(): HTMLDivElement {
   return ring;
 }
 
+// Módulo círculo de precisión del vehículo (No modificar)
 // círculo de precisión GPS - hijo del propio marcador (no una capa de mapa aparte), así queda
 // SIEMPRE centrado en la flecha por construcción, sin depender de sincronizar dos sistemas de
 // coordenadas distintos (lo que causaba el desfase durante el deslizamiento suave del marcador)
@@ -130,13 +129,14 @@ export function createVehicleMarkerElement({
   el.style.height = `${ARROW_SIZE}px`;
   el.style.cursor = clickable ? 'pointer' : 'default';
 
-  el.appendChild(createAccuracyCircle());
+  el.appendChild(createAccuracyCircle()); // Módulo círculo de precisión del vehículo (No modificar)
   el.appendChild(createSelectionRing());
   el.appendChild(createHeadingArrow(color));
 
   return el;
 }
 
+// Módulo círculo de precisión del vehículo (No modificar)
 // tamaño del círculo en PIXELES de pantalla reales, medido con map.project() - la MISMA
 // proyección que usa MapLibre para dibujar geocercas y todo lo demás, en vez de mantener una
 // fórmula aparte que tiene que coincidir a mano con el zoom interno de la librería (eso fue lo

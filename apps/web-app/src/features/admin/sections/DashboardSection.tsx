@@ -268,7 +268,7 @@ export function DashboardSection() {
   const circleMarkerRef = useRef<maplibregl.Marker | null>(null);
   const equipmentMarkerRef = useRef<maplibregl.Marker | null>(null);
   const vehicleMarkersRef = useRef<Record<string, maplibregl.Marker>>({});
-  const accuracyRef = useRef<Record<string, number | undefined>>({});
+  const accuracyRef = useRef<Record<string, number | undefined>>({}); // Módulo círculo de precisión del vehículo (No modificar)
   const selectVehicleRef = useRef<(deviceId: string) => void>(() => {});
   const [showGeoPanel, setShowGeoPanel] = useState(false);
   const [geoShape, setGeoShape] = useState<GeofenceShape>('circle');
@@ -552,12 +552,12 @@ export function DashboardSection() {
       if (!currentIds.has(id)) {
         vehicleMarkersRef.current[id].remove();
         delete vehicleMarkersRef.current[id];
-        delete accuracyRef.current[id];
+        delete accuracyRef.current[id]; // Módulo círculo de precisión del vehículo (No modificar)
       }
     });
     scopedLivePositions.forEach((pos) => {
       const lngLat: [number, number] = [pos.longitude, pos.latitude];
-      accuracyRef.current[pos.deviceId] = pos.accuracy;
+      accuracyRef.current[pos.deviceId] = pos.accuracy; // Módulo círculo de precisión del vehículo (No modificar)
       const existing = vehicleMarkersRef.current[pos.deviceId];
       if (existing) {
         existing.setLngLat(lngLat);
@@ -566,6 +566,7 @@ export function DashboardSection() {
           existing.getElement(),
           Date.now() - new Date(pos.fixTime).getTime() > OFFLINE_THRESHOLD_MS,
         );
+        // Módulo círculo de precisión del vehículo (No modificar)
         setVehicleMarkerAccuracy(existing.getElement(), map, pos.latitude, pos.longitude, pos.accuracy);
         return;
       }
@@ -576,7 +577,7 @@ export function DashboardSection() {
       });
       updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed);
       setVehicleMarkerStale(el, Date.now() - new Date(pos.fixTime).getTime() > OFFLINE_THRESHOLD_MS);
-      setVehicleMarkerAccuracy(el, map, pos.latitude, pos.longitude, pos.accuracy);
+      setVehicleMarkerAccuracy(el, map, pos.latitude, pos.longitude, pos.accuracy); // Módulo círculo de precisión del vehículo (No modificar)
       el.onclick = () => selectVehicleRef.current(pos.deviceId);
       vehicleMarkersRef.current[pos.deviceId] = new maplibregl.Marker({ element: el })
         .setLngLat(lngLat)
@@ -584,6 +585,7 @@ export function DashboardSection() {
     });
   }, [map, loaded, scopedLivePositions, historyMode]);
 
+  // Módulo círculo de precisión del vehículo (No modificar)
   // el círculo es en pixeles de pantalla real (no metros) - al hacer zoom hay que recalcular
   // el tamaño de todos aunque no haya llegado una posición nueva
   useEffect(() => {
