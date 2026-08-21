@@ -3,6 +3,8 @@ import {
   TraccarSender,
   type NtripConfig,
   type RtkStatus,
+  type TraccarLogEntry,
+  type TraccarSendSettings,
   type TraccarServer,
 } from '@gaga-gps/android-bridge';
 import {
@@ -36,6 +38,10 @@ function emptyExtraServer(): TraccarServer {
 // solo rellenan el formulario la primera vez (si ya hay algo guardado, gana lo guardado)
 const TEST_DEFAULTS = { serverUrl: 'https://app.gaga-maquinaria.com', token: 'test', deviceId: 'T2' };
 
+function formatLogTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString();
+}
+
 export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   const [serverUrl, setServerUrl] = useState(getApiBaseUrl() || TEST_DEFAULTS.serverUrl);
   const [token, setToken] = useState(getTelemetryToken() || TEST_DEFAULTS.token);
@@ -45,6 +51,12 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   const [extraServers, setExtraServers] = useState<TraccarServer[]>([]);
   const [senderRunning, setSenderRunning] = useState(false);
   const [senderError, setSenderError] = useState<string | null>(null);
+  const [bufferedCount, setBufferedCount] = useState(0);
+  const [sendNowMessage, setSendNowMessage] = useState('');
+
+  const [sendSettings, setSendSettings] = useState<TraccarSendSettings | null>(null);
+  const [showLog, setShowLog] = useState(false);
+  const [logEntries, setLogEntries] = useState<TraccarLogEntry[]>([]);
 
   const [ntripConfig, setNtripConfig] = useState<Partial<NtripConfig>>({ port: 2101 });
   const [usbDevices, setUsbDevices] = useState<{ deviceId: number; name: string | null }[]>([]);
@@ -54,22 +66,24 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     ntripError: null,
   });
 
-  useEffect(() => {
-    TraccarSender.getServers().then((r) => setExtraServers(r.servers.filter((s) => s.id !== MAIN_SERVER_ID)));
+  function refreshState() {
     TraccarSender.getState().then((s) => {
       setSenderRunning(s.running);
       setSenderError(s.lastError);
+      setBufferedCount(s.bufferedCount);
     });
+    TraccarSender.getLog().then((r) => setLogEntries(r.entries));
+  }
+
+  useEffect(() => {
+    TraccarSender.getServers().then((r) => setExtraServers(r.servers.filter((s) => s.id !== MAIN_SERVER_ID)));
+    TraccarSender.getSendSettings().then(setSendSettings);
+    refreshState();
     RtkNtrip.getNtripConfig().then((c) => setNtripConfig((prev) => ({ ...prev, ...c })));
     RtkNtrip.getStatus().then(setRtkStatus);
 
     const listenerPromise = RtkNtrip.addListener('rtkStatus', (status) => setRtkStatus(status));
-    const interval = setInterval(() => {
-      TraccarSender.getState().then((s) => {
-        setSenderRunning(s.running);
-        setSenderError(s.lastError);
-      });
-    }, 4000);
+    const interval = setInterval(refreshState, 4000);
 
     return () => {
       clearInterval(interval);
@@ -126,6 +140,30 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     }
   }
 
+  async function handleSendNow() {
+    setSendNowMessage('Enviando...');
+    try {
+      const state = await TraccarSender.sendNow();
+      setSenderError(state.lastError);
+      setBufferedCount(state.bufferedCount);
+      setSendNowMessage(state.lastError ? 'Fallo el envio' : 'Enviado');
+      TraccarSender.getLog().then((r) => setLogEntries(r.entries));
+    } catch (e) {
+      setSendNowMessage(e instanceof Error ? e.message : 'No se pudo enviar');
+    }
+    setTimeout(() => setSendNowMessage(''), 2500);
+  }
+
+  function updateSendSettings(patch: Partial<TraccarSendSettings>) {
+    setSendSettings((prev) => (prev ? { ...prev, ...patch } : prev));
+    TraccarSender.setSendSettings(patch);
+  }
+
+  async function handleResetSendSettings() {
+    const restored = await TraccarSender.resetSendSettings();
+    setSendSettings(restored);
+  }
+
   async function refreshUsbDevices() {
     const { devices } = await RtkNtrip.listUsbDevices();
     setUsbDevices(devices);
@@ -175,7 +213,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
         <h2>Configuracion del dispositivo</h2>
 
         <section className="ds-section">
-          <h3>Servidor y envio de posicion</h3>
+          <h3>Servidor e identidad</h3>
           <label className="ds-label">Servidor GAGA GPS</label>
           <input
             placeholder="http://192.168.1.50:3001"
@@ -201,13 +239,66 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
           <p className="ds-hint">
             El envio de posicion manda a {serverUrl ? buildMainServerUrl(serverUrl, token) : '(configura el servidor primero)'}
           </p>
+        </section>
+
+        <section className="ds-section">
+          <h3>Envio de posicion</h3>
           <div className="ds-actions">
-            <button onClick={toggleSender}>{senderRunning ? 'Detener envio' : 'Iniciar envio'}</button>
+            <button onClick={toggleSender}>{senderRunning ? 'Detener envio continuo' : 'Iniciar envio continuo'}</button>
+            <button onClick={handleSendNow}>Enviar ubicacion ahora</button>
+          </div>
+          <div className="ds-actions">
             <span className="ds-status">
               {senderRunning ? 'Enviando' : 'Detenido'}
+              {bufferedCount > 0 && ` - ${bufferedCount} en buffer sin conexion`}
               {senderError && <span className="ds-error"> - {senderError}</span>}
             </span>
+            {sendNowMessage && <span className="ds-saved">{sendNowMessage}</span>}
           </div>
+
+          {sendSettings && (
+            <>
+              <label className="ds-label">Intervalo de envio (segundos)</label>
+              <input
+                type="number"
+                min={1}
+                value={sendSettings.intervalSeconds}
+                onChange={(e) => updateSendSettings({ intervalSeconds: Number(e.target.value) })}
+              />
+              <label className="ds-label">Contrasena (opcional, protocolo OsmAnd)</label>
+              <input
+                type="password"
+                value={sendSettings.password}
+                onChange={(e) => updateSendSettings({ password: e.target.value })}
+              />
+              <p className="ds-hint">
+                GPS y buffer sin conexion siempre estan activos al maximo - no hay ajustes que solo
+                empeorarian el envio, lo unico que tiene sentido tocar aqui es el intervalo.
+              </p>
+
+              <div className="ds-actions">
+                <button className="ds-remove" onClick={handleResetSendSettings}>
+                  Restaurar intervalo por defecto
+                </button>
+              </div>
+            </>
+          )}
+
+          <button className="ds-add" onClick={() => setShowLog((v) => !v)}>
+            {showLog ? 'Ocultar bitacora' : 'Mostrar estado (bitacora de envio)'}
+          </button>
+          {showLog && (
+            <div className="ds-log">
+              {logEntries.length === 0 && <div className="ds-log-empty">Sin envios registrados todavia</div>}
+              {logEntries.map((entry, i) => (
+                <div className={`ds-log-row ${entry.success ? 'ds-log-ok' : 'ds-log-fail'}`} key={i}>
+                  <span className="ds-log-time">{formatLogTime(entry.timestamp)}</span>
+                  <span className="ds-log-server">{entry.serverUrl}</span>
+                  <span className="ds-log-message">{entry.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="ds-section">

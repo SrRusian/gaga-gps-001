@@ -2,6 +2,7 @@ package com.gagagps.operator.traccar
 
 import android.Manifest
 import android.content.Intent
+import android.location.LocationManager
 import android.os.Build
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
@@ -14,8 +15,8 @@ import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
 import java.util.UUID
 
-// Puente JS <-> TraccarSenderService. La lista de servidores vive en TraccarPrefs (SharedPreferences),
-// el servicio en primer plano hace el envio real - este plugin solo es la capa de configuracion/control.
+// Puente JS <-> TraccarSenderService/TraccarUplink. La configuracion vive en TraccarPrefs, el
+// envio real (periodico y manual) en TraccarUplink - este plugin es solo control + lectura de estado.
 @CapacitorPlugin(
     name = "TraccarSender",
     permissions = [
@@ -57,10 +58,27 @@ class TraccarSenderPlugin : Plugin() {
     }
 
     @PluginMethod
-    fun setInterval(call: PluginCall) {
-        val ms = call.getInt("intervalMs") ?: return call.reject("intervalMs requerido")
-        TraccarPrefs.setIntervalMs(context, ms.toLong())
+    fun getSendSettings(call: PluginCall) {
+        call.resolve(buildSendSettings())
+    }
+
+    @PluginMethod
+    fun setSendSettings(call: PluginCall) {
+        call.getInt("intervalSeconds")?.let { TraccarPrefs.setIntervalMs(context, it * 1000L) }
+        call.getString("password")?.let { TraccarPrefs.setPassword(context, it) }
         call.resolve()
+    }
+
+    @PluginMethod
+    fun resetSendSettings(call: PluginCall) {
+        TraccarPrefs.resetSendingDefaults(context)
+        call.resolve(buildSendSettings())
+    }
+
+    private fun buildSendSettings(): JSObject {
+        return JSObject()
+            .put("intervalSeconds", (TraccarPrefs.getIntervalMs(context) / 1000).toInt())
+            .put("password", TraccarPrefs.getPassword(context))
     }
 
     @PluginMethod
@@ -100,12 +118,57 @@ class TraccarSenderPlugin : Plugin() {
         call.resolve()
     }
 
+    // "Enviar ubicacion" manual - funciona aunque el envio continuo este apagado, igual que en
+    // Traccar Client (util para probar conectividad/servidor sin activar el seguimiento)
+    @PluginMethod
+    fun sendNow(call: PluginCall) {
+        val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as LocationManager
+        val location = try {
+            locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+        } catch (e: SecurityException) {
+            return call.reject("Permiso de ubicacion denegado")
+        }
+        if (location == null) {
+            call.reject("Sin una ubicacion reciente disponible todavia")
+            return
+        }
+        if (TraccarPrefs.getServers(context).none { it.enabled }) {
+            call.reject("No hay ningun servidor activo configurado")
+            return
+        }
+        TraccarUplink.sendToAllServers(context, location)
+        call.resolve(buildStateObject())
+    }
+
     @PluginMethod
     fun getState(call: PluginCall) {
+        call.resolve(buildStateObject())
+    }
+
+    @PluginMethod
+    fun getLog(call: PluginCall) {
+        val arr = JSArray()
+        TraccarUplink.getLogSnapshot().forEach {
+            arr.put(
+                JSObject()
+                    .put("timestamp", it.timestamp)
+                    .put("serverUrl", it.serverUrl)
+                    .put("success", it.success)
+                    .put("message", it.message),
+            )
+        }
+        val ret = JSObject()
+        ret.put("entries", arr)
+        call.resolve(ret)
+    }
+
+    private fun buildStateObject(): JSObject {
         val ret = JSObject()
         ret.put("running", TraccarSenderService.isRunning)
-        ret.put("lastSentAt", TraccarSenderService.lastSentAt)
-        ret.put("lastError", TraccarSenderService.lastError)
-        call.resolve(ret)
+        ret.put("lastSentAt", TraccarUplink.lastSentAt)
+        ret.put("lastError", TraccarUplink.lastError)
+        ret.put("bufferedCount", TraccarUplink.getBufferedCount(context))
+        return ret
     }
 }

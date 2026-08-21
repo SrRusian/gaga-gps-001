@@ -70,7 +70,8 @@
   margin-bottom: 4px;
 }
 
-.ds-card input {
+.ds-card input,
+.ds-card select {
   width: 100%;
   padding: 9px 11px;
   margin-bottom: 10px;
@@ -84,9 +85,55 @@
 .ds-card input::placeholder {
   color: #565d68;
 }
-.ds-card input:focus {
+.ds-card input:focus,
+.ds-card select:focus {
   outline: none;
   border-color: #4f8ff0;
+}
+
+.ds-log {
+  margin-top: 10px;
+  border: 1px solid #262b33;
+  border-radius: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.ds-log-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: #565d68;
+  text-align: center;
+}
+.ds-log-row {
+  display: flex;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  border-bottom: 1px solid #1a1e24;
+  font-variant-numeric: tabular-nums;
+}
+.ds-log-row:last-child {
+  border-bottom: none;
+}
+.ds-log-time {
+  color: #8b949e;
+  flex-shrink: 0;
+}
+.ds-log-server {
+  color: #565d68;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ds-log-message {
+  flex-shrink: 0;
+}
+.ds-log-ok .ds-log-message {
+  color: #3fb950;
+}
+.ds-log-fail .ds-log-message {
+  color: #e5484d;
 }
 
 .ds-hint {

@@ -12,18 +12,15 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
-// Servicio en primer plano: replica Traccar Client - una posición real (GPS del telefono, o el
-// GPS_PROVIDER simulado por RtkNtripPlugin si el RTK esta activo, Android no distingue el origen)
-// se manda por protocolo OsmAnd (GET simple) a cada servidor habilitado en TraccarPrefs.
+// Servicio en primer plano: replica Traccar Client - lee posicion real por GPS (GPS_PROVIDER,
+// siempre - es la unica opcion realmente buena, no se ofrece "precision baja" porque solo seria
+// peor) y manda cada `intervalMs` configurado, sin condiciones extra. El envio en si
+// (TraccarUplink, con buffer sin conexion siempre activo) es compartido con "Enviar ubicacion" manual.
 class TraccarSenderService : Service() {
     companion object {
         const val CHANNEL_ID = "gaga_position_sender"
@@ -31,20 +28,24 @@ class TraccarSenderService : Service() {
 
         @Volatile var isRunning: Boolean = false
             private set
-
-        @Volatile var lastSentAt: Long = 0L
-            private set
-
-        @Volatile var lastError: String? = null
-            private set
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO + Job())
     private lateinit var locationManager: LocationManager
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var lastSentAtMs: Long = 0L
+
+    // requestLocationUpdates() sin un Looper propio entrega onLocationChanged en el hilo principal
+    // - Android prohibe hacer red ahi (NetworkOnMainThreadException), por eso el envio real se
+    // manda a este hilo aparte (mismo motivo por el que el envio manual del plugin si funcionaba:
+    // Capacitor ya despacha los @PluginMethod fuera del hilo principal por su cuenta)
+    private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     private val listener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            sendToAllServers(location)
+            val now = System.currentTimeMillis()
+            if (now - lastSentAtMs < TraccarPrefs.getIntervalMs(applicationContext)) return
+            lastSentAtMs = now
+            ioExecutor.execute { TraccarUplink.sendToAllServers(applicationContext, location) }
         }
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
         override fun onProviderEnabled(provider: String) {}
@@ -59,6 +60,7 @@ class TraccarSenderService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundCompat()
+        acquireWakeLock()
         startLocationUpdates()
         isRunning = true
         return START_STICKY
@@ -69,70 +71,34 @@ class TraccarSenderService : Service() {
             locationManager.removeUpdates(listener)
         } catch (_: SecurityException) {
         }
+        ioExecutor.shutdownNow()
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
         isRunning = false
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    // siempre activo mientras el envio corre - apagarlo solo haria el envio menos confiable con
+    // pantalla apagada, sin ningun beneficio real, asi que no se ofrece como opcion
+    private fun acquireWakeLock() {
+        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
+        val lock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "gaga:traccar-sender")
+        lock.setReferenceCounted(false)
+        lock.acquire()
+        wakeLock = lock
+    }
+
     private fun startLocationUpdates() {
-        val intervalMs = TraccarPrefs.getIntervalMs(applicationContext)
         try {
-            locationManager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                intervalMs,
-                0f,
-                listener,
-            )
+            // se pide cada fix disponible (minTime/minDistance en 0) - el intervalo de ENVIO real
+            // lo decide el listener arriba, no la tasa de muestreo del GPS
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, listener)
         } catch (e: SecurityException) {
-            lastError = "Sin permiso de ubicacion"
+            android.util.Log.w("TraccarSender", "Sin permiso de ubicacion")
         } catch (e: IllegalArgumentException) {
-            lastError = "GPS no disponible en este dispositivo"
-        }
-    }
-
-    private fun sendToAllServers(location: Location) {
-        val servers = TraccarPrefs.getServers(applicationContext).filter { it.enabled }
-        if (servers.isEmpty()) return
-        val deviceId = TraccarPrefs.getDeviceId(applicationContext)
-
-        servers.forEach { server ->
-            scope.launch {
-                try {
-                    sendOsmAnd(server.url, deviceId, location)
-                    lastSentAt = System.currentTimeMillis()
-                    lastError = null
-                } catch (e: Exception) {
-                    lastError = "${server.url}: ${e.message}"
-                }
-            }
-        }
-    }
-
-    // protocolo OsmAnd - el mismo que usa Traccar Client por defecto contra cualquier servidor Traccar
-    private fun sendOsmAnd(baseUrl: String, deviceId: String, location: Location) {
-        fun enc(v: String) = URLEncoder.encode(v, "UTF-8")
-        val sep = if (baseUrl.contains("?")) "&" else "?"
-        val query = buildString {
-            append("id=").append(enc(deviceId))
-            append("&timestamp=").append(location.time / 1000)
-            append("&lat=").append(location.latitude)
-            append("&lon=").append(location.longitude)
-            if (location.hasSpeed()) append("&speed=").append(location.speed * 1.94384) // m/s a nudos
-            if (location.hasBearing()) append("&bearing=").append(location.bearing)
-            if (location.hasAltitude()) append("&altitude=").append(location.altitude)
-            if (location.hasAccuracy()) append("&accuracy=").append(location.accuracy)
-        }
-        val url = URL("$baseUrl$sep$query")
-        val conn = url.openConnection() as HttpURLConnection
-        conn.connectTimeout = 5000
-        conn.readTimeout = 5000
-        conn.requestMethod = "GET"
-        try {
-            val code = conn.responseCode
-            if (code !in 200..299) throw Exception("HTTP $code")
-        } finally {
-            conn.disconnect()
+            android.util.Log.w("TraccarSender", "GPS no disponible en este dispositivo")
         }
     }
 

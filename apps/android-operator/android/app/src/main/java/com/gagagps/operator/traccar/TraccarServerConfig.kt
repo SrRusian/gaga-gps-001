@@ -12,14 +12,18 @@ data class TraccarServer(
     val enabled: Boolean,
 )
 
-// estado persistido del emisor - lista de servidores + id de dispositivo + intervalo, igual que
-// Traccar Client (varios servidores simultáneos, cada uno se puede prender/apagar sin borrar)
+// estado persistido del emisor - deliberadamente minimo: GPS y buffer/wakelock siempre estan
+// forzados al mejor modo posible en el codigo (ver TraccarSenderService/TraccarUplink), no hay
+// ajustes de "precision baja" ni "sin buffer" que solo empeorarian el sistema - lo unico realmente
+// util de tocar en campo es el intervalo (para pruebas) y la contrasena (si el servidor la exige)
 object TraccarPrefs {
-    private const val PREFS_NAME = "gaga_traccar_sender"
+    const val PREFS_NAME = "gaga_traccar_sender"
     private const val KEY_SERVERS = "servers"
     private const val KEY_DEVICE_ID = "device_id"
+    private const val KEY_PASSWORD = "password"
     private const val KEY_INTERVAL_MS = "interval_ms"
-    const val DEFAULT_INTERVAL_MS = 5000L
+
+    const val DEFAULT_INTERVAL_MS = 1000L
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -53,10 +57,21 @@ object TraccarPrefs {
         prefs(context).edit().putString(KEY_DEVICE_ID, deviceId).apply()
     }
 
+    fun getPassword(context: Context): String = prefs(context).getString(KEY_PASSWORD, "") ?: ""
+
+    fun setPassword(context: Context, password: String) {
+        prefs(context).edit().putString(KEY_PASSWORD, password).apply()
+    }
+
     fun getIntervalMs(context: Context): Long =
         prefs(context).getLong(KEY_INTERVAL_MS, DEFAULT_INTERVAL_MS)
 
     fun setIntervalMs(context: Context, intervalMs: Long) {
         prefs(context).edit().putLong(KEY_INTERVAL_MS, intervalMs).apply()
+    }
+
+    // restaura solo el intervalo - nunca toca servidor/token/deviceId/password/lista de servidores
+    fun resetSendingDefaults(context: Context) {
+        setIntervalMs(context, DEFAULT_INTERVAL_MS)
     }
 }

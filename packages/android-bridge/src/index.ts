@@ -11,16 +11,36 @@ export interface TraccarSenderState {
   running: boolean;
   lastSentAt: number;
   lastError: string | null;
+  bufferedCount: number;
+}
+
+// deliberadamente minimo - GPS y buffer/wakelock siempre estan forzados al mejor modo posible
+// (ver TraccarSenderService/TraccarUplink en la app nativa), no se ofrecen ajustes que solo
+// serian "peor que el default" (precision baja, sin buffer, etc)
+export interface TraccarSendSettings {
+  intervalSeconds: number;
+  password: string;
+}
+
+export interface TraccarLogEntry {
+  timestamp: number;
+  serverUrl: string;
+  success: boolean;
+  message: string;
 }
 
 export interface TraccarSenderPlugin {
   getServers(): Promise<{ servers: TraccarServer[] }>;
   saveServers(options: { servers: TraccarServer[] }): Promise<void>;
   setDeviceId(options: { deviceId: string }): Promise<void>;
-  setInterval(options: { intervalMs: number }): Promise<void>;
+  getSendSettings(): Promise<TraccarSendSettings>;
+  setSendSettings(options: Partial<TraccarSendSettings>): Promise<void>;
+  resetSendSettings(): Promise<TraccarSendSettings>;
   start(): Promise<void>;
   stop(): Promise<void>;
+  sendNow(): Promise<TraccarSenderState>;
   getState(): Promise<TraccarSenderState>;
+  getLog(): Promise<{ entries: TraccarLogEntry[] }>;
 }
 
 export interface UsbDeviceInfo {
@@ -80,14 +100,23 @@ function unavailable(name: string): never {
   throw new Error(`${name} solo esta disponible dentro de la app Android GAGA Operador`);
 }
 
+const defaultSendSettings: TraccarSendSettings = {
+  intervalSeconds: 1,
+  password: '',
+};
+
 const webTraccarFallback: TraccarSenderPlugin = {
   getServers: async () => ({ servers: [] }),
   saveServers: async () => unavailable('TraccarSender'),
   setDeviceId: async () => unavailable('TraccarSender'),
-  setInterval: async () => unavailable('TraccarSender'),
+  getSendSettings: async () => defaultSendSettings,
+  setSendSettings: async () => unavailable('TraccarSender'),
+  resetSendSettings: async () => defaultSendSettings,
   start: async () => unavailable('TraccarSender'),
   stop: async () => unavailable('TraccarSender'),
-  getState: async () => ({ running: false, lastSentAt: 0, lastError: null }),
+  sendNow: async () => unavailable('TraccarSender'),
+  getState: async () => ({ running: false, lastSentAt: 0, lastError: null, bufferedCount: 0 }),
+  getLog: async () => ({ entries: [] }),
 };
 
 const webRtkFallback: RtkNtripPlugin = {
