@@ -5,7 +5,6 @@ import {
   EQUIPMENT_CORE_COLOR,
   EQUIPMENT_OUTER_COLOR,
   lineToBufferPolygon,
-  metersPerPixel,
   setVehicleMarkerAccuracy,
   setVehicleMarkerSelected,
   setVehicleMarkerStale,
@@ -559,7 +558,6 @@ export function DashboardSection() {
     scopedLivePositions.forEach((pos) => {
       const lngLat: [number, number] = [pos.longitude, pos.latitude];
       accuracyRef.current[pos.deviceId] = pos.accuracy;
-      const metersPerPx = metersPerPixel(pos.latitude, map.getZoom());
       const existing = vehicleMarkersRef.current[pos.deviceId];
       if (existing) {
         existing.setLngLat(lngLat);
@@ -568,7 +566,7 @@ export function DashboardSection() {
           existing.getElement(),
           Date.now() - new Date(pos.fixTime).getTime() > OFFLINE_THRESHOLD_MS,
         );
-        setVehicleMarkerAccuracy(existing.getElement(), pos.accuracy, metersPerPx);
+        setVehicleMarkerAccuracy(existing.getElement(), map, pos.latitude, pos.longitude, pos.accuracy);
         return;
       }
       const el = createVehicleMarkerElement({
@@ -578,7 +576,7 @@ export function DashboardSection() {
       });
       updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed);
       setVehicleMarkerStale(el, Date.now() - new Date(pos.fixTime).getTime() > OFFLINE_THRESHOLD_MS);
-      setVehicleMarkerAccuracy(el, pos.accuracy, metersPerPx);
+      setVehicleMarkerAccuracy(el, map, pos.latitude, pos.longitude, pos.accuracy);
       el.onclick = () => selectVehicleRef.current(pos.deviceId);
       vehicleMarkersRef.current[pos.deviceId] = new maplibregl.Marker({ element: el })
         .setLngLat(lngLat)
@@ -592,10 +590,9 @@ export function DashboardSection() {
     if (!map) return;
 
     const handler = () => {
-      const zoom = map.getZoom();
       Object.entries(vehicleMarkersRef.current).forEach(([deviceId, marker]) => {
         const lngLat = marker.getLngLat();
-        setVehicleMarkerAccuracy(marker.getElement(), accuracyRef.current[deviceId], metersPerPixel(lngLat.lat, zoom));
+        setVehicleMarkerAccuracy(marker.getElement(), map, lngLat.lat, lngLat.lng, accuracyRef.current[deviceId]);
       });
     };
     map.on('zoom', handler);

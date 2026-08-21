@@ -1,6 +1,5 @@
 import {
   createVehicleMarkerElement,
-  metersPerPixel,
   setVehicleMarkerAccuracy,
   setVehicleMarkerStale,
   setVehicleMarkerThreat,
@@ -197,8 +196,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       fixTimeRef.current[vehicleId] = fixTimeMs;
       const isStale = !isMine && now - fixTimeMs > STALE_THRESHOLD_MS;
 
-      const metersPerPx = metersPerPixel(pos.latitude, map.getZoom());
-
       if (markersRef.current[vehicleId]) {
         const marker = markersRef.current[vehicleId];
         glideMarkerTo(
@@ -209,7 +206,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         );
         updateVehicleMarkerHeading(marker.getElement(), pos.deviceId, pos.course, pos.speed);
         setVehicleMarkerStale(marker.getElement(), isStale);
-        setVehicleMarkerAccuracy(marker.getElement(), pos.accuracy, metersPerPx);
+        setVehicleMarkerAccuracy(marker.getElement(), map, pos.latitude, pos.longitude, pos.accuracy);
         return;
       }
 
@@ -217,7 +214,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const el = createVehicleMarkerElement({ deviceId: pos.deviceId, isMine, color, clickable: false });
       updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed);
       setVehicleMarkerStale(el, isStale);
-      setVehicleMarkerAccuracy(el, pos.accuracy, metersPerPx);
+      setVehicleMarkerAccuracy(el, map, pos.latitude, pos.longitude, pos.accuracy);
 
       markersRef.current[vehicleId] = new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map);
     });
@@ -229,15 +226,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     if (!map) return;
 
     const handler = () => {
-      const zoom = map.getZoom();
       Object.entries(markersRef.current).forEach(([vehicleId, marker]) => {
         const deviceId = vehicleId.replace(/^vehicle-/, '');
         const lngLat = marker.getLngLat();
-        setVehicleMarkerAccuracy(
-          marker.getElement(),
-          accuracyRef.current[deviceId],
-          metersPerPixel(lngLat.lat, zoom),
-        );
+        setVehicleMarkerAccuracy(marker.getElement(), map, lngLat.lat, lngLat.lng, accuracyRef.current[deviceId]);
       });
     };
     map.on('zoom', handler);

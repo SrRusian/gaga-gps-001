@@ -1,4 +1,9 @@
+import type { Map as MaplibreMap } from 'maplibre-gl';
+
 const MIN_MOVING_SPEED_MPS = 0.5;
+// mismo criterio que packages/map-core/src/geofenceLayer.ts (duplicado a propósito, ver nota
+// de ese archivo) - para desplazar un punto una distancia real hacia el este
+const METERS_PER_DEG_LAT = 111320;
 const ARROW_SIZE = 34;
 const RING_SIZE = ARROW_SIZE + 14;
 // mismos valores que colors.danger/colors.selected en @gaga-gps/ui - duplicados a propósito,
@@ -132,19 +137,26 @@ export function createVehicleMarkerElement({
   return el;
 }
 
-// tamaño del círculo en PIXELES de pantalla reales, calculado desde metros reales de precisión
-// GPS - sin piso artificial: a un zoom bajo una precisión de 3m debe verse chica en pantalla
-// (porque 3m realmente ocupan pocos pixeles ahí), y grande al acercar, fiel al valor real
+// tamaño del círculo en PIXELES de pantalla reales, medido con map.project() - la MISMA
+// proyección que usa MapLibre para dibujar geocercas y todo lo demás, en vez de mantener una
+// fórmula aparte que tiene que coincidir a mano con el zoom interno de la librería (eso fue lo
+// que causaba el círculo desproporcionado frente a una geocerca real del mismo radio)
 export function setVehicleMarkerAccuracy(
   el: HTMLElement,
+  map: MaplibreMap,
+  latitude: number,
+  longitude: number,
   accuracyMeters: number | undefined,
-  metersPerPx: number,
 ): void {
   const circle = el.querySelector<HTMLDivElement>('.vehicle-marker__accuracy');
-  if (!circle || !metersPerPx) return;
+  if (!circle) return;
 
   const radiusMeters = accuracyMeters ?? DEFAULT_ACCURACY_METERS;
-  const diameterPx = (radiusMeters / metersPerPx) * 2;
+  const dLat = radiusMeters / METERS_PER_DEG_LAT;
+  const center = map.project([longitude, latitude]);
+  const edge = map.project([longitude, latitude + dLat]);
+  const radiusPx = Math.hypot(edge.x - center.x, edge.y - center.y);
+  const diameterPx = radiusPx * 2;
   circle.style.width = `${diameterPx}px`;
   circle.style.height = `${diameterPx}px`;
 }
