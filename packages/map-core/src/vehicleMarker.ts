@@ -105,7 +105,10 @@ function createAccuracyCircle(): HTMLDivElement {
   circle.style.background = `${ACCURACY_COLOR}1f`;
   circle.style.border = `1px solid ${ACCURACY_COLOR}66`;
   circle.style.pointerEvents = 'none';
-  circle.style.transition = 'width 0.2s ease, height 0.2s ease';
+  // sin transición: el mapa mismo no anima su propio zoom con easing extra (cada frame cambia
+  // de tamaño al instante), así que animar el círculo aparte solo lo desincroniza - con zoom
+  // rápido (rueda del mouse) cada evento reinicia la transición antes de que termine la
+  // anterior, y el círculo nunca alcanza a "ponerse al día" con su tamaño real
   circle.style.width = `${ACCURACY_INITIAL_DIAMETER_PX}px`;
   circle.style.height = `${ACCURACY_INITIAL_DIAMETER_PX}px`;
   return circle;
@@ -144,8 +147,6 @@ export function setVehicleMarkerAccuracy(
   const diameterPx = (radiusMeters / metersPerPx) * 2;
   circle.style.width = `${diameterPx}px`;
   circle.style.height = `${diameterPx}px`;
-  // DEBUG TEMPORAL - quitar una vez resuelto el reporte de tamaño del círculo de precisión
-  console.log('[accuracy-debug]', { accuracyMeters, radiusMeters, metersPerPx, diameterPx });
 }
 
 export function updateVehicleMarkerHeading(
