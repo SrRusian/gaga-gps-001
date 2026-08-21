@@ -13,6 +13,7 @@ COPY packages/shared-types/package.json packages/shared-types/package.json
 COPY packages/client/package.json packages/client/package.json
 COPY packages/map-core/package.json packages/map-core/package.json
 COPY packages/ui/package.json packages/ui/package.json
+COPY packages/android-bridge/package.json packages/android-bridge/package.json
 RUN npm ci
 
 FROM deps AS build
@@ -26,6 +27,7 @@ COPY packages/shared-types/src packages/shared-types/src
 COPY packages/client/src packages/client/src
 COPY packages/map-core/src packages/map-core/src
 COPY packages/ui/src packages/ui/src
+COPY packages/android-bridge/src packages/android-bridge/src
 
 RUN npm run build
 
