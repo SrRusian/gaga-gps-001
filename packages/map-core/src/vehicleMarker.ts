@@ -144,6 +144,8 @@ export function setVehicleMarkerAccuracy(
   const diameterPx = (radiusMeters / metersPerPx) * 2;
   circle.style.width = `${diameterPx}px`;
   circle.style.height = `${diameterPx}px`;
+  // DEBUG TEMPORAL - quitar una vez resuelto el reporte de tamaño del círculo de precisión
+  console.log('[accuracy-debug]', { accuracyMeters, radiusMeters, metersPerPx, diameterPx });
 }
 
 export function updateVehicleMarkerHeading(

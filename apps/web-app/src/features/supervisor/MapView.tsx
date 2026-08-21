@@ -61,7 +61,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   onMapReadyRef.current = onMapReady;
   const mapReadyFiredRef = useRef(false);
 
-  useSatelliteLayers(map, loaded, activeMaps, mapMode, 'geofences-fill', true);
+  useSatelliteLayers(map, loaded, activeMaps, mapMode, true);
   useGeofenceLayer(map, loaded, geofences);
   useIncidentLayer(map, loaded, incidents);
   useEquipmentLayer(map, loaded, equipment);

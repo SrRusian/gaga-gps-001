@@ -4,6 +4,19 @@ import { useEffect, useRef } from 'react';
 import { OSM_LAYER_ID } from './useMapLibreMap';
 import type { MapMode } from './mapMode';
 
+// la satelital debe quedar siempre justo encima del mapa base y debajo de TODO lo demás
+// (geocercas, equipo, incidentes, vehículos) - buscar una capa con nombre específico como
+// referencia es frágil (puede no existir todavía en el momento exacto en que esto se re-ejecuta,
+// dejando la satelital hasta arriba de todo por accidente); la capa base sí es una garantía real,
+// se crea antes que cualquier hook de este proyecto
+function firstLayerAfterBaseMap(map: MaplibreMap): string | undefined {
+  const layers = map.getStyle()?.layers ?? [];
+  const baseIndex = layers.findIndex((layer) => layer.id === OSM_LAYER_ID);
+  if (baseIndex === -1) return undefined;
+  const next = layers[baseIndex + 1];
+  return next && !next.id.startsWith('sat-') ? next.id : undefined;
+}
+
 function applyMapModeToMap(map: MaplibreMap, mode: MapMode, activeSatelliteIds: number[]): void {
   const showOsm = mode === 'streets' || mode === 'hybrid';
   const showSat = mode === 'satellite' || mode === 'hybrid';
@@ -28,7 +41,6 @@ export function useSatelliteLayers(
   mapLoaded: boolean,
   activeMaps: ActiveMap[],
   mode: MapMode,
-  beforeLayerId = 'geofences-fill',
   autoFitOnFirstLoad = false,
 ): void {
   const activeIdsRef = useRef<number[]>([]);
@@ -43,6 +55,11 @@ export function useSatelliteLayers(
     });
     activeIdsRef.current = [];
 
+    // se calcula una sola vez, antes de agregar ninguna - así varios mapas satelitales activos
+    // a la vez quedan agrupados consecutivos en ese mismo punto, no cada uno buscando de nuevo
+    // (lo que dejaría al segundo/tercero saltando hasta arriba de todo)
+    const beforeId = firstLayerAfterBaseMap(map);
+
     activeMaps.forEach((m) => {
       const sourceId = `sat-${m.id}`;
       map.addSource(sourceId, {
@@ -55,10 +72,6 @@ export function useSatelliteLayers(
           ? { bounds: [m.bounds.minLon, m.bounds.minLat, m.bounds.maxLon, m.bounds.maxLat] }
           : {}),
       });
-
-      const beforeId = map.getLayer(beforeLayerId)
-        ? beforeLayerId
-        : map.getStyle()?.layers?.find((layer) => layer.id.startsWith('gl-draw-'))?.id;
 
       map.addLayer(
         {
@@ -96,7 +109,7 @@ export function useSatelliteLayers(
 
     applyMapModeToMap(map, mode, activeIdsRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, mapLoaded, activeMaps, beforeLayerId]);
+  }, [map, mapLoaded, activeMaps]);
 
   useEffect(() => {
     if (!map || !mapLoaded) return;

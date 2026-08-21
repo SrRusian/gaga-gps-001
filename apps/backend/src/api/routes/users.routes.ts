@@ -49,6 +49,9 @@ export function buildUsersRouter({ userRepo, requireRole, userProjectHistoryRepo
       const passwordHash = await bcrypt.hash(password, 10);
       // no-admin nunca origina un usuario fuera de su propio proyecto
       const projectId = role === 'admin' ? null : isAdmin ? req.body.projectId : req.user!.projectId;
+      if (role !== 'admin' && !projectId) {
+        return res.status(400).json({ error: 'Los usuarios no admin deben tener un proyecto asignado' });
+      }
       const user = await userRepo.create({ email, passwordHash, name, role, projectId });
       if (user.project_id != null) {
         await userProjectHistoryRepo?.recordChange({
@@ -91,6 +94,11 @@ export function buildUsersRouter({ userRepo, requireRole, userProjectHistoryRepo
       const effectiveRole = role !== undefined ? role : existing.role;
       if (isAdmin && effectiveRole === 'admin') {
         projectId = null;
+      }
+
+      const effectiveProjectId = projectId !== undefined ? projectId : existing.project_id;
+      if (effectiveRole !== 'admin' && !effectiveProjectId) {
+        return res.status(400).json({ error: 'Los usuarios no admin deben tener un proyecto asignado' });
       }
 
       const wantsRoleChange = role !== undefined && role !== existing.role;
