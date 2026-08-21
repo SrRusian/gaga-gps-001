@@ -1,3 +1,5 @@
+import { getApiBaseUrl } from './deviceConfig';
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -24,7 +26,7 @@ export interface ApiClient {
 }
 
 export function createApiClient(options: ApiClientOptions = {}): ApiClient {
-  const baseUrl = options.baseUrl ?? '';
+  const baseUrl = options.baseUrl ?? getApiBaseUrl();
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const token = options.getToken?.();

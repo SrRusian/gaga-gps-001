@@ -91,6 +91,17 @@ const io = new Server(server, {
   transports: ['websocket', 'polling'],
 });
 
+// la app nativa Android (Capacitor) sirve el WebView desde su propio origen local (https://localhost),
+// distinto del backend real - sin esto el navegador bloquea toda la API por CORS. Bearer token, no
+// cookies, asi que origin abierto es seguro (mismo criterio ya usado en el cors de socket.io arriba)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(requestLogger);

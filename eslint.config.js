@@ -6,7 +6,14 @@ const reactHooks = require('eslint-plugin-react-hooks');
 
 module.exports = [
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/build/**', '**/*.mbtiles'],
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/build/**',
+      '**/*.mbtiles',
+      'apps/android-operator/www/**',
+      'apps/android-operator/android/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -18,6 +25,13 @@ module.exports = [
     },
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
+  {
+    files: ['**/*.mjs'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: globals.node,
     },
   },
   {

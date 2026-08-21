@@ -1,0 +1,216 @@
+.ds-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  background: rgba(11, 13, 16, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.ds-card {
+  position: relative;
+  background: #14171c;
+  border: 1px solid #262b33;
+  border-radius: 10px;
+  padding: 28px;
+  width: 440px;
+  max-width: 100%;
+  max-height: 88vh;
+  overflow-y: auto;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+.ds-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.ds-close:hover {
+  color: #e8eaed;
+}
+
+.ds-card h2 {
+  color: #e8eaed;
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 18px;
+}
+
+.ds-section {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #262b33;
+}
+.ds-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.ds-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8eaed;
+  margin-bottom: 10px;
+}
+
+.ds-label {
+  display: block;
+  font-size: 11px;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
+
+.ds-card input {
+  width: 100%;
+  padding: 9px 11px;
+  margin-bottom: 10px;
+  background: #0b0d10;
+  border: 1px solid #262b33;
+  border-radius: 6px;
+  color: #e8eaed;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.ds-card input::placeholder {
+  color: #565d68;
+}
+.ds-card input:focus {
+  outline: none;
+  border-color: #4f8ff0;
+}
+
+.ds-hint {
+  font-size: 11px;
+  color: #565d68;
+  margin: -4px 0 10px;
+  word-break: break-all;
+}
+
+.ds-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ds-row input {
+  flex: 1 1 auto;
+  width: auto;
+  margin-bottom: 0;
+}
+.ds-row span {
+  flex: 1 1 auto;
+  color: #e8eaed;
+  font-size: 13px;
+}
+
+.ds-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #8b949e;
+  white-space: nowrap;
+}
+.ds-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+.ds-remove {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 11px;
+  background: none;
+  border: 1px solid #e5484d;
+  color: #e5484d;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ds-add {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: none;
+  border: 1px dashed #262b33;
+  color: #8b949e;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ds-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.ds-actions button {
+  width: auto;
+  padding: 8px 14px;
+  font-size: 12px;
+  background: #4f8ff0;
+  border: none;
+  border-radius: 6px;
+  color: #0b0d10;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ds-status {
+  font-size: 12px;
+  color: #8b949e;
+}
+.ds-saved {
+  font-size: 12px;
+  color: #4f8ff0;
+}
+.ds-error {
+  color: #e5484d;
+}
+.ds-error-block {
+  color: #e5484d;
+  font-size: 12px;
+  margin-top: 6px;
+}
+.ds-fix {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #4f8ff0;
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-gear-btn {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: #14171c;
+  border: 1px solid #262b33;
+  color: #8b949e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+}
+.ds-gear-btn:hover {
+  color: #e8eaed;
+  border-color: #4f8ff0;
+}
+.ds-gear-btn svg {
+  width: 22px;
+  height: 22px;
+}

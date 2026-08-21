@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/core": "^7.4.4",
+    "@gaga-gps/android-bridge": "*",
     "@gaga-gps/client": "*",
     "@gaga-gps/map-core": "*",
     "@gaga-gps/shared-types": "*",

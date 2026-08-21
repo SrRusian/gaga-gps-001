@@ -1,0 +1,11 @@
+{
+  "name": "@gaga-gps/android-bridge",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Interfaz tipada hacia los plugins nativos de apps/android-operator (TraccarSender, RtkNtrip). En navegador normal (no Capacitor) cada metodo resuelve a un no-op seguro, asi apps/web-app puede usarla sin ramificar su codigo por plataforma.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@capacitor/core": "^7.4.4"
+  }
+}
