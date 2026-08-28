@@ -1,0 +1,84 @@
+# GAGA Operador (Android)
+
+Este APK sirve para **cualquier rol** (Admin, Encargado de Proyecto, Supervisor, Operador) - es el mismo `web` de siempre empacado con Capacitor, con un solo login que decide la vista según el rol, igual que en el navegador. Un dispositivo recién instalado queda en **modo básico**: solo login, sin pedir ningún permiso extra. Las 3 piezas de abajo (Traccar/GNSS Master) solo son relevantes para Operador, y quedan ocultas hasta que alguien del equipo activa el **"Modo Operador"** desde Ajustes con un código interno de 4 dígitos (ver `DeviceSettingsPanel.tsx`, constante `OPERATOR_MODE_CODE`) - una vez activado no se puede desactivar sin reinstalar la app. Esto evita que cualquiera que instale el APK active el envío de datos por accidente o a propósito.
+
+En modo operador, el APK unifica en un solo lugar las 3 apps que hoy usa la tableta:
+
+1. **Operador GAGA** (mapa, alertas, turnos, incidentes) - el mismo código web que ya corre en el navegador, sin fork. Vive en `web`, esta app solo lo empaqueta con Capacitor.
+2. **Traccar Client** - envío de posición por protocolo OsmAnd, deliberadamente simple: GPS y buffer sin conexión siempre al máximo (no hay ajustes que solo serían "peor que el default" - ver filosofía abajo), con intervalo editable y envío manual/bitácora para pruebas.
+3. **GNSS Master** - conexión al receptor RTK por **USB**, cliente NTRIP (corrección en tiempo real contra un caster) y alimentación del fix corregido al sistema como *mock location*, para que tanto el mapa del Operador como el envío de posición usen automáticamente la posición RTK en vez del GPS interno del tablet.
+
+Todo esto se controla desde el engranaje (⚙) abajo a la derecha en la pantalla de login - visible solo cuando la app corre empacada como app nativa (no aparece en el navegador normal), y accesible ANTES de iniciar sesión (el envío de posición es una función del dispositivo, no de la sesión de un operador).
+
+## Filosofía de los ajustes: sin opciones que solo empeoran el sistema
+
+A pedido explícito del usuario: si una opción (precisión baja, sin buffer, sin wakelock, detección de parada, distancia/ángulo como filtro adicional) nunca sería mejor que el default, no se expone como ajuste - el código simplemente siempre usa el mejor modo. Lo único que de verdad tiene sentido tocar en campo es el **intervalo de envío** (para pruebas, ej. moverlo de 1s a 2-3s) y la **contraseña** (si el servidor la exige). Esto es intencional, no una limitación - menos ajustes, menos formas de dejar el sistema en un estado "tonto" sin darse cuenta.
+
+## Qué ya está construido
+
+- Proyecto Capacitor + Android generado con la herramienta oficial (`npx cap add android`), no escrito a mano - reduce el riesgo de un Gradle mal armado.
+- `MainActivity.kt`: modo inmersivo (oculta barra de estado/navegación, un swipe la muestra un momento), pantalla que nunca se apaga sola (`FLAG_KEEP_SCREEN_ON` - un press real del botón de encendido sí bloquea igual, ninguna app puede evitar eso), brillo siempre al máximo mientras la app está abierta (a nivel de la propia ventana, sin permiso especial ni tocar el brillo global del sistema).
+- **Traccar** (`TraccarSenderPlugin`/`TraccarSenderService`/`TraccarUplink`, Kotlin) - servicio en primer plano con GPS y wakelock siempre activos, protocolo OsmAnd:
+  - Servidor "principal" auto-armado desde la URL del servidor GAGA + `/gps` + token (sin volver a escribir la URL aparte); servidores adicionales opcionales administrables a mano.
+  - **Intervalo de envío (s)** editable, **contraseña** opcional (protocolo OsmAnd).
+  - **Buffer sin conexión** siempre activo: si un envío falla, se guarda (JSON acotado a 300 puntos en SharedPreferences, no una base de datos aparte) y se reintenta en el próximo envío exitoso.
+  - **Envío manual** ("Enviar ubicación ahora") - funciona aunque el envío continuo esté apagado, igual que en Traccar Client real.
+  - **Bitácora** ("Mostrar estado") - últimos 50 intentos de envío con hora, servidor, éxito/error.
+  - **Restaurar intervalo por defecto** - regresa solo el intervalo a 1 segundo, sin tocar servidor/token/id/contraseña.
+- **GNSS Master** (`RtkNtripPlugin`/`UsbSerialManager`/`NtripClient`/`SwMapsOutputServer`/`RateTracker`, Kotlin) - paridad con la app real:
+  - **USB**: deteccion automatica de dispositivos conectados/desconectados (`ACTION_USB_DEVICE_ATTACHED`/`DETACHED`, refresca la lista sola en el front sin boton), seleccionar + Conectar, estado "Conectado" con nombre del dispositivo y **data rate real** (B/s o KB/s, calculado con `RateTracker`), **baud rate editable** (default 460800, el real de la mayoria de receptores RTK de gama alta - antes tenia 115200 por error).
+  - **NTRIP**: address/puerto/mount point/usuario/contrasena (ya existian) + **version V1/V2 seleccionable** (V1 manda el formato minimo original sin headers HTTP/1.1 extra, V2 el completo) + **data rate real** del stream RTCM recibido.
+  - **Modo de correccion**: selector NTRIP Client / PointPerfect / USB Serial - solo NTRIP Client funciona hoy, los otros dos se guardan y se muestran bloqueados "proximamente" en el front (contemplados a proposito, sin rehacer el selector despues).
+  - **Ubicacion simulada** y **Output to SW Maps** ahora son toggles reales que reflejan el estado actual (antes "Output to SW Maps" no existia) - SW Maps se implementa como un servidor TCP local en `SwMapsOutputServer.kt` (puerto configurable, default 11123, solo localhost) que retransmite el NMEA crudo del receptor a cualquier app que se conecte (SW Maps: External GNSS > TCP > 127.0.0.1:puerto).
+  - **Servicio GNSS: Activar/Desactivar/Reiniciar** - un control en el front (`DeviceSettingsPanel.tsx`) que orquesta USB+NTRIP+mock location+SW Maps juntos en el orden correcto, sin logica nueva del lado nativo (cada pieza sigue siendo un plugin independiente).
+- **Automatización / provisión rápida** - pensado para instalar la app en una tableta nueva y que quede operando sola:
+  - **Botón "Configuración rápida" + código de 4 dígitos** (`DeviceSettingsPanel.tsx`, código en una constante al inicio del archivo, cambiar ahí si hace falta) - rellena de un golpe servidor/token/credenciales NTRIP conocidas y activa el "modo automático". El identificador del dispositivo y el mount point NUNCA se rellenan solos - varían por tableta/ubicación, se quedan manuales a propósito.
+  - **Envío de posición persiste solo** (`TraccarPrefs.autoStart`, Kotlin) - una vez que se le da "Iniciar envío continuo" una vez, se retoma solo si se cierra/reabre la app (`MainActivity.resumeTraccarIfNeeded()`) y hasta si se reinicia la tableta completa (`BootReceiver.kt`, escucha `BOOT_COMPLETED`).
+  - **Modo automático del RTK/NTRIP** (`RtkPrefs.autoModeEnabled`, activado por el código de arriba) - al conectar el USB del receptor (se detecta por vendor id de u-blox, `0x1546`, con `baudRate` guardado) se conecta solo y arranca NTRIP solo (si ya hay un mount point guardado) + ubicación simulada; al desconectar el USB, todo eso se apaga solo y el sistema vuelve al GPS normal de la tableta - sin tocar nada a mano, ni una vez.
+  - **Bloqueo de ajustes con contraseña** (`web/packages/client/deviceConfig.ts`, `localStorage`) - opcional, vacío por defecto. Una vez puesta, la pantalla de ajustes pide la contraseña antes de mostrar nada, para que un operador no pueda entrar a cambiar la configuración por accidente o a propósito.
+- `app/packages/android-bridge` - la interfaz TypeScript hacia esos dos plugins, consumida por `web`.
+- `DeviceSettingsPanel.tsx` (`web/src/features/device-settings/`) - la pantalla de configuración completa (servidor/token/id, intervalo/contraseña, bitácora, USB, NTRIP, estado del fix en vivo), accesible desde el engranaje del login.
+- CORS habilitado en el backend (`backend/src/app.ts`) y `androidScheme: 'http'` + `usesCleartextTraffic="true"` - necesarios para que el WebView de la app hable con un backend sin TLS (servidor de pruebas); ya desplegado y confirmado funcionando contra `app.gaga-maquinaria.com`.
+- `npm run cap:sync` (dentro de esta carpeta) ya se probó de punta a punta en este entorno: compila `web`, copia el `dist/` a `www/`, y corre `cap sync android` - **sin errores**. Ya se compiló, instaló y probó en una tableta real (Samsung SM-X306B) con login funcionando de extremo a extremo.
+
+## Qué falta y por qué no lo hice aquí
+
+No hay SDK de Android, Gradle nativo ni `adb` instalados en este entorno - solo Node/npm. Pude generar y sincronizar el proyecto Capacitor (eso es JavaScript puro), pero **nunca compilé el APK ni probé nada contra hardware real** (ni el receptor RTK, ni el caster NTRIP, ni el mock-location). El código Kotlin está escrito con cuidado y sigue la documentación oficial de cada pieza (Capacitor plugin API, `usb-serial-for-android`, NTRIP v1/v2, `LocationManager`), pero la primera compilación real en Android Studio es también la primera vez que un compilador de verdad lo revisa - trátalo como una v1 sólida, no como código ya probado en campo.
+
+## Pasos en Android Studio
+
+1. `File > Open` → selecciona `app/android/android` (no la raíz del repo).
+2. Deja que Gradle sincronice (primera vez tarda, descarga AGP, Capacitor Android, Kotlin y `usb-serial-for-android` vía JitPack - necesita internet).
+3. Conecta la tableta por USB con "Depuración USB" activada, o usa "Depuración inalámbrica" si el puerto USB ya está ocupado por el receptor RTK (ver más abajo).
+4. `Run` para probar, o `Build > Generate Signed App Bundle / APK` para el instalable final (crea un keystore nuevo la primera vez y guárdalo - lo vas a necesitar para cada actualización).
+
+### El puerto USB se comparte con el receptor RTK
+
+La mayoría de las tabletas solo tienen un puerto USB-C. Si lo usas para el cable de depuración no queda libre para el receptor RTK. Para desarrollar cómodo: activa "Depuración inalámbrica" en Opciones de desarrollador (Android 11+) y deja el puerto físico libre para el receptor.
+
+### Paso manual obligatorio: mock location
+
+Android bloquea por diseño que cualquier app finja tu ubicación, a menos que la elijas explícitamente. Después de instalar la app una vez:
+
+`Ajustes > Opciones de desarrollador > Seleccionar app de ubicación falsa` → elige **GAGA Operador**.
+
+Sin este paso, el botón "Activar ubicación simulada" de la pantalla de Integraciones falla con un mensaje claro (ya está manejado en el código, no truena la app) explicando este mismo paso.
+
+## Cómo se actualiza el contenido web dentro del APK
+
+Cada vez que cambie algo en `web` y quieras que el APK lo lleve:
+
+```bash
+cd app/android
+npm run cap:sync
+```
+
+Esto recompila `web`, copia el resultado a `www/`, y sincroniza `android/`. Después, en Android Studio, vuelve a compilar/instalar.
+
+## Limitaciones conocidas (honestas)
+
+- El RTK/NTRIP corre mientras la app está viva - no es un servicio 100% independiente de la actividad (a diferencia de Traccar, que ya corre en un foreground service real con wakelock). Para el caso de uso real (tableta con pantalla encendida en la máquina durante el turno) no debería notarse.
+- Esta app siempre usa el `LocationManager` nativo de Android para GPS, nunca Google Play Services Fused Location - a propósito, para no sumar esa dependencia pesada. Si algún día se necesita de verdad la variante Fused (mejor precisión en interiores/con GPS débil), es una tarea aparte concreta.
+- El buffer sin conexión ahora vive en SQLite (`OfflineBufferStore.kt`, no un JSON en SharedPreferences) con tope de seguridad de 200,000 puntos (a 1 fix/segundo, más de dos días completos) - una desconexión de horas no pierde nada. Al reconectar, la posición EN VIVO se manda de inmediato (nunca espera al histórico) y el histórico se drena aparte con hasta 8 envíos en paralelo (el rate limit del backend es 6000/min por dispositivo, con margen de sobra) - un backlog de varias horas se pone al día en minutos, no bloquea nunca la posición actual.
+- Ya probado de extremo a extremo con hardware real: receptor RTK u-blox por USB, caster NTRIP real (EarthScope), fix DGPS con 8-12 satélites, y confirmado que la posición que llega al servidor (`accuracy=2.5` en vez del ~10.5m del GPS de la tableta) es la corregida por RTK, no la del chip interno. Dos bugs reales que salieron en el proceso y ya están corregidos: faltaba activar DTR/RTS al abrir el puerto serial (el receptor no transmitía nada sin eso) y faltaba declarar `ACCESS_MOCK_LOCATION` en el manifest (sin eso la app nunca aparecía en "Seleccionar app de ubicación ficticia", sin importar reinicios ni reinstalaciones).
+- El modo automático (auto-conectar USB, auto-arrancar NTRIP) todavía no se ha probado en campo con el flujo completo apagar/prender el receptor varias veces seguidas - la lógica está ahí y compilada, pero es la parte más nueva de esta ronda.

@@ -22,7 +22,7 @@ web.
 6. [Multi-tenencia por proyecto](#multi-tenencia-por-proyecto)
 7. [Modelo de datos](#modelo-de-datos)
 8. [Funcionalidades](#funcionalidades)
-   - [Geocercas](#geocercas-círculo-polígono-corredor)
+   - [Geocercas](#geocercas-polígono-líneacorredor)
    - [Equipo estático](#equipo-estático)
    - [Visor de recorridos (historial)](#visor-de-recorridos-historial)
    - [Alertas de incidente en tiempo real](#alertas-de-incidente-en-tiempo-real)
@@ -75,10 +75,10 @@ tiempo real a tres interfaces web, detrás de un login único:
 Tableta (Traccar Client, protocolo OsmAnd)
         │ GET/POST /gps?id=...&lat=...&lon=...
         ▼
-apps/backend/src/api/routes/telemetry.routes.ts
+backend/src/api/routes/telemetry.routes.ts
         │ Valida clave compartida, parámetros, rango lat/lon
         ▼
-apps/backend/src/services/telemetry/PositionProcessor.ts
+backend/src/services/telemetry/PositionProcessor.ts
         │ 1. Auto-registra el dispositivo si es nuevo (DeviceManager)
         │ 2. Filtra saltos físicamente implausibles (PositionFilterService)
         │ 3. Persiste en PostgreSQL/TimescaleDB (PositionRepository)
@@ -118,49 +118,61 @@ una sola imagen.
 
 ## Estructura del proyecto
 
+Separación por dónde vive cada cosa, no por rol: `backend/` es el único servicio que consultan
+tanto la web como la app móvil (nunca se compila dentro de nada); `web/` es todo lo que se
+compila dentro del bundle del navegador/SPA; `app/` es todo lo exclusivo de la app nativa. El
+único paquete que queda neutral en la raíz es `shared-types`, porque backend y web lo importan
+cada uno por su lado, sin que ninguno "empaquete" al otro.
+
 ```
 gaga-gps-001/
-├── apps/
-│   ├── backend/
-│   │   ├── Dockerfile              # build multi-stage: tsc + vite build → imagen runtime
-│   │   └── src/
-│   │       ├── app.ts              # entry point - ensambla todo, sirve la SPA + fallback de rutas
-│   │       ├── config/              # pool de PostgreSQL, cliente Redis, env (validado con zod)
-│   │       ├── repositories/        # acceso a datos (CRUD PostgreSQL, sin ORM)
-│   │       ├── services/
-│   │       │   ├── telemetry/       # PositionProcessor, PositionFilterService, DeviceManager, FleetStateManager
-│   │       │   ├── alerts/          # módulos de seguridad (geocercas, colisión, proximidad, señal, incidentes)
-│   │       │   ├── static_equipment/
-│   │       │   └── maps/            # pipeline de imágenes georreferenciadas → MBTiles
-│   │       ├── sockets/              # FleetSocketServer (Socket.io, eventos tipados desde shared-types)
-│   │       ├── api/
-│   │       │   ├── routes/           # un archivo por recurso
-│   │       │   └── middleware/       # auth (JWT + Socket.io), rate limiting
-│   │       ├── scripts/              # seed-admin.ts
-│   │       └── utils/                # geometry.ts, geoFormats.ts (funciones puras)
-│   │
-│   └── web-app/                      # Vite + React + TS - la única SPA (login + Admin + Supervisor + Operador)
-│       └── src/
-│           ├── main.tsx, App.tsx     # BrowserRouter + rutas protegidas + React.lazy() por rol
-│           └── features/
-│               ├── auth/              # LoginScreen (login único) + ProtectedRoute
-│               ├── admin/             # AdminApp + sections/ (Dashboard, Reportes, Sistema)
-│               ├── supervisor/        # SupervisorApp - sala de control
-│               └── operator/          # OperatorApp - vista en campo + turnos
+├── backend/
+│   ├── Dockerfile              # build multi-stage: tsc + vite build → imagen runtime
+│   ├── db/
+│   │   └── 001_init.sql        # schema completo, se aplica solo al crear un volumen de Postgres nuevo
+│   └── src/
+│       ├── app.ts              # entry point - ensambla todo, sirve la SPA + fallback de rutas
+│       ├── config/              # pool de PostgreSQL, cliente Redis, env (validado con zod)
+│       ├── repositories/        # acceso a datos (CRUD PostgreSQL, sin ORM)
+│       ├── services/
+│       │   ├── telemetry/       # PositionProcessor, PositionFilterService, DeviceManager, FleetStateManager
+│       │   ├── alerts/          # módulos de seguridad (geocercas, colisión, proximidad, señal, incidentes)
+│       │   ├── static_equipment/
+│       │   └── maps/            # pipeline de imágenes georreferenciadas → MBTiles
+│       ├── sockets/              # FleetSocketServer (Socket.io, eventos tipados desde shared-types)
+│       ├── api/
+│       │   ├── routes/           # un archivo por recurso
+│       │   └── middleware/       # auth (JWT + Socket.io), rate limiting
+│       ├── scripts/              # seed-admin.ts
+│       └── utils/                # geometry.ts, geoFormats.ts (funciones puras)
+│
+├── web/                           # Vite + React + TS - la única SPA (login + Admin + Supervisor + Operador)
+│   ├── src/
+│   │   ├── main.tsx, App.tsx     # BrowserRouter + rutas protegidas + React.lazy() por rol
+│   │   └── features/
+│   │       ├── auth/              # LoginScreen (login único) + ProtectedRoute
+│   │       ├── admin/             # AdminApp + sections/ (Dashboard, Reportes, Sistema)
+│   │       ├── supervisor/        # SupervisorApp - sala de control
+│   │       └── operator/          # OperatorApp - vista en campo + turnos
+│   └── packages/                  # exclusivos de la web - nadie más los importa directo
+│       ├── client/                # fetch tipado + Socket.io tipado + sesión compartida
+│       ├── map-core/              # capas de mapa satelital y render de geocercas, compartido por los 3 paneles
+│       └── ui/                    # Button, AlertBanner, VehicleCard, MapModeSelector, StatCard, tokens de color
+│
+├── app/
+│   ├── android/                   # proyecto Capacitor - empaqueta el mismo bundle de web/, sin fork
+│   └── packages/
+│       └── android-bridge/        # interfaz TS hacia los plugins nativos (TraccarSender, RtkNtrip)
 │
 ├── packages/
-│   ├── shared-types/                # Device, Geofence, Position, FleetState, Alert*, eventos de Socket.io
-│   ├── client/                      # fetch tipado + Socket.io tipado + sesión compartida
-│   ├── map-core/                    # capas de mapa satelital y render de geocercas, compartido por los 3 paneles
-│   └── ui/                          # Button, AlertBanner, VehicleCard, MapModeSelector, StatCard, tokens de color
+│   └── shared-types/               # Device, Geofence, Position, FleetState, Alert*, eventos de Socket.io
 │
-├── db/
-│   └── migrations/
-│       └── 001_init.sql             # schema completo, se aplica solo al crear un volumen de Postgres nuevo
+├── config/                          # tooling que casi nunca se toca a mano
+│   ├── tsconfig.base.json           # compilerOptions base que extiende cada paquete
+│   ├── eslint.config.js             # reglas de lint del monorepo completo
+│   └── vitest.config.mts            # proyectos unit/integration
 │
-├── caddy/
-│   └── Caddyfile                    # configuración HTTPS/proxy
-│
+├── Caddyfile                        # configuración HTTPS/proxy (un solo archivo, sin carpeta propia)
 ├── package.json                     # workspaces + scripts build/test/lint a nivel monorepo
 ├── docker-compose.yml                # stack completo - dev y producción
 ├── .env.example                      # única plantilla de variables
@@ -305,7 +317,7 @@ momento de cada registro por el mismo motivo.
 
 ## Modelo de datos
 
-Definido en `db/migrations/001_init.sql`, se aplica automáticamente
+Definido en `backend/db/001_init.sql`, se aplica automáticamente
 la primera vez que se crea el volumen de PostgreSQL.
 
 | Tabla                     | Propósito                                                                                          |
@@ -313,7 +325,7 @@ la primera vez que se crea el volumen de PostgreSQL.
 | `projects`                | Sitios de operación aislados entre sí                                                               |
 | `devices`                 | Dispositivos/tabletas - `unique_id` es el identificador configurado en Traccar Client                |
 | `positions`                | Hypertable de TimescaleDB - una fila por posición GPS, particionada por `fix_time`                   |
-| `geofences`                | Geocercas - círculo, polígono o polilínea/corredor; tipo `warning`/`danger`/`parking`                |
+| `geofences`                | Geocercas - polígono o polilínea/corredor (círculo solo heredado); paleta fija de 8 tipos semánticos |
 | `geofence_events`          | Auditoría de entradas/salidas de geocercas                                                          |
 | `static_equipment`         | Equipo estático con radio de giro/seguridad - `linked_device_id` vincula opcionalmente una tableta   |
 | `users`                    | Cuentas de todos los roles                                                                          |
@@ -329,24 +341,45 @@ la primera vez que se crea el volumen de PostgreSQL.
 
 ## Funcionalidades
 
-### Geocercas (círculo, polígono, corredor)
+### Geocercas (polígono, línea/corredor)
 
-Tres formas soportadas, todas evaluadas en tiempo real contra la
-posición de cada vehículo:
+Dos formas creables (máxima compatibilidad con lo que exporta Google
+Earth vía KML), evaluadas en tiempo real contra la posición de cada
+vehículo:
 
-- **Círculo** - centro + radio.
-- **Polígono** - zona autorizada de forma arbitraria, dibujada en el
-  mapa del panel Admin.
-- **Polilínea/corredor** - ruta autorizada con un ancho definido a
-  cada lado, con severidad progresiva (dentro del corredor → sin
-  alerta, cerca del borde → advertencia, fuera del margen → peligro).
+- **Polígono** - área de forma arbitraria, dibujada en el mapa del
+  panel Admin.
+- **Línea/corredor** - ruta con un ancho real definido a cada lado,
+  con severidad progresiva (dentro del corredor → sin alerta, cerca
+  del borde → advertencia, fuera del margen → peligro).
 
-Tipo `warning` (amarilla), `danger` (roja) o `parking` (azul, sin
-sirena). Cada entrada/salida queda registrada en `geofence_events`
-para auditoría. Se crean/editan desde un panel flotante sobre el
-mapa grande de Admin, con vista previa en vivo y edición de vértices
-tras guardar. Exportables en GeoJSON o KML; importables desde
-cualquiera de esos dos formatos.
+(El círculo - centro + radio - sigue existiendo a nivel de datos para
+geocercas creadas antes de este cambio, pero ya no se ofrece como
+opción al crear una nueva.)
+
+**Paleta fija de 8 tipos semánticos**, cada uno con su color y
+comportamiento de alerta propios (el color se deriva siempre del
+tipo, no es libre):
+
+| Tipo | Color | Alerta |
+|---|---|---|
+| `forbidden` - Zona prohibida | negro | crítica, mensaje propio |
+| `danger` - Peligro | rojo | crítica |
+| `warning` - Advertencia | amarillo | advertencia |
+| `authorized_route` - Ruta autorizada | naranja | corredor por distancia (mecanismo de arriba) |
+| `allowed` - Zona permitida | verde | ninguna, solo visual |
+| `parking` - Estacionamiento | azul | informativa, sin sirena |
+| `discharge` - Descarga | café | ninguna, solo visual |
+| `maintenance` - Mantenimiento | morado | advertencia, mensaje propio |
+
+Cada entrada/salida queda registrada en `geofence_events` para
+auditoría. Se crean/editan desde un panel flotante sobre el mapa
+grande de Admin, con vista previa en vivo y edición de vértices tras
+guardar. Exportables en GeoJSON o KML (con color real vía
+`<Style>`); importables desde cualquiera de esos dos formatos - al
+importar un KML de Google Earth, el tipo se detecta por color exacto
+contra la paleta de arriba (si el color no coincide con ninguno, cae
+en Advertencia por default).
 
 ### Equipo estático
 
@@ -515,7 +548,7 @@ docker compose up -d --build
 volúmenes con nombre (`postgres_data`, `redis_data`, `maps_data`,
 `caddy_data`, `caddy_config`), fijados explícitamente en
 `docker-compose.yml` (`name: gaga-gps-001`) - reconstruir la imagen
-del backend nunca borra datos. `db/migrations/001_init.sql` solo se
+del backend nunca borra datos. `backend/db/001_init.sql` solo se
 aplica una vez, al crear el volumen de Postgres.
 
 **Borrado total intencional** (para empezar de cero de verdad):
@@ -729,7 +762,7 @@ Todas las rutas bajo `/api/*` (excepto `/api/auth/login` y
 ## Datos: retención, compresión y escalabilidad
 
 La hypertable `positions` (TimescaleDB) tiene configurada una
-política automática (`db/migrations/001_init.sql`):
+política automática (`backend/db/001_init.sql`):
 
 - **Compresión** - chunks de más de 7 días se comprimen
   automáticamente en segundo plano (10-20x menos espacio en disco),
@@ -780,7 +813,7 @@ npm run lint          # ESLint sobre todo el monorepo
 ```
 
 **Tests de integración** (Postgres+PostGIS real) - un segundo
-"proyecto" Vitest dentro del mismo `vitest.config.mts`
+"proyecto" Vitest dentro del mismo `config/vitest.config.mts`
 (`test.projects`), para lo que un fake en memoria no puede cubrir:
 consultas SQL/PostGIS reales. Conecta a la misma instancia de Docker
 Compose que ya usa el desarrollo local.
@@ -826,7 +859,7 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota
 | Síntoma                                                                       | Causa probable                                                                   | Solución                                                                                                       |
 | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `NOAUTH Authentication required` (Redis)                                     | Falta `REDIS_PASSWORD` en `.env`                                                   | Debe coincidir con lo que arrancó el contenedor - `docker compose up -d --build` tras editar `.env`             |
-| `Cannot GET /`, `/administrator`, `/operator`, `/supervisor`                | El build del frontend no llegó a la imagen del backend                             | Verificar que `apps/web-app/dist` exista tras `npm run build`                                                    |
+| `Cannot GET /`, `/administrator`, `/operator`, `/supervisor`                | El build del frontend no llegó a la imagen del backend                             | Verificar que `web/dist` exista tras `npm run build`                                                    |
 | Entrar a una ruta protegida manda de vuelta al login en loop                  | No hay sesión válida, o el rol no coincide con esa ruta                            | Iniciar sesión con un usuario del rol correcto; si persiste, revisar errores de red a `/api/auth/login`         |
 | `401`/`403` en `/api/fleet/stop` o `/resume` con sesión iniciada             | El usuario no tiene un rol autorizado, o el token venció                          | Confirmar el rol en Admin → Usuarios; si es correcto, volver a iniciar sesión                                    |
 | El socket no conecta / sin actualizaciones en vivo                           | Conexión sin JWT válido en el handshake                                            | Confirmar que hay sesión válida antes de que la app llame a `createSocket()`                                     |
@@ -858,7 +891,7 @@ Dirección declarada del proyecto, no implementada todavía:
     operación, no solo un rastreador.
   - De construirse, el stack natural por consistencia sería React
     Native (reutilizando `packages/shared-types` y parte de
-    `packages/client`) - todo el proyecto se mantiene en TypeScript
+    `web/packages/client`) - todo el proyecto se mantiene en TypeScript
     de punta a punta deliberadamente, para no migrar a otro lenguaje
     cuando llegue este momento.
 - **Más roles** - el sistema ya está preparado para esto sin cambios

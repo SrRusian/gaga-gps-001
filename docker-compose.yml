@@ -18,7 +18,7 @@ services:
     container_name: gaga-caddy
     restart: unless-stopped
     volumes:
-      - ./caddy:/etc/caddy:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:
@@ -30,7 +30,7 @@ services:
   gaga-backend:
     build:
       context: .
-      dockerfile: apps/backend/Dockerfile
+      dockerfile: backend/Dockerfile
     container_name: gaga-backend
     restart: unless-stopped
     init: true
@@ -44,6 +44,9 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       TZ: America/Mexico_City
+      # fijo a proposito, sin importar lo que diga MAPS_DIR en .env (uso local sin Docker) - el
+      # volumen maps_data siempre esta montado en /app/maps, cambiar esto rompe la persistencia
+      MAPS_DIR: maps
     volumes:
       - maps_data:/app/maps
     depends_on:
@@ -66,7 +69,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/home/postgres/pgdata
-      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+      - ./backend/db:/docker-entrypoint-initdb.d:ro
     networks:
       - gaga-net
     ports:

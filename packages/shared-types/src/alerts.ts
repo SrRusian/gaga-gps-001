@@ -6,7 +6,7 @@ export interface PreventiveStopStatus {
 }
 
 export interface GeofenceAlertPayload {
-  type: 'geofence_red' | 'geofence_yellow' | 'geofence_parking';
+  type: 'geofence_red' | 'geofence_yellow' | 'geofence_parking' | 'geofence_forbidden' | 'geofence_maintenance';
   deviceId: string;
   geofenceId: number;
   geofenceName: string;

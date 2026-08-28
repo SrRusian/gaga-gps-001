@@ -1,8 +1,8 @@
 node_modules/
-TEST-FILES/
 .env
 *.log
 dist/
 CLAUDE.md
-maps/
-apps/android-operator/www/
+.claude/
+files/
+app/android/www/

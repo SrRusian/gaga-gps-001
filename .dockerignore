@@ -1,11 +1,10 @@
 **/node_modules
-TEST-FILES
 .env
 *.log
 **/dist
 CLAUDE.md
-maps
-**/.vscode
+**/.claude
+**/files
 
 .git
 .gitignore

@@ -1,6 +1,14 @@
 import type { LineString, Polygon } from 'geojson';
 
-export type GeofenceType = 'warning' | 'danger' | 'parking';
+export type GeofenceType =
+  | 'warning'
+  | 'danger'
+  | 'parking'
+  | 'forbidden'
+  | 'authorized_route'
+  | 'allowed'
+  | 'discharge'
+  | 'maintenance';
 export type GeofenceShapeType = 'circle' | 'polygon' | 'polyline';
 
 interface GeofenceBase {
