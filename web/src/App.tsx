@@ -1,4 +1,5 @@
-import { getStoredToken, getStoredUser, resolveRolePath } from '@gaga-gps/client';
+import { clearSession, getStoredToken, getStoredUser, resolveRolePath } from '@gaga-gps/client';
+import { Capacitor } from '@capacitor/core';
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { LoginScreen } from './features/auth/LoginScreen';
@@ -7,7 +8,13 @@ import { ProtectedRoute } from './features/auth/ProtectedRoute';
 
 const AdminApp = lazy(() => import('./features/admin/AdminApp'));
 const SupervisorApp = lazy(() => import('./features/supervisor/SupervisorApp'));
-const OperatorApp = lazy(() => import('./features/operator/OperatorApp'));
+// Operador es exclusivo de la app instalada - el codigo fuente vive en app/packages/operator-ui,
+// no en web/. Este import por nombre (no por ruta relativa) es el mismo patron ya usado con
+// @gaga-gps/android-bridge: web/ sigue siendo quien compila el bundle unico, pero el codigo le
+// pertenece a app/. Import de subruta especifica (no el paquete a secas) a proposito - si
+// comparte un index.ts barrel con DeviceSettingsPanel (import eager de LoginScreen), Vite
+// precarga el codigo de Operador para cualquier visitante sin importar su rol.
+const OperatorApp = lazy(() => import('@gaga-gps/operator-ui/OperatorApp'));
 
 function LoadingScreen() {
   return (
@@ -30,6 +37,14 @@ function LoadingScreen() {
 function Home() {
   const token = getStoredToken();
   const user = getStoredUser();
+
+  // sesion de Operador guardada (ej. localStorage copiado a mano) pero fuera de la app - sin este
+  // corte, redirigir a /operator y que ProtectedRoute la rebote de vuelta aqui crea un loop infinito
+  if (token && user && user.role === 'operator' && !Capacitor.isNativePlatform()) {
+    clearSession();
+    return <LoginScreen />;
+  }
+
   if (token && user) return <Navigate to={`/${resolveRolePath(user.role)}`} replace />;
   return <LoginScreen />;
 }
@@ -76,7 +91,7 @@ export default function App() {
           <Route
             path="/operator"
             element={
-              <ProtectedRoute role="operator">
+              <ProtectedRoute role="operator" nativeOnly>
                 <OperatorApp />
               </ProtectedRoute>
             }

@@ -3,7 +3,7 @@ import { Button } from '@gaga-gps/ui';
 import { Capacitor } from '@capacitor/core';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DeviceSettingsPanel } from '../device-settings/DeviceSettingsPanel';
+import { DeviceSettingsPanel } from '@gaga-gps/operator-ui/DeviceSettingsPanel';
 
 interface LoginResponse {
   token: string;
@@ -46,6 +46,16 @@ export function LoginScreen() {
       // en la app nativa se puede configurar desde el engranaje sin recargar la pagina
       const api = createApiClient();
       const data = await api.post<LoginResponse>('/api/auth/login', { email, password });
+
+      // Operador es exclusivo de la app instalada - nunca se debe poder ver este panel desde un
+      // navegador normal, ni siquiera con credenciales validas. Se corta aqui, antes de guardar
+      // sesion, para que ni el login parezca haber funcionado.
+      if (data.user.role === 'operator' && !Capacitor.isNativePlatform()) {
+        setError('Esta cuenta es de Operador - inicia sesión desde la app instalada en la tableta, no desde el navegador.');
+        setLoading(false);
+        return;
+      }
+
       saveSession(data.token, data.user);
       if (data.user.role !== 'operator') captureApproximateLocation(data.token);
       navigate(`/${resolveRolePath(data.user.role)}`, { replace: true });

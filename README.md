@@ -86,7 +86,7 @@ backend/src/services/telemetry/PositionProcessor.ts
         │ 5. Evalúa módulos de seguridad (geocercas, colisión, señal, equipo)
         │ 6. Distribuye vía Socket.io (FleetSocketServer)
         ▼
-UI Operador / UI Supervisor / UI Admin (navegador)
+UI Operador (solo app instalada) / UI Supervisor / UI Admin (navegador)
 ```
 
 Todo el procesamiento ocurre de forma síncrona en el momento en que
@@ -118,11 +118,15 @@ una sola imagen.
 
 ## Estructura del proyecto
 
-Separación por dónde vive cada cosa, no por rol: `backend/` es el único servicio que consultan
-tanto la web como la app móvil (nunca se compila dentro de nada); `web/` es todo lo que se
-compila dentro del bundle del navegador/SPA; `app/` es todo lo exclusivo de la app nativa. El
-único paquete que queda neutral en la raíz es `shared-types`, porque backend y web lo importan
-cada uno por su lado, sin que ninguno "empaquete" al otro.
+Separación por a quién le pertenece el código, no por dónde termina compilado: `backend/` es el
+único servicio que consultan tanto la web como la app móvil (nunca se compila dentro de nada);
+`web/` es el código exclusivo de Admin/Supervisor/Encargado; `app/` es todo lo exclusivo de la
+app nativa - incluido el panel de Operador completo (`app/packages/operator-ui`), aunque su
+bundle final se siga compilando junto con el de `web/` en un solo `vite build` (`web/` lo importa
+por nombre, igual que hace con `android-bridge`, porque su bundle único necesita ese código para
+poder renderizarlo - eso no cambia a quién le pertenece el archivo fuente). El único paquete que
+queda neutral en la raíz es `shared-types`, porque backend y web lo importan cada uno por su
+lado, sin que ninguno "empaquete" al otro.
 
 ```
 gaga-gps-001/
@@ -146,23 +150,23 @@ gaga-gps-001/
 │       ├── scripts/              # seed-admin.ts
 │       └── utils/                # geometry.ts, geoFormats.ts (funciones puras)
 │
-├── web/                           # Vite + React + TS - la única SPA (login + Admin + Supervisor + Operador)
+├── web/                           # Vite + React + TS - la SPA de Admin/Supervisor/Encargado
 │   ├── src/
 │   │   ├── main.tsx, App.tsx     # BrowserRouter + rutas protegidas + React.lazy() por rol
 │   │   └── features/
 │   │       ├── auth/              # LoginScreen (login único) + ProtectedRoute
 │   │       ├── admin/             # AdminApp + sections/ (Dashboard, Reportes, Sistema)
-│   │       ├── supervisor/        # SupervisorApp - sala de control
-│   │       └── operator/          # OperatorApp - vista en campo + turnos
+│   │       └── supervisor/        # SupervisorApp - sala de control
 │   └── packages/                  # exclusivos de la web - nadie más los importa directo
 │       ├── client/                # fetch tipado + Socket.io tipado + sesión compartida
 │       ├── map-core/              # capas de mapa satelital y render de geocercas, compartido por los 3 paneles
 │       └── ui/                    # Button, AlertBanner, VehicleCard, MapModeSelector, StatCard, tokens de color
 │
 ├── app/
-│   ├── android/                   # proyecto Capacitor - empaqueta el mismo bundle de web/, sin fork
+│   ├── android/                   # proyecto Capacitor - empaqueta el bundle de web/ + operator-ui, sin fork
 │   └── packages/
-│       └── android-bridge/        # interfaz TS hacia los plugins nativos (TraccarSender, RtkNtrip)
+│       ├── android-bridge/        # interfaz TS hacia los plugins nativos (TraccarSender, RtkNtrip)
+│       └── operator-ui/           # OperatorApp + DeviceSettingsPanel - exclusivos de la app, web/ los importa por nombre
 │
 ├── packages/
 │   └── shared-types/               # Device, Geofence, Position, FleetState, Alert*, eventos de Socket.io
@@ -488,7 +492,7 @@ historial. Supervisor ve solo su turno programado y conserva el
 botón de parada preventiva colectiva; Encargado ve todo el proyecto
 y todos los turnos, sin ninguna acción de edición.
 
-**Operador** (`/operator`) - vista en campo. Principio de diseño:
+**Operador** (`/operator`) - vista en campo, **exclusiva de la app instalada** - su código fuente vive en `app/packages/operator-ui`, no en `web/`, y un login con rol Operador desde un navegador normal se rechaza explícitamente, incluso con credenciales válidas. Principio de diseño:
 *local complementa, nunca reemplaza* - la posición/velocidad propia
 usa la Geolocation API del navegador como fuente primaria (respuesta
 inmediata, funciona sin conexión), mientras que todo lo que el

@@ -14,6 +14,7 @@ COPY web/packages/client/package.json web/packages/client/package.json
 COPY web/packages/map-core/package.json web/packages/map-core/package.json
 COPY web/packages/ui/package.json web/packages/ui/package.json
 COPY app/packages/android-bridge/package.json app/packages/android-bridge/package.json
+COPY app/packages/operator-ui/package.json app/packages/operator-ui/package.json
 RUN npm ci
 
 FROM deps AS build
@@ -28,6 +29,7 @@ COPY web/packages/client/src web/packages/client/src
 COPY web/packages/map-core/src web/packages/map-core/src
 COPY web/packages/ui/src web/packages/ui/src
 COPY app/packages/android-bridge/src app/packages/android-bridge/src
+COPY app/packages/operator-ui/src app/packages/operator-ui/src
 
 RUN npm run build
 

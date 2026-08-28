@@ -2,7 +2,7 @@
   "name": "@gaga-gps/web-app",
   "version": "0.0.0",
   "private": true,
-  "description": "App única (login + Admin + Supervisor + Operador) - arquitectura feature-driven con React Router y code-splitting por rol. Reemplaza los 4 proyectos separados (web-gateway/web-admin/web-supervisor/web-operator).",
+  "description": "App única (login + Admin + Supervisor) - arquitectura feature-driven con React Router y code-splitting por rol. El panel de Operador vive en @gaga-gps/operator-ui (app/packages), pero se importa aquí para compilarse en el mismo bundle - ver ese paquete y CLAUDE.md para el porqué. Reemplaza los 4 proyectos separados (web-gateway/web-admin/web-supervisor/web-operator).",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,9 +11,9 @@
   },
   "dependencies": {
     "@capacitor/core": "^7.4.4",
-    "@gaga-gps/android-bridge": "*",
     "@gaga-gps/client": "*",
     "@gaga-gps/map-core": "*",
+    "@gaga-gps/operator-ui": "*",
     "@gaga-gps/shared-types": "*",
     "@gaga-gps/ui": "*",
     "@mapbox/mapbox-gl-draw": "^1.4.3",
