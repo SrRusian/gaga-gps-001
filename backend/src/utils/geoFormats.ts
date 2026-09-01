@@ -163,12 +163,24 @@ function typeFromStyleColor(props: Record<string, unknown>): GeofenceType | null
   return hit ? hit[0] : null;
 }
 
+// el editor de poligonos a mano de Google Earth nombra cada forma con su medida ("0.000"), no con
+// un nombre real - en ese caso el styleUrl (nombre del Style/carpeta, ej. "#PELIGRO") es mas util
+function resolveFeatureName(props: Record<string, unknown>, index: number): string {
+  const rawName = typeof props.name === 'string' ? props.name.trim() : '';
+  if (rawName && !/^-?\d+([.,]\d+)?$/.test(rawName)) return rawName;
+
+  const styleUrl = typeof props.styleUrl === 'string' ? props.styleUrl.replace(/^#/, '') : '';
+  if (styleUrl) return styleUrl;
+
+  return `Geocerca importada ${index + 1}`;
+}
+
 function featureToGeofenceInput(
   feature: Feature<Geometry | null>,
   index: number,
 ): FeatureConversionResult {
   const props: Record<string, unknown> = feature.properties || {};
-  const name = (props.name as string) || `Geocerca importada ${index + 1}`;
+  const name = resolveFeatureName(props, index);
   const type: GeofenceType =
     (VALID_GEOFENCE_TYPES.has(props.type as string) && (props.type as GeofenceType)) ||
     typeFromStyleColor(props) ||
@@ -238,7 +250,10 @@ export function kmlToGeofenceInputs(kmlString: string): {
   inputs: GeofenceInput[];
   errors: string[];
 } {
-  const dom = new DOMParser().parseFromString(kmlString, 'text/xml');
+  // Google Earth exporta KML con BOM UTF-8 (caracter U+FEFF) al inicio - xmldom lo trata como
+  // contenido antes de la declaracion <?xml ...?> y truena el parseo por completo, no solo el color
+  const cleaned = kmlString.charCodeAt(0) === 0xfeff ? kmlString.slice(1) : kmlString;
+  const dom = new DOMParser().parseFromString(cleaned, 'text/xml');
   const featureCollection = kmlToGeoJSON(dom);
   return geoJSONToGeofenceInputs(featureCollection);
 }
