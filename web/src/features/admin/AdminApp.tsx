@@ -4,7 +4,6 @@ import type { ComponentType } from 'react';
 import { useEffect, useState } from 'react';
 import './admin.css';
 import { DashboardSection } from './sections/DashboardSection';
-import { ReportsSection } from './sections/ReportsSection';
 import { SystemSection } from './sections/SystemSection';
 import { useAdminAuth } from './useAdminAuth';
 
@@ -34,7 +33,6 @@ function useBackendReachable(): boolean {
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'reports', label: 'Reportes' },
   { id: 'system', label: 'Sistema', adminOnly: true },
 ] as const;
 
@@ -42,7 +40,6 @@ type SectionId = (typeof NAV_ITEMS)[number]['id'];
 
 const SECTIONS: Record<SectionId, ComponentType> = {
   dashboard: DashboardSection,
-  reports: ReportsSection,
   system: SystemSection,
 };
 

@@ -251,6 +251,8 @@ export function DashboardSection() {
     projectId: '',
   });
 
+  const [csvExporting, setCsvExporting] = useState(false);
+
   const [historyMode, setHistoryMode] = useState(false);
   const [historyDeviceId, setHistoryDeviceId] = useState('');
   const [historyFrom, setHistoryFrom] = useState('');
@@ -724,6 +726,34 @@ export function DashboardSection() {
       renderHistoryRoute(data);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Error obteniendo el historial');
+    }
+  }
+
+  async function exportHistoryCsv() {
+    if (!historyDeviceId || !historyFrom || !historyTo) {
+      alert('Complete dispositivo, desde y hasta');
+      return;
+    }
+    setCsvExporting(true);
+    try {
+      const projectParam = typeof scope === 'number' ? `&projectId=${scope}` : '';
+      const url = `/api/reports/history/csv?deviceId=${encodeURIComponent(historyDeviceId)}&from=${new Date(historyFrom).toISOString()}&to=${new Date(historyTo).toISOString()}${projectParam}`;
+      const token = getStoredToken();
+      const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Error ${res.status}`);
+      }
+      // blob: Chrome bloquea esta descarga fuera de HTTPS/localhost exacto
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `historial_${historyDeviceId}.csv`;
+      a.click();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error exportando el historial');
+    } finally {
+      setCsvExporting(false);
     }
   }
 
@@ -1778,17 +1808,14 @@ export function DashboardSection() {
             </button>
           </div>
 
-          {}
-          {typeof scope === 'number' && (
-            <div className="dash-tools">
-              <button
-                className={`btn btn-sm${historyMode ? ' active' : ''}`}
-                onClick={() => (historyMode ? exitHistoryMode() : enterHistoryMode())}
-              >
-                {historyMode ? 'Salir del historial' : 'Historial'}
-              </button>
-            </div>
-          )}
+          <div className="dash-tools">
+            <button
+              className={`btn btn-sm${historyMode ? ' active' : ''}`}
+              onClick={() => (historyMode ? exitHistoryMode() : enterHistoryMode())}
+            >
+              {historyMode ? 'Salir del historial' : 'Historial'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1823,6 +1850,9 @@ export function DashboardSection() {
           </div>
           <button className="btn btn-sm" onClick={loadHistoryPoints}>
             Buscar
+          </button>
+          <button className="btn btn-sm" onClick={exportHistoryCsv} disabled={csvExporting}>
+            {csvExporting ? 'Descargando…' : 'Descargar CSV'}
           </button>
         </div>
       )}

@@ -155,7 +155,7 @@ gaga-gps-001/
 │   │   ├── main.tsx, App.tsx     # BrowserRouter + rutas protegidas + React.lazy() por rol
 │   │   └── features/
 │   │       ├── auth/              # LoginScreen (login único) + ProtectedRoute
-│   │       ├── admin/             # AdminApp + sections/ (Dashboard, Reportes, Sistema)
+│   │       ├── admin/             # AdminApp + sections/ (Dashboard, Sistema)
 │   │       └── supervisor/        # SupervisorApp - sala de control
 │   └── packages/                  # exclusivos de la web - nadie más los importa directo
 │       ├── client/                # fetch tipado + Socket.io tipado + sesión compartida
@@ -284,7 +284,7 @@ alcance global - todos los demás roles siempre tienen un proyecto.
   (sala de control), con el mapa y la lista de vehículos acotados a
   su **turno programado asignado**, no a todo el proyecto. Solo
   lectura - sin acceso a Dispositivos, Usuarios, Geocercas, Equipo
-  estático, Mapas, Historial de recorridos, Reportes ni Sistema
+  estático, Mapas, Historial de recorridos/CSV ni Sistema
   (conserva parada preventiva colectiva y resolver incidentes, por
   ser acciones operativas de seguridad en vivo, no edición de
   configuración). El historial de alertas (no de posiciones) se
@@ -482,9 +482,12 @@ definida.
 **Admin/Administrador de Proyecto** (`/administrator`,
 `/project-admin`) - Dashboard (mapa grande con toda la operación,
 overlays de Proyectos/Turnos/Dispositivos/Usuarios/Geocercas/Equipo/
-Mapas), Reportes (exportación CSV), Sistema (configuración global -
-solo Admin - y health check en vivo). Historial de recorridos vive
-como modo dentro de Dashboard.
+Mapas, cada uno filtrado por el proyecto elegido en el selector -
+disponible también con "Global" seleccionado), Sistema (configuración
+global - solo Admin - y health check en vivo). Historial de
+recorridos vive como modo interactivo dentro de Dashboard (filtro de
+dispositivo/rango + reproducción sobre el mapa), con exportación a
+CSV como una opción más dentro del mismo filtro.
 
 **Supervisor/Encargado** (`/supervisor`, `/manager`) - mismo panel,
 sala de control con mapa, lista de vehículos, alertas activas/

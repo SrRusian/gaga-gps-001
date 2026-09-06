@@ -15,6 +15,7 @@ export interface PositionFilterConfig {
 export interface Env {
   port: number;
   nodeEnv: string;
+  isProduction: boolean;
   jwtSecret: string;
   jwtExpiresIn: string;
   operatorJwtExpiresIn: string;
@@ -27,9 +28,12 @@ export interface Env {
   positionFilter: PositionFilterConfig;
 }
 
+const nodeEnv = process.env.NODE_ENV || 'development';
+
 export const env: Env = {
   port: parseInt(process.env.PORT || '3001', 10),
-  nodeEnv: process.env.NODE_ENV || 'development',
+  nodeEnv,
+  isProduction: nodeEnv === 'production',
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-cambiar-en-produccion',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',
   operatorJwtExpiresIn: process.env.OPERATOR_JWT_EXPIRES_IN || '30d',
@@ -57,7 +61,7 @@ const productionEnvSchema = z.object({
 });
 
 function validateEnv(): void {
-  if (env.nodeEnv !== 'production') return;
+  if (!env.isProduction) return;
 
   const result = productionEnvSchema.safeParse(process.env);
   if (!result.success) {

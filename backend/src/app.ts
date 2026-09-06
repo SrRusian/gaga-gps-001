@@ -417,9 +417,15 @@ async function ensureDefaultAdmin(): Promise<void> {
   });
 
   console.warn(' ══════════════════════════════════════════════════════════');
-  console.warn(
-    ` Usuario admin creado automáticamente (primera vez): ${env.defaultAdminEmail} / ${env.defaultAdminPassword}`,
-  );
+  if (env.isProduction) {
+    console.warn(` Usuario admin creado automáticamente (primera vez): ${env.defaultAdminEmail}`);
+    console.warn(' Contraseña: la definida por DEFAULT_ADMIN_PASSWORD en el .env de este servidor');
+    console.warn(' (no se imprime aquí por seguridad - no queda en los logs de producción).');
+  } else {
+    console.warn(
+      ` Usuario admin creado automáticamente (primera vez): ${env.defaultAdminEmail} / ${env.defaultAdminPassword}`,
+    );
+  }
   console.warn(' Inicia sesión en / y CAMBIA esta contraseña de inmediato.');
   console.warn(' ══════════════════════════════════════════════════════════');
 }
