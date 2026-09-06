@@ -7,7 +7,12 @@ export type GagaSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 export function createSocket(url?: string): GagaSocket {
   const socket: GagaSocket = io(url ?? (getApiBaseUrl() || window.location.origin), {
-    transports: ['websocket', 'polling'],
+    // polling primero (orden default de socket.io), luego upgrade a websocket - forzar websocket
+    // desde el primer intento hace que, bajo StrictMode (dev), el socket que React descarta en el
+    // doble-montaje alcance a abrir un WebSocket real antes del cleanup, y el navegador reporta
+    // "WebSocket is closed before the connection is established" (inofensivo, solo en dev, pero
+    // evitable). Con polling primero ese intento descartado es una petición HTTP normal.
+    transports: ['polling', 'websocket'],
     auth: { token: getStoredToken() },
   });
 

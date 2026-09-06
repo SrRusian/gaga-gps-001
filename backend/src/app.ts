@@ -90,7 +90,9 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
-  transports: ['websocket', 'polling'],
+  // mismo orden que el cliente (web/packages/client/src/socket.ts) - polling primero, upgrade a
+  // websocket despues, para evitar el warning de WebSocket abortado bajo StrictMode en dev
+  transports: ['polling', 'websocket'],
 });
 
 // la app nativa Android (Capacitor) sirve el WebView desde su propio origen local (https://localhost),
