@@ -51,6 +51,7 @@ export interface GeofenceMatchRow {
   shape_type: GeofenceShapeType;
   corridor_width_meters: number | null;
   corridor_danger_margin_meters: number | null;
+  speed_limit_kmh: number | null;
   distance_meters: number;
 }
 
@@ -103,6 +104,7 @@ class GeofenceAlertService {
   socketServer: SocketServerLike | null;
   activeGeofences: Geofence[];
   activeAlerts: Record<string, Severity>;
+  activeAllowedZones: Record<string, boolean>;
   geofenceEventRepo: GeofenceEventRepoLike | null;
   alertEventRepo: AlertEventRepoLike | null;
 
@@ -121,6 +123,7 @@ class GeofenceAlertService {
     this.socketServer = socketServer || null;
     this.activeGeofences = [];
     this.activeAlerts = {};
+    this.activeAllowedZones = {};
     this.geofenceEventRepo = geofenceEventRepo || null;
     this.alertEventRepo = alertEventRepo || null;
   }
@@ -144,10 +147,17 @@ class GeofenceAlertService {
     this.activeGeofences = this.activeGeofences.filter((g) => g.id !== id);
   }
 
-  async evaluate(position: EvaluatedPosition): Promise<void> {
+  async evaluate(position: EvaluatedPosition): Promise<GeofenceMatchRow[]> {
     const { deviceId, latitude, longitude, projectId } = position;
 
     const matches = await this.geofenceRepo.findMatchingSpatial({ projectId, latitude, longitude });
+
+    const wasInAllowed = this.activeAllowedZones[deviceId] ?? false;
+    const inAllowed = matches.some((g) => g.type === 'allowed');
+    if (wasInAllowed && !inAllowed) {
+      this.triggerLeftAllowedZone(deviceId, projectId);
+    }
+    this.activeAllowedZones[deviceId] = inAllowed;
 
     let maxSeverity: Severity = null;
     let triggeredGeofence: GeofenceMatchRow | null = null;
@@ -187,6 +197,33 @@ class GeofenceAlertService {
       this.clearAlert(deviceId, previousAlert, projectId);
       this.activeAlerts[deviceId] = null;
     }
+
+    return matches;
+  }
+
+  // evento puntual de transicion (no un estado sostenido como danger/warning) - "fuera de zona"
+  // segun el cliente significa salir de una zona 'allowed' (verde), severidad info, sin "clear"
+  triggerLeftAllowedZone(deviceId: string, projectId: number | null): void {
+    const message = 'Vehículo salió de zona permitida';
+    const payload = {
+      type: 'geofence_left_allowed',
+      deviceId,
+      message,
+      loop: false,
+      timestamp: new Date().toISOString(),
+    };
+
+    console.log(`Device ${deviceId} salió de una zona permitida`);
+
+    if (this.socketServer) {
+      this.socketServer.broadcastToProject(projectId, 'alert:info', payload);
+      this.socketServer.broadcastToProject(projectId, 'supervisor:alert', {
+        ...payload,
+        action: 'exited_allowed',
+      });
+    }
+
+    this._recordAlertEvent(deviceId, 'info', message, {});
   }
 
   triggerAlert(
@@ -291,6 +328,7 @@ class GeofenceAlertService {
       this.clearAlert(deviceId, previousAlert, projectId);
     }
     delete this.activeAlerts[deviceId];
+    delete this.activeAllowedZones[deviceId];
   }
 }
 

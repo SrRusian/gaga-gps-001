@@ -24,10 +24,10 @@ export function buildDeviceGroupsRouter({ deviceGroupRepo, requireRole }: Device
 
   router.post('/', canManage, async (req, res) => {
     try {
-      const { name } = req.body;
+      const { name, speedLimitKmh } = req.body;
       if (!name) return res.status(400).json({ error: 'name es requerido' });
       const projectId = req.user!.role === 'admin' ? (req.body.projectId ?? null) : req.user!.projectId;
-      const group = await deviceGroupRepo.create({ projectId, name });
+      const group = await deviceGroupRepo.create({ projectId, name, speedLimitKmh });
       res.status(201).json(group);
     } catch (err) {
       console.error('device-groups.routes POST /:', (err as Error).message);
@@ -37,9 +37,8 @@ export function buildDeviceGroupsRouter({ deviceGroupRepo, requireRole }: Device
 
   router.patch('/:id', canManage, async (req, res) => {
     try {
-      const { name } = req.body;
-      if (!name) return res.status(400).json({ error: 'name es requerido' });
-      const group = await deviceGroupRepo.update(Number(req.params.id), name);
+      const { name, speedLimitKmh } = req.body;
+      const group = await deviceGroupRepo.update(Number(req.params.id), { name, speedLimitKmh });
       if (!group) return res.status(404).json({ error: 'Grupo no encontrado' });
       res.json(group);
     } catch (err) {

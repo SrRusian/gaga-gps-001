@@ -58,6 +58,7 @@ export function buildGeofencesRouter({
         geometry,
         corridorWidthMeters,
         corridorDangerMarginMeters,
+        speedLimitKmh,
       } = req.body;
 
       if (!name || !type) {
@@ -91,6 +92,7 @@ export function buildGeofencesRouter({
         geometry,
         corridorWidthMeters,
         corridorDangerMarginMeters,
+        speedLimitKmh,
       });
 
       geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(geofence));
@@ -125,6 +127,7 @@ export function buildGeofencesRouter({
         geometry,
         corridorWidthMeters,
         corridorDangerMarginMeters,
+        speedLimitKmh,
       } = req.body;
 
       const geofence = await geofenceRepo.update(Number(req.params.id), {
@@ -137,6 +140,7 @@ export function buildGeofencesRouter({
         geometry,
         corridorWidthMeters,
         corridorDangerMarginMeters,
+        speedLimitKmh,
       });
       if (!geofence) return res.status(404).json({ error: 'Geocerca no encontrada' });
 

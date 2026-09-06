@@ -8,6 +8,8 @@ import type GeofenceAlertService from '../../services/alerts/GeofenceAlertServic
 import type SignalLostService from '../../services/alerts/SignalLostService';
 import type CollisionRiskService from '../../services/alerts/CollisionRiskService';
 import type VehicleProximityService from '../../services/alerts/VehicleProximityService';
+import type SpeedAlertService from '../../services/alerts/SpeedAlertService';
+import type ActivityClassificationService from '../../services/telemetry/ActivityClassificationService';
 import type IncidentAlertService from '../../services/alerts/IncidentAlertService';
 import type StaticEquipmentManager from '../../services/static_equipment/StaticEquipmentManager';
 import type EquipmentRepository from '../../repositories/EquipmentRepository';
@@ -27,6 +29,8 @@ export interface DevicesRouterDeps {
   signalLostService?: SignalLostService;
   collisionRiskService?: CollisionRiskService;
   vehicleProximityService?: VehicleProximityService;
+  speedAlertService?: SpeedAlertService;
+  activityClassificationService?: ActivityClassificationService;
   incidentAlertService?: IncidentAlertService;
   equipmentRepo?: EquipmentRepository;
   equipmentManager?: StaticEquipmentManager;
@@ -44,6 +48,8 @@ export function buildDevicesRouter({
   signalLostService,
   collisionRiskService,
   vehicleProximityService,
+  speedAlertService,
+  activityClassificationService,
   incidentAlertService,
   equipmentRepo,
   equipmentManager,
@@ -146,13 +152,15 @@ export function buildDevicesRouter({
         return res.status(404).json({ error: 'Dispositivo no encontrado' });
       }
 
-      const { name, type, attributes } = req.body;
+      const { name, type, attributes, groupId, speedLimitKmh } = req.body;
       const projectId = req.user!.role === 'admin' ? req.body.projectId : undefined;
       const device = await deviceRepo.update(Number(req.params.id), {
         name,
         type,
         projectId,
         attributes,
+        groupId,
+        speedLimitKmh,
       });
       if (
         req.user!.role === 'admin' &&
@@ -204,6 +212,8 @@ export function buildDevicesRouter({
         signalLostService?.clearDevice(device.unique_id);
         collisionRiskService?.clearDevice(device.unique_id, otherDeviceIds);
         vehicleProximityService?.clearDevice(device.unique_id, otherDeviceIds);
+        speedAlertService?.clearDevice(device.unique_id, device.project_id);
+        activityClassificationService?.clearDevice(device.unique_id);
 
         const unlinkedEquipment = equipmentManager?.clearDeviceLink(device.unique_id);
         if (unlinkedEquipment && socketServer && equipmentManager) {

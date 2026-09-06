@@ -119,6 +119,39 @@ class PositionRepository {
       throw err;
     }
   }
+
+  // distancia recorrida via PostGIS (LAG + ST_Distance sobre geography) en vez de traer todas las
+  // filas a Node - evita el LIMIT de findHistory truncando el cálculo en rangos largos
+  async sumDistanceMeters({
+    deviceId,
+    from,
+    to,
+  }: {
+    deviceId: string;
+    from: Date | string;
+    to: Date | string;
+  }): Promise<number> {
+    try {
+      // el LAG (window function) debe resolverse en una subquery aparte - Postgres no permite
+      // SUM(...) envolviendo directamente una window function en el mismo nivel de SELECT
+      const { rows } = await query<{ distance_meters: number | null }>(
+        `SELECT SUM(step_meters) AS distance_meters FROM (
+           SELECT ST_Distance(
+             ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
+             ST_SetSRID(ST_MakePoint(LAG(longitude) OVER w, LAG(latitude) OVER w), 4326)::geography
+           ) AS step_meters
+           FROM positions
+           WHERE device_id = $1 AND fix_time BETWEEN $2 AND $3 AND valid = TRUE
+           WINDOW w AS (ORDER BY fix_time)
+         ) steps`,
+        [deviceId, from, to],
+      );
+      return Number(rows[0]?.distance_meters ?? 0);
+    } catch (err) {
+      console.error('PositionRepository.sumDistanceMeters:', (err as Error).message);
+      throw err;
+    }
+  }
 }
 
 export default PositionRepository;

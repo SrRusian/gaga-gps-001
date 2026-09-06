@@ -4,6 +4,8 @@ import type DeviceRepository from '../../repositories/DeviceRepository';
 import type { DeviceRow } from '../../repositories/DeviceRepository';
 import GeofenceRepository from '../../repositories/GeofenceRepository';
 import type PositionRepository from '../../repositories/PositionRepository';
+import type EquipmentActivityRepository from '../../repositories/EquipmentActivityRepository';
+import type OperatorSessionRepository from '../../repositories/OperatorSessionRepository';
 import type { UserRole } from '../../repositories/UserRepository';
 import { isInsideGeofence } from '../../utils/geometry';
 
@@ -15,6 +17,8 @@ export interface ReportsRouterDeps {
   positionRepo: PositionRepository;
   geofenceRepo: GeofenceRepository;
   deviceRepo: DeviceRepository;
+  equipmentActivityRepo: EquipmentActivityRepository;
+  operatorSessionRepo: OperatorSessionRepository;
   requireRole: (...roles: UserRole[]) => RequestHandler;
 }
 
@@ -22,6 +26,8 @@ export function buildReportsRouter({
   positionRepo,
   geofenceRepo,
   deviceRepo,
+  equipmentActivityRepo,
+  operatorSessionRepo,
   requireRole,
 }: ReportsRouterDeps) {
   const router = express.Router();
@@ -151,6 +157,88 @@ export function buildReportsRouter({
     } catch (err) {
       console.error('reports.routes GET /history/csv:', (err as Error).message);
       res.status(500).json({ error: 'Error exportando CSV' });
+    }
+  });
+
+  // distancia + tiempo productivo/improductivo/mantenimiento de un vehiculo en un rango - sin UI
+  // todavia (mismo criterio que Produccion: endpoint listo, pantalla queda para cuando se pida)
+  router.get('/vehicle-summary', canView, async (req, res) => {
+    try {
+      const { deviceId, from, to } = req.query;
+      if (!deviceId || !from || !to) {
+        return res.status(400).json({ error: 'deviceId, from y to son requeridos' });
+      }
+
+      const resolved = await resolveDeviceForHistory(req, String(deviceId));
+      if ('error' in resolved) {
+        return res.status(resolved.error).json({ error: resolved.message });
+      }
+
+      const [distanceMeters, activity] = await Promise.all([
+        positionRepo.sumDistanceMeters({ deviceId: String(deviceId), from: String(from), to: String(to) }),
+        equipmentActivityRepo.summarizeByDevice(String(deviceId), String(from), String(to)),
+      ]);
+
+      res.json({
+        deviceId: String(deviceId),
+        from: String(from),
+        to: String(to),
+        distanceMeters: Math.round(distanceMeters),
+        productiveSeconds: Math.round(activity.productive),
+        unproductiveSeconds: Math.round(activity.unproductive),
+        maintenanceSeconds: Math.round(activity.maintenance),
+      });
+    } catch (err) {
+      console.error('reports.routes GET /vehicle-summary:', (err as Error).message);
+      res.status(500).json({ error: 'Error obteniendo resumen del vehículo' });
+    }
+  });
+
+  // igual que vehicle-summary pero por operador - un operador puede haber usado mas de un
+  // vehiculo en el rango, la distancia se suma sesion por sesion
+  router.get('/operator-summary', canView, async (req, res) => {
+    try {
+      const { userId, from, to } = req.query;
+      if (!userId || !from || !to) {
+        return res.status(400).json({ error: 'userId, from y to son requeridos' });
+      }
+
+      const sessions = await operatorSessionRepo.findReport({
+        userId: parseInt(String(userId), 10),
+        from: String(from),
+        to: String(to),
+      });
+
+      const distances = await Promise.all(
+        sessions.map((s) =>
+          positionRepo.sumDistanceMeters({
+            deviceId: s.device_id,
+            from: s.started_at > new Date(String(from)) ? s.started_at : String(from),
+            to: s.ended_at && s.ended_at < new Date(String(to)) ? s.ended_at : String(to),
+          }),
+        ),
+      );
+      const distanceMeters = distances.reduce((sum, d) => sum + d, 0);
+
+      const activity = await equipmentActivityRepo.summarizeByOperatorSession(
+        parseInt(String(userId), 10),
+        String(from),
+        String(to),
+      );
+
+      res.json({
+        userId: parseInt(String(userId), 10),
+        from: String(from),
+        to: String(to),
+        deviceIds: [...new Set(sessions.map((s) => s.device_id))],
+        distanceMeters: Math.round(distanceMeters),
+        productiveSeconds: Math.round(activity.productive),
+        unproductiveSeconds: Math.round(activity.unproductive),
+        maintenanceSeconds: Math.round(activity.maintenance),
+      });
+    } catch (err) {
+      console.error('reports.routes GET /operator-summary:', (err as Error).message);
+      res.status(500).json({ error: 'Error obteniendo resumen del operador' });
     }
   });
 

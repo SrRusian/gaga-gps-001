@@ -14,6 +14,7 @@ export interface CreateGeofenceParams {
   geometry?: Polygon | LineString;
   corridorWidthMeters?: number;
   corridorDangerMarginMeters?: number;
+  speedLimitKmh?: number;
 }
 
 export interface UpdateGeofenceParams {
@@ -26,6 +27,7 @@ export interface UpdateGeofenceParams {
   geometry?: Polygon | LineString;
   corridorWidthMeters?: number;
   corridorDangerMarginMeters?: number;
+  speedLimitKmh?: number | null;
 }
 
 export interface GeofenceMatchRow {
@@ -35,6 +37,7 @@ export interface GeofenceMatchRow {
   shape_type: GeofenceShapeType;
   corridor_width_meters: number | null;
   corridor_danger_margin_meters: number | null;
+  speed_limit_kmh: number | null;
   distance_meters: number;
 }
 
@@ -96,7 +99,7 @@ class GeofenceRepository {
     try {
       const { rows } = await query<GeofenceMatchRow>(
         `SELECT g.id, g.name, g.type, g.shape_type,
-                g.corridor_width_meters, g.corridor_danger_margin_meters,
+                g.corridor_width_meters, g.corridor_danger_margin_meters, g.speed_limit_kmh,
                 ST_Distance(g.geog, pt.g) AS distance_meters
          FROM geofences g,
               LATERAL (SELECT ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography AS g) pt
@@ -127,15 +130,16 @@ class GeofenceRepository {
     geometry,
     corridorWidthMeters,
     corridorDangerMarginMeters,
+    speedLimitKmh,
   }: CreateGeofenceParams): Promise<GeofenceRow> {
     try {
       const { rows } = await query<GeofenceRow>(
         `INSERT INTO geofences
-           (name, project_id, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, corridor_danger_margin_meters, geog)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-           CASE $11
+           (name, project_id, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, corridor_danger_margin_meters, speed_limit_kmh, geog)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+           CASE $12
              WHEN 'circle' THEN ST_SetSRID(ST_MakePoint($6, $5), 4326)::geography
-             ELSE ST_GeomFromGeoJSON($12)::geography
+             ELSE ST_GeomFromGeoJSON($13)::geography
            END)
          RETURNING *`,
         [
@@ -149,6 +153,7 @@ class GeofenceRepository {
           geometry ? JSON.stringify(geometry) : null,
           corridorWidthMeters ?? null,
           corridorDangerMarginMeters ?? null,
+          speedLimitKmh ?? null,
           // duplican $4/$8 - mismo placeholder en dos contextos de tipo distinto confunde a pg
           shapeType,
           geometry ? JSON.stringify(geometry) : null,
@@ -172,6 +177,7 @@ class GeofenceRepository {
       geometry,
       corridorWidthMeters,
       corridorDangerMarginMeters,
+      speedLimitKmh,
     } = params;
 
     // SET armado a mano para los campos que un PATCH parcial puede querer cambiar de verdad
@@ -204,6 +210,10 @@ class GeofenceRepository {
     if (corridorDangerMarginMeters !== undefined) {
       values.push(corridorDangerMarginMeters);
       sets.push(`corridor_danger_margin_meters = $${values.length}`);
+    }
+    if (speedLimitKmh !== undefined) {
+      values.push(speedLimitKmh);
+      sets.push(`speed_limit_kmh = $${values.length}`);
     }
 
     values.push(centerLon ?? null);

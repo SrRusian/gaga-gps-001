@@ -9,6 +9,7 @@ export interface DeviceRow {
   project_id: number | null;
   group_id: number | null;
   attributes: Record<string, unknown>;
+  speed_limit_kmh: number | null;
   last_update: Date | null;
   created_at: Date;
 }
@@ -126,12 +127,14 @@ class DeviceRepository {
       projectId,
       groupId,
       attributes,
+      speedLimitKmh,
     }: {
       name?: string;
       type?: string;
       projectId?: number | null;
       groupId?: number | null;
       attributes?: Record<string, unknown>;
+      speedLimitKmh?: number | null;
     },
   ): Promise<DeviceRow | null> {
     // SET armado a mano - COALESCE no distingue null intencional de "no vino en el body"
@@ -157,6 +160,10 @@ class DeviceRepository {
       values.push(attributes);
       sets.push(`attributes = $${values.length}`);
     }
+    if (speedLimitKmh !== undefined) {
+      values.push(speedLimitKmh);
+      sets.push(`speed_limit_kmh = $${values.length}`);
+    }
     if (sets.length === 0) return this.findById(id);
 
     try {
@@ -167,6 +174,27 @@ class DeviceRepository {
       return rows[0] || null;
     } catch (err) {
       console.error('DeviceRepository.update:', (err as Error).message);
+      throw err;
+    }
+  }
+
+  // limite propio del dispositivo + el de su grupo (si tiene) - SpeedAlertService combina ambos con
+  // el de la geocerca/ruta y se queda con el mas estricto
+  async findSpeedLimits(
+    uniqueId: string,
+  ): Promise<{ deviceLimit: number | null; groupLimit: number | null }> {
+    try {
+      const { rows } = await query<{ device_limit: number | null; group_limit: number | null }>(
+        `SELECT d.speed_limit_kmh AS device_limit, g.speed_limit_kmh AS group_limit
+         FROM devices d
+         LEFT JOIN device_groups g ON g.id = d.group_id
+         WHERE d.unique_id = $1`,
+        [uniqueId],
+      );
+      if (!rows[0]) return { deviceLimit: null, groupLimit: null };
+      return { deviceLimit: rows[0].device_limit, groupLimit: rows[0].group_limit };
+    } catch (err) {
+      console.error('DeviceRepository.findSpeedLimits:', (err as Error).message);
       throw err;
     }
   }
@@ -201,6 +229,9 @@ class DeviceRepository {
         const uniqueId = rows[0]?.unique_id;
         if (uniqueId) {
           // debe purgar TODAS las FK reales a devices - grep REFERENCES devices en 001_init.sql
+          // equipment_activity_segments.operator_session_id REFERENCES operator_sessions(id) sin
+          // cascade - debe purgarse ANTES de borrar operator_sessions, si no 23503
+          await client.query('DELETE FROM equipment_activity_segments WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM operator_sessions WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM positions WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM device_sensor_snapshots WHERE device_id = $1', [uniqueId]);
@@ -209,7 +240,6 @@ class DeviceRepository {
           await client.query('DELETE FROM device_project_history WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM equipment_variable_readings WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM equipment_variable_thresholds WHERE device_id = $1', [uniqueId]);
-          await client.query('DELETE FROM equipment_activity_segments WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM production_records WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM pay_rates WHERE device_id = $1', [uniqueId]);
           await client.query(

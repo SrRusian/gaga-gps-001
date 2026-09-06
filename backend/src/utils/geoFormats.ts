@@ -16,6 +16,7 @@ export interface GeofenceRow {
   geometry: Polygon | LineString | null;
   corridor_width_meters: number | null;
   corridor_danger_margin_meters: number | null;
+  speed_limit_kmh: number | null;
 }
 
 function geofenceRowToFeature(row: GeofenceRow): Feature {

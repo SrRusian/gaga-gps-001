@@ -28,6 +28,8 @@ const ALERT_TYPE_LABEL: Record<AlertEventType, string> = {
   proximity: 'Proximidad',
   preventive_stop: 'Parada preventiva',
   incident: 'Incidente',
+  equipment_variable: 'Variable de equipo',
+  speed: 'Velocidad',
 };
 
 const SEVERITY_LABEL = { info: 'Info', warning: 'Precaución', danger: 'Peligro' } as const;

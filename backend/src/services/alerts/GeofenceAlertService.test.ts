@@ -8,6 +8,7 @@ const dangerCircleRow = {
   shape_type: 'circle' as const,
   corridor_width_meters: null,
   corridor_danger_margin_meters: null,
+  speed_limit_kmh: null,
   distance_meters: 10,
 };
 
@@ -18,6 +19,7 @@ const warningCircleRow = {
   shape_type: 'circle' as const,
   corridor_width_meters: null,
   corridor_danger_margin_meters: null,
+  speed_limit_kmh: null,
   distance_meters: 10,
 };
 
@@ -28,6 +30,7 @@ const parkingCircleRow = {
   shape_type: 'circle' as const,
   corridor_width_meters: null,
   corridor_danger_margin_meters: null,
+  speed_limit_kmh: null,
   distance_meters: 10,
 };
 
@@ -38,6 +41,7 @@ const forbiddenPolygonRow = {
   shape_type: 'polygon' as const,
   corridor_width_meters: null,
   corridor_danger_margin_meters: null,
+  speed_limit_kmh: null,
   distance_meters: 10,
 };
 
@@ -48,6 +52,7 @@ const maintenancePolygonRow = {
   shape_type: 'polygon' as const,
   corridor_width_meters: null,
   corridor_danger_margin_meters: null,
+  speed_limit_kmh: null,
   distance_meters: 10,
 };
 
@@ -58,6 +63,7 @@ const allowedPolygonRow = {
   shape_type: 'polygon' as const,
   corridor_width_meters: null,
   corridor_danger_margin_meters: null,
+  speed_limit_kmh: null,
   distance_meters: 10,
 };
 
@@ -68,6 +74,7 @@ const dischargePolygonRow = {
   shape_type: 'polygon' as const,
   corridor_width_meters: null,
   corridor_danger_margin_meters: null,
+  speed_limit_kmh: null,
   distance_meters: 10,
 };
 
@@ -79,6 +86,7 @@ function corridorRow(distanceMeters: number, corridorDangerMarginMeters: number 
     shape_type: 'polyline' as const,
     corridor_width_meters: 20,
     corridor_danger_margin_meters: corridorDangerMarginMeters,
+    speed_limit_kmh: null,
     distance_meters: distanceMeters,
   };
 }
@@ -390,6 +398,52 @@ describe('GeofenceAlertService', () => {
     findMatchingSpatial.mockResolvedValue([dischargePolygonRow]);
     await service.evaluate(pos());
     expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
+  });
+
+  it('evaluate devuelve las geocercas encontradas (para que SpeedAlertService las reutilice)', async () => {
+    findMatchingSpatial.mockResolvedValue([warningCircleRow]);
+    const matches = await service.evaluate(pos());
+    expect(matches).toEqual([warningCircleRow]);
+  });
+
+  it('emite alert:info al salir de una zona "allowed" (evento puntual, no un estado sostenido)', async () => {
+    findMatchingSpatial.mockResolvedValue([allowedPolygonRow]);
+    await service.evaluate(pos());
+    socketServer.broadcastToProject.mockClear();
+
+    findMatchingSpatial.mockResolvedValue([]);
+    await service.evaluate(pos());
+
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+      7,
+      'alert:info',
+      expect.objectContaining({ type: 'geofence_left_allowed', deviceId: 'V1' }),
+    );
+  });
+
+  it('no emite el evento de salida de "allowed" si nunca estuvo dentro', async () => {
+    findMatchingSpatial.mockResolvedValue([]);
+    await service.evaluate(pos());
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalledWith(
+      7,
+      'alert:info',
+      expect.objectContaining({ type: 'geofence_left_allowed' }),
+    );
+  });
+
+  it('no re-emite el evento de salida de "allowed" en cada tick posterior fuera de la zona', async () => {
+    findMatchingSpatial.mockResolvedValue([allowedPolygonRow]);
+    await service.evaluate(pos());
+    findMatchingSpatial.mockResolvedValue([]);
+    await service.evaluate(pos());
+    socketServer.broadcastToProject.mockClear();
+
+    await service.evaluate(pos());
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalledWith(
+      7,
+      'alert:info',
+      expect.objectContaining({ type: 'geofence_left_allowed' }),
+    );
   });
 
   it('"forbidden" tiene la misma prioridad que "danger" - gana sobre "maintenance" (nivel advertencia)', async () => {

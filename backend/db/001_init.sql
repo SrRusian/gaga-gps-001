@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS device_groups (
   id SERIAL PRIMARY KEY,
   project_id INTEGER REFERENCES projects(id),
   name VARCHAR(255) NOT NULL,
+  speed_limit_kmh DOUBLE PRECISION,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS devices (
   group_id INTEGER REFERENCES device_groups(id),
   last_update TIMESTAMPTZ,
   attributes JSONB DEFAULT '{}',
+  speed_limit_kmh DOUBLE PRECISION,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_devices_project ON devices (project_id);
@@ -119,6 +121,7 @@ CREATE TABLE IF NOT EXISTS geofences (
   geometry JSONB,
   corridor_width_meters DOUBLE PRECISION,
   corridor_danger_margin_meters DOUBLE PRECISION,
+  speed_limit_kmh DOUBLE PRECISION,
   active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   geog GEOGRAPHY(GEOMETRY, 4326),
@@ -242,7 +245,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
   id BIGSERIAL PRIMARY KEY,
   project_id INTEGER REFERENCES projects(id),
   alert_type VARCHAR(20) NOT NULL
-    CHECK (alert_type IN ('geofence', 'signal_lost', 'collision', 'proximity', 'preventive_stop', 'incident', 'equipment_variable')),
+    CHECK (alert_type IN ('geofence', 'signal_lost', 'collision', 'proximity', 'preventive_stop', 'incident', 'equipment_variable', 'speed')),
   severity VARCHAR(10) NOT NULL CHECK (severity IN ('info', 'warning', 'danger')),
   device_id VARCHAR(255),
   device_id_2 VARCHAR(255),
