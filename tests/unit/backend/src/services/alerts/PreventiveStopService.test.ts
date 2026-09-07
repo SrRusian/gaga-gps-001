@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import PreventiveStopService from './PreventiveStopService';
+import PreventiveStopService from '../../../../../../backend/src/services/alerts/PreventiveStopService';
 
 describe('PreventiveStopService', () => {
   let io: { emit: ReturnType<typeof vi.fn<(event: string, payload: unknown) => void>> };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mostRecentShiftStart, resolveShiftForTime } from './ShiftResolverService';
+import { mostRecentShiftStart, resolveShiftForTime } from '../../../../../../backend/src/services/telemetry/ShiftResolverService';
 
 function at(hh: number, mm: number): Date {
   const d = new Date(2026, 0, 1, hh, mm, 0);

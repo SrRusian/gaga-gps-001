@@ -814,11 +814,14 @@ servidor real para absorber ráfagas de conexión a mayor escala.
 
 ## Tests
 
-`npm test` corre Vitest sobre todo el monorepo - tests de
-**caracterización**: existen para congelar el comportamiento exacto
-de la lógica de seguridad antes de tocarla, no para perseguir un
-porcentaje de cobertura. 100% en memoria con fakes, sin tocar una
-base de datos real.
+Tres niveles, cada uno como su propio "proyecto" Vitest dentro del mismo `config/vitest.config.mts`
+(`test.projects`) - ver también [`tests/README.md`](tests/README.md) para dónde poner un test nuevo.
+
+**Unitarios** (`tests/unit/`, replicando la ruta del código que prueban - ej.
+`tests/unit/backend/src/services/alerts/X.test.ts` prueba `backend/src/services/alerts/X.ts`) -
+tests de **caracterización**: existen para congelar el comportamiento exacto de la lógica de
+seguridad antes de tocarla, no para perseguir un porcentaje de cobertura. 100% en memoria con
+fakes, sin tocar una base de datos real.
 
 ```bash
 npm test              # una vez - rápido, sin dependencias externas
@@ -826,19 +829,23 @@ npm run test:watch    # modo watch
 npm run lint          # ESLint sobre todo el monorepo
 ```
 
-**Tests de integración** (Postgres+PostGIS real) - un segundo
-"proyecto" Vitest dentro del mismo `config/vitest.config.mts`
-(`test.projects`), para lo que un fake en memoria no puede cubrir:
-consultas SQL/PostGIS reales. Conecta a la misma instancia de Docker
-Compose que ya usa el desarrollo local.
+**Integración** (`tests/integration/`, Postgres+PostGIS real) - para lo que un fake en memoria no
+puede cubrir: consultas SQL/PostGIS reales. Conecta a la misma instancia de Docker Compose que ya
+usa el desarrollo local.
+
+**End-to-end** (`tests/e2e/`) - contra el backend completo corriendo de verdad (HTTP real), para
+flujos que de verdad necesitan el proceso completo (ej. GDAL procesando un archivo real al
+importar un mapa satelital).
 
 ```bash
-npm run test:integration  # solo los de integración (requiere Docker)
-npm run test:all          # todos los tests, rápidos + integración
+npm run test:integration  # solo integración (levanta Postgres solo)
+npm run test:e2e          # solo e2e (levanta el stack completo solo)
+npm run test:all          # las tres suites en orden - correr antes de cada push
 ```
 
-Ninguno de los dos tipos de test llega a la imagen de Docker - el
-Dockerfile solo corre `npm run build`, nunca un script de test.
+Ninguno de los tres tipos de test llega a la imagen de Docker de producción - el Dockerfile solo
+corre `npm run build`, nunca un script de test (los e2e conectan a un backend ya corriendo, no se
+ejecutan dentro de él).
 
 ## Acceso directo a PostgreSQL y Redis
 

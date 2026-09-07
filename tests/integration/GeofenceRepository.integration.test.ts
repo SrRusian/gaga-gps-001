@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { pool, query } from '../config/database';
-import GeofenceRepository from './GeofenceRepository';
+import { pool, query } from '../../backend/src/config/database';
+import GeofenceRepository from '../../backend/src/repositories/GeofenceRepository';
 
 const repo = new GeofenceRepository();
 let testProjectId: number;
@@ -18,7 +18,7 @@ beforeAll(async () => {
   `);
 
   const sql = fs.readFileSync(
-    path.join(__dirname, '../../db/001_init.sql'),
+    path.join(__dirname, '../../backend/db/001_init.sql'),
     'utf-8',
   );
   await pool.query(sql);

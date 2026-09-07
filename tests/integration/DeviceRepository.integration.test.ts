@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { pool, query } from '../config/database';
-import DeviceRepository from './DeviceRepository';
+import { pool, query } from '../../backend/src/config/database';
+import DeviceRepository from '../../backend/src/repositories/DeviceRepository';
 
 const repo = new DeviceRepository();
 let testProjectId: number;

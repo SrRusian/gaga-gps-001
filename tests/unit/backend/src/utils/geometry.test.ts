@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LineString, Polygon } from 'geojson';
 import type { CircleGeofence, Geofence, PolygonGeofence, PolylineGeofence } from '@gaga-gps/shared-types';
-import * as geometry from './geometry';
+import * as geometry from '../../../../../backend/src/utils/geometry';
 
 const GEOFENCE_BASE = { id: 1, name: 'test', type: 'warning' as const, projectId: null };
 

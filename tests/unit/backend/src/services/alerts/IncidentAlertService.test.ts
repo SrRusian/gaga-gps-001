@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import IncidentAlertService from './IncidentAlertService';
-import type { IncidentReportRow } from '../../repositories/IncidentReportRepository';
+import IncidentAlertService from '../../../../../../backend/src/services/alerts/IncidentAlertService';
+import type { IncidentReportRow } from '../../../../../../backend/src/repositories/IncidentReportRepository';
 
 const LAT = 19.35;
 const LON = -103.56;

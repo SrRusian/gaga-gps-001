@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import GeofenceAlertService, { type GeofenceMatchRow } from './GeofenceAlertService';
+import GeofenceAlertService, { type GeofenceMatchRow } from '../../../../../../backend/src/services/alerts/GeofenceAlertService';
 
 const dangerCircleRow = {
   id: 1,

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import VehicleProximityService from './VehicleProximityService';
+import VehicleProximityService from '../../../../../../backend/src/services/alerts/VehicleProximityService';
 
 const LAT = 19.35;
 const LON = -103.56;

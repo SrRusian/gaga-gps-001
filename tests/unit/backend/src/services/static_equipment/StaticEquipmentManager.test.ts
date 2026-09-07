@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import StaticEquipmentManager from './StaticEquipmentManager';
+import StaticEquipmentManager from '../../../../../../backend/src/services/static_equipment/StaticEquipmentManager';
 
 const LAT = 19.35;
 const LON = -103.56;

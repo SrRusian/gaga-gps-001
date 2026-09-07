@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import SignalLostService from './SignalLostService';
+import SignalLostService from '../../../../../../backend/src/services/alerts/SignalLostService';
 
 describe('SignalLostService', () => {
   let io: { emit: ReturnType<typeof vi.fn<(event: string, payload: unknown) => void>> };

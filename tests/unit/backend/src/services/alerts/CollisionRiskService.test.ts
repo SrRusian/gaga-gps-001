@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import CollisionRiskService from './CollisionRiskService';
+import CollisionRiskService from '../../../../../../backend/src/services/alerts/CollisionRiskService';
 
 const LAT = 19.35;
 const LON = -103.56;

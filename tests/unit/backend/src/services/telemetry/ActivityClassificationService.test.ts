@@ -1,14 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import ActivityClassificationService from './ActivityClassificationService';
+import ActivityClassificationService, {
+  type ActivityType,
+} from '../../../../../../backend/src/services/telemetry/ActivityClassificationService';
 
 const SESSION = { id: 42 };
 const FIVE_MIN_MS = 5 * 60 * 1000;
 const T0 = 1_700_000_000_000;
 
+type FindActiveByDevice = (deviceId: string) => Promise<{ id: number } | null>;
+type CreateSegment = (segment: {
+  deviceId: string;
+  operatorSessionId?: number | null;
+  activityType: ActivityType;
+}) => Promise<unknown>;
+type CloseOpen = (deviceId: string) => Promise<void>;
+
 describe('ActivityClassificationService', () => {
-  let findActiveByDevice: ReturnType<typeof vi.fn>;
-  let create: ReturnType<typeof vi.fn>;
-  let closeOpen: ReturnType<typeof vi.fn>;
+  let findActiveByDevice: ReturnType<typeof vi.fn<FindActiveByDevice>>;
+  let create: ReturnType<typeof vi.fn<CreateSegment>>;
+  let closeOpen: ReturnType<typeof vi.fn<CloseOpen>>;
   let service: InstanceType<typeof ActivityClassificationService>;
 
   beforeEach(() => {

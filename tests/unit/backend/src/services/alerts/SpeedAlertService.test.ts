@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import SpeedAlertService from './SpeedAlertService';
+import SpeedAlertService from '../../../../../../backend/src/services/alerts/SpeedAlertService';
 
 type FindSpeedLimits = (deviceId: string) => Promise<{ deviceLimit: number | null; groupLimit: number | null }>;
 type BroadcastToProject = (projectId: number | null, event: string, payload: unknown) => void;

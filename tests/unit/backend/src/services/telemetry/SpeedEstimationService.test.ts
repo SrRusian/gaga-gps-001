@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import SpeedEstimationService from './SpeedEstimationService';
+import SpeedEstimationService from '../../../../../../backend/src/services/telemetry/SpeedEstimationService';
 
 const LAT = 19.35;
 const LON = -103.56;

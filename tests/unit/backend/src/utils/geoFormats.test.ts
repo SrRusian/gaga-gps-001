@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { kmlToGeofenceInputs } from './geoFormats';
+import { kmlToGeofenceInputs } from '../../../../../backend/src/utils/geoFormats';
 
 const BOM = '﻿';
 

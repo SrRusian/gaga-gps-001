@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import PositionFilterService from './PositionFilterService';
+import PositionFilterService from '../../../../../../backend/src/services/telemetry/PositionFilterService';
 
 function pos(lat: number, lon: number, fixTime: string | Date) {
   return { deviceId: 'V1', latitude: lat, longitude: lon, fixTime };
