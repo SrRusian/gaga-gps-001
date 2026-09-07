@@ -368,7 +368,18 @@ export function DashboardSection() {
 
   async function loadMaps() {
     const data = await adminApi.get<MapRow[]>('/api/maps');
-    setMapsRows(data);
+
+    // setMapsRows(prev => ...) para comparar contra el estado mas reciente, no uno capturado
+    // por el closure de este setInterval (que se crea una sola vez y no se refresca en cada render)
+    setMapsRows((prev) => {
+      data.forEach((m) => {
+        const before = prev.find((p) => p.id === m.id);
+        if (before?.status === 'processing' && m.status === 'failed') {
+          alert(`No se pudo procesar el mapa "${m.name}":\n\n${m.error_message || 'Error desconocido'}`);
+        }
+      });
+      return data;
+    });
 
     const stillProcessing = data.some((m) => m.status === 'processing');
     if (stillProcessing && !mapsPollRef.current) {

@@ -275,6 +275,17 @@ class MapPipelineService {
         { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024 },
         (err, stdout, stderr) => {
           if (err) {
+            // ENOENT = el binario de GDAL no existe en este entorno (típico corriendo el backend
+            // con "npm run dev" en Windows sin Docker, que es donde sí está instalado) - mensaje
+            // claro en vez del "spawn gdalinfo ENOENT" críptico, se guarda tal cual en maps.error_message
+            if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+              reject(
+                new Error(
+                  `GDAL no está disponible en este entorno (falta "${command}") - la importación de mapas satelitales requiere el backend corriendo con Docker (docker compose up -d --build gaga-backend), no con "npm run dev" directo en tu máquina.`,
+                ),
+              );
+              return;
+            }
             const detail = (stderr || err.message || '').trim().slice(-800);
             reject(new Error(`${command} falló: ${detail || err.message}`));
             return;

@@ -621,30 +621,44 @@ docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 docker compose logs -f caddy
 ```
 
-### Correr el backend sin Docker (modo desarrollo)
+### Desarrollo local
 
-Docker sigue siendo la vía recomendada. Esta alternativa es para
-iterar rápido modificando código del backend - recompila y reinicia
-con cada guardado, sin esperar un rebuild de imagen:
+El backend **siempre** corre dentro de Docker, nunca nativo en la
+máquina del desarrollador (evita depender de GDAL u otras
+herramientas de sistema instaladas a mano):
 
 ```bash
-docker compose stop gaga-backend        # si ya estaba corriendo
-docker compose up -d postgres redis     # solo las dependencias
-npm run dev                             # instala dependencias si faltan + backend + frontend
+npm run dev
 ```
 
-`npm run dev` corre backend (`tsx watch`, puerto 3001) y frontend
-(Vite, puerto 5173 con hot module reload) a la vez. Mientras se edita
-frontend, usar `http://localhost:5173` (proxy ya configurado hacia
-`:3001` para `/api`, `/gps`, `/tiles` y el socket) - `:3001` directo
-sirve el último build estático, sin hot-reload.
+Un solo comando: instala dependencias si faltan, levanta
+`postgres`+`redis`+`gaga-backend` en Docker (imagen normal, la misma
+que producción - GDAL incluido) y el frontend con Vite en el host
+(puerto 5173, con hot module reload). Usar `http://localhost:5173`
+mientras se edita - proxy ya configurado hacia `:3001` para `/api`,
+`/gps`, `/tiles`, `/health` y el socket.
+
+**El backend no tiene hot-reload** - un cambio en `backend/src`
+requiere volver a correr `npm run dev` (o `npm run dev:backend`) para
+que Docker reconstruya la imagen y reinicie el contenedor.
 
 También pueden correrse por separado:
 
 ```bash
-npm run dev:backend
-npm run dev:web-app
+npm run dev:backend    # solo postgres+redis+backend, en Docker
+npm run dev:web-app    # solo frontend, espera a que el backend responda /health
 ```
+
+**Trabajar solo en frontend (estilos, layout, organización visual)**
+sin necesidad de tener el backend corriendo:
+
+```bash
+npm run dev:web-app:only
+```
+
+No espera a que haya un backend real respondiendo - las llamadas a la
+API van a fallar. Sirve únicamente para iterar rápido sobre lo
+visual, no para probar funcionalidad real con datos.
 
 ## Configurar Traccar Client en las tabletas
 
