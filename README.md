@@ -34,7 +34,7 @@ web.
 11. [Instalación y despliegue](#instalación-y-despliegue)
     - [Variables de entorno](#variables-de-entorno)
     - [Caddy: HTTPS y dominio](#caddy-https-y-dominio)
-    - [Correr el backend sin Docker](#correr-el-backend-sin-docker-modo-desarrollo)
+    - [Desarrollo local](#desarrollo-local)
 12. [Configurar Traccar Client en las tabletas](#configurar-traccar-client-en-las-tabletas)
 13. [Referencia de la API](#referencia-de-la-api)
 14. [Eventos de Socket.io](#eventos-de-socketio)
@@ -647,13 +647,6 @@ También pueden correrse por separado:
 ```bash
 npm run dev:backend    # solo postgres+redis+backend, en Docker
 npm run dev:web-app    # solo frontend, espera a que el backend responda /health
-```
-
-**Trabajar solo en frontend (estilos, layout, organización visual)**
-sin necesidad de tener el backend corriendo:
-
-```bash
-npm run dev:web-app:only
 ```
 
 No espera a que haya un backend real respondiendo - las llamadas a la
