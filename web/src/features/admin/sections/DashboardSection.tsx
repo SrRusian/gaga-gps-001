@@ -313,7 +313,11 @@ export function DashboardSection() {
   const [mapImportModal, setMapImportModal] = useState(false);
   const [mapImportForm, setMapImportForm] = useState({ name: '', crs: 'EPSG:32613', projectId: '' });
   const [mapImportError, setMapImportError] = useState('');
-  const [mapImporting, setMapImporting] = useState(false);
+  // subida en curso, fuera del modal (que ya se cierra al iniciar) - se muestra como una fila mas
+  // en la tabla de Mapas, con la misma seccion de estado que "Procesando"/"Listo"/"Error"
+  const [mapUpload, setMapUpload] = useState<{ name: string; progress: number } | null>(null);
+  const [mapEditModal, setMapEditModal] = useState<MapRow | null>(null);
+  const [mapEditForm, setMapEditForm] = useState({ name: '', projectId: '' });
   const imageInputRef = useRef<HTMLInputElement>(null);
   const worldInputRef = useRef<HTMLInputElement>(null);
   const mapsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1669,8 +1673,40 @@ export function DashboardSection() {
     }
   }
 
+  // XMLHttpRequest (no fetch) a proposito - es la unica forma con soporte amplio de exponer
+  // progreso real de subida (xhr.upload.onprogress), fetch no lo da de forma sencilla/confiable
+  function uploadMapFile(
+    formData: FormData,
+    onProgress: (percent: number) => void,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/maps');
+      const token = getStoredToken();
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+          return;
+        }
+        let message = `Error ${xhr.status}`;
+        try {
+          message = JSON.parse(xhr.responseText).error || message;
+        } catch {
+          // respuesta no era JSON - se queda el mensaje generico
+        }
+        reject(new Error(message));
+      };
+      xhr.onerror = () => reject(new Error('Error de red al subir el mapa'));
+      xhr.send(formData);
+    });
+  }
+
   async function importMap() {
-    if (mapImporting) return;
+    if (mapUpload) return;
     setMapImportError('');
     const effectiveProjectId =
       typeof scope === 'number'
@@ -1690,33 +1726,29 @@ export function DashboardSection() {
     }
 
     const formData = new FormData();
-    formData.append('name', mapImportForm.name.trim());
+    const mapName = mapImportForm.name.trim();
+    formData.append('name', mapName);
     formData.append('sourceCrs', mapImportForm.crs);
     formData.append('projectId', String(effectiveProjectId));
     formData.append('image', imageFile);
     formData.append('worldFile', worldFile);
 
-    setMapImporting(true);
+    // se cierra el modal y se limpia el formulario de inmediato - la subida sigue en segundo plano
+    // (mapUpload) y el admin puede seguir usando el resto de la interfaz mientras tanto, en vez de
+    // quedar atascado viendo un modal congelado hasta que termine en una red lenta
+    setMapImportForm({ name: '', crs: 'EPSG:32613', projectId: '' });
+    if (imageInputRef.current) imageInputRef.current.value = '';
+    if (worldInputRef.current) worldInputRef.current.value = '';
+    setMapImportModal(false);
+    setMapUpload({ name: mapName, progress: 0 });
+
     try {
-      const token = getStoredToken();
-      const res = await fetch('/api/maps', {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Error ${res.status}`);
-      }
-      setMapImportForm({ name: '', crs: 'EPSG:32613', projectId: '' });
-      if (imageInputRef.current) imageInputRef.current.value = '';
-      if (worldInputRef.current) worldInputRef.current.value = '';
-      setMapImportModal(false);
+      await uploadMapFile(formData, (percent) => setMapUpload({ name: mapName, progress: percent }));
       loadMaps();
     } catch (err) {
-      setMapImportError(err instanceof Error ? err.message : 'Error importando el mapa');
+      alert(err instanceof Error ? err.message : 'Error importando el mapa');
     } finally {
-      setMapImporting(false);
+      setMapUpload(null);
     }
   }
 
@@ -1737,11 +1769,31 @@ export function DashboardSection() {
     loadMaps();
   }
 
-  async function renameMap(id: number, currentName: string) {
-    const name = prompt('Nuevo nombre:', currentName);
-    if (!name) return;
-    await adminApi.patch(`/api/maps/${id}`, { name });
-    loadMaps();
+  function openEditMap(m: MapRow) {
+    setMapEditModal(m);
+    setMapEditForm({ name: m.name, projectId: m.project_id != null ? String(m.project_id) : '' });
+  }
+
+  async function saveMapEdit() {
+    if (!mapEditModal) return;
+    const name = mapEditForm.name.trim();
+    if (!name) {
+      alert('El nombre es requerido');
+      return;
+    }
+    try {
+      const payload: { name: string; projectId?: number } = { name };
+      // el selector de proyecto solo existe en el formulario para el admin global - si cambio,
+      // se manda; para los demas roles el campo ni se renderiza, nunca se envia
+      if (isAdmin && mapEditForm.projectId && Number(mapEditForm.projectId) !== mapEditModal.project_id) {
+        payload.projectId = Number(mapEditForm.projectId);
+      }
+      await adminApi.patch(`/api/maps/${mapEditModal.id}`, payload);
+      setMapEditModal(null);
+      loadMaps();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error actualizando el mapa');
+    }
   }
 
   async function deleteMapRow(m: MapRow) {
@@ -2654,7 +2706,7 @@ export function DashboardSection() {
             + Importar mapa
           </button>
         </div>
-        {scopedMapsRows.length === 0 ? (
+        {scopedMapsRows.length === 0 && !mapUpload ? (
           <div className="org-empty">Sin mapas importados todavía.</div>
         ) : (
           <table>
@@ -2667,6 +2719,14 @@ export function DashboardSection() {
               </tr>
             </thead>
             <tbody>
+              {mapUpload && (
+                <tr>
+                  <td>{mapUpload.name}</td>
+                  {scope === 'global' && <td>-</td>}
+                  <td className="status-uploading">Subiendo… {mapUpload.progress}%</td>
+                  <td></td>
+                </tr>
+              )}
               {scopedMapsRows.map((m) => (
                 <tr key={m.id}>
                   <td>
@@ -2690,8 +2750,8 @@ export function DashboardSection() {
                           Activar
                         </button>
                       ))}
-                    <button className="btn btn-sm" onClick={() => renameMap(m.id, m.name)}>
-                      Renombrar
+                    <button className="btn btn-sm" onClick={() => openEditMap(m)}>
+                      Editar
                     </button>
                     <button className="btn btn-sm btn-danger" onClick={() => deleteMapRow(m)}>
                       Eliminar
@@ -2991,15 +3051,52 @@ export function DashboardSection() {
         </div>
         {mapImportError && <div style={{ color: '#e5484d', fontSize: 12 }}>{mapImportError}</div>}
         <div className="gg-modal-actions">
-          <button
-            className="btn btn-sm"
-            onClick={() => setMapImportModal(false)}
-            disabled={mapImporting}
-          >
+          <button className="btn btn-sm" onClick={() => setMapImportModal(false)}>
             Cancelar
           </button>
-          <button className="btn btn-sm" onClick={importMap} disabled={mapImporting}>
-            {mapImporting ? 'Subiendo...' : 'Importar'}
+          <button className="btn btn-sm" onClick={importMap}>
+            Importar
+          </button>
+        </div>
+      </Modal>
+
+      <Modal open={mapEditModal !== null} title="Editar mapa" onClose={() => setMapEditModal(null)}>
+        <div className="gg-modal-field">
+          <label>Nombre</label>
+          <input
+            value={mapEditForm.name}
+            onChange={(e) => setMapEditForm({ ...mapEditForm, name: e.target.value })}
+          />
+        </div>
+        <div className="gg-modal-field">
+          <label>Proyecto</label>
+          {isAdmin ? (
+            <select
+              value={mapEditForm.projectId}
+              onChange={(e) => setMapEditForm({ ...mapEditForm, projectId: e.target.value })}
+            >
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            // solo el admin global puede reasignar el proyecto de un mapa - un Administrador de
+            // Proyecto solo administra el suyo, no hay a donde mas moverlo. Ni se renderiza el
+            // selector (no solo deshabilitado) - el backend tambien lo rechaza si se fuerza por API.
+            <input
+              value={projects.find((p) => p.id === mapEditModal?.project_id)?.name ?? 'Sin asignar'}
+              disabled
+            />
+          )}
+        </div>
+        <div className="gg-modal-actions">
+          <button className="btn btn-sm" onClick={() => setMapEditModal(null)}>
+            Cancelar
+          </button>
+          <button className="btn btn-sm" onClick={saveMapEdit}>
+            Guardar
           </button>
         </div>
       </Modal>

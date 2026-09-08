@@ -146,7 +146,8 @@ tbody tr:hover {
   color: var(--ad-accent);
 }
 .status-offline,
-.status-processing {
+.status-processing,
+.status-uploading {
   color: var(--ad-text-muted);
 }
 .status-failed {
