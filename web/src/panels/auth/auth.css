@@ -1,46 +1,104 @@
 .gw-screen {
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #0b0d10;
+  padding: 24px;
+  background: radial-gradient(ellipse at 50% 0%, #12161c 0%, #0b0d10 55%);
 }
 
 .gw-box {
   background: #14171c;
   border: 1px solid #262b33;
-  border-radius: 10px;
-  padding: 36px 32px;
-  width: 340px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  border-radius: 12px;
+  padding: 40px 32px 32px;
+  width: min(340px, 100%);
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+}
+
+/* --- Marca --- */
+.gw-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.gw-logo {
+  width: 46px;
+  height: 46px;
+  margin-bottom: 12px;
 }
 
 .gw-box h1 {
-  color: #e8eaed;
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  margin-bottom: 6px;
-  text-align: center;
+  display: flex;
+  gap: 0.28em;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  font-weight: 800;
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+/* "GAGA" - degradado blanco */
+.gw-gaga {
+  color: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #cfd6dd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* "GPS" - degradado azul */
+.gw-gps {
+  color: #008cff;
+  background: linear-gradient(180deg, #00c6ff 0%, #008cff 50%, #0066ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .gw-subtitle {
   color: #8b949e;
   font-size: 13px;
   text-align: center;
-  margin-bottom: 24px;
+  margin: 0;
+}
+
+/* --- Campos --- */
+.gw-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.gw-input-icon {
+  position: absolute;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: #8b949e;
+  pointer-events: none;
+  transition: color 0.15s;
+}
+.gw-input-wrap:focus-within .gw-input-icon {
+  color: #4f8ff0;
 }
 
 .gw-box input {
   width: 100%;
-  padding: 10px 12px;
-  margin-bottom: 12px;
+  padding: 11px 12px 11px 38px;
   background: #0b0d10;
   border: 1px solid #262b33;
-  border-radius: 6px;
+  border-radius: 8px;
   color: #e8eaed;
-  font-size: 13px;
+  font-size: 14px;
   box-sizing: border-box;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 .gw-box input::placeholder {
   color: #8b949e;
@@ -48,17 +106,58 @@
 .gw-box input:focus {
   outline: none;
   border-color: #4f8ff0;
+  box-shadow: 0 0 0 3px rgba(79, 143, 240, 0.15);
+}
+
+.gw-input-wrap--password input {
+  padding-right: 42px;
+}
+
+.gw-toggle-pw {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: #8b949e;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.gw-toggle-pw:hover {
+  color: #e8eaed;
+}
+.gw-toggle-pw:focus-visible {
+  outline: 2px solid #4f8ff0;
+  outline-offset: 1px;
+}
+.gw-toggle-pw svg {
+  width: 16px;
+  height: 16px;
 }
 
 .gw-submit {
   width: 100%;
-  margin-top: 4px;
+  margin-top: 6px;
+}
+
+/* mismo degradado azul que "GPS" - solo el boton del login, no toca .gg-button global */
+.gw-submit.gg-button--primary {
+  background: linear-gradient(90deg, #00c6ff 0%, #008cff 50%, #0066ff 100%);
+  color: #ffffff;
+}
+.gw-submit.gg-button--primary:hover:not(:disabled) {
+  background: linear-gradient(90deg, #00b4e6 0%, #0080e6 50%, #005ce6 100%);
 }
 
 .gw-error {
   color: #e5484d;
   font-size: 13px;
   margin-top: 12px;
-  min-height: 16px;
   text-align: center;
 }
