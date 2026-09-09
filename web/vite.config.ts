@@ -10,6 +10,7 @@ export default defineConfig({
       '/api': 'http://localhost:3001',
       '/gps': 'http://localhost:3001',
       '/tiles': 'http://localhost:3001',
+      '/health': 'http://localhost:3001',
       '/socket.io': { target: 'http://localhost:3001', ws: true },
     },
   },

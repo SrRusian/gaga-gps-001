@@ -56,6 +56,7 @@ export const GEOFENCE_COLORS: Record<GeofenceType, string> = {
   parking: '#2979ff',
   discharge: '#a1662f',
   maintenance: '#8e24aa',
+  carga: '#00acc1',
 };
 
 function colorForGeofence(g: Geofence): string {
@@ -73,27 +74,20 @@ function buildGeofenceFeatures(geofences: Geofence[], highlightedId?: number | n
       case 'polygon':
         features.push({
           type: 'Feature',
-          properties: { color, highlighted },
+          properties: { color, highlighted, filled: g.filled },
           geometry: g.geometry,
         });
         break;
 
-      case 'polyline': {
-        const margin = g.corridorDangerMarginMeters;
-        if (margin) {
-          features.push({
-            type: 'Feature',
-            properties: { color: GEOFENCE_COLORS.warning, highlighted: false },
-            geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters + margin),
-          });
-        }
+      case 'polyline':
+        // una sola franja del ancho configurado, color del tipo real (ya no hay margen extra de
+        // escalada - la severidad la decide el tipo, no la distancia)
         features.push({
           type: 'Feature',
-          properties: { color: GEOFENCE_COLORS.authorized_route, highlighted },
+          properties: { color, highlighted },
           geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters),
         });
         break;
-      }
 
       case 'circle':
       default:
@@ -128,7 +122,10 @@ function renderGeofences(map: MaplibreMap, geofences: Geofence[], highlightedId?
       id: 'geofences-fill',
       type: 'fill',
       source: 'geofences-preview',
-      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.3 },
+      // poligono 'sin relleno' (filled=false) se dibuja solo con su linea de borde (capa
+      // geofences-line, sin cambios) - la franja de alerta (corridorWidthMeters) no se dibuja,
+      // solo se explica como texto en el panel de edicion
+      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['case', ['==', ['get', 'filled'], false], 0, 0.3] },
     });
     map.addLayer({
       id: 'geofences-line',

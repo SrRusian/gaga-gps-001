@@ -39,11 +39,11 @@ class RtkNtripPlugin : Plugin() {
                 usbConnected = true
                 usbRate.reset() // total acumulado es "de esta conexion", no de toda la vida de la app
                 mockLocation.start() // siempre - si ya estaba activo no hace nada
-                if (RtkPrefs.getAutoModeEnabled(context)) {
-                    val config = RtkPrefs.getNtripConfig(context)
-                    if (config != null && config.mountpoint.isNotBlank()) {
-                        startNtripInternal(config)
-                    }
+                // arranca NTRIP solo, siempre - sin flag "modo automatico" que alguien pueda
+                // olvidar activar (pedido explicito: el auto-conectar nunca debe ser opcional)
+                val config = RtkPrefs.getNtripConfig(context)
+                if (config != null && config.mountpoint.isNotBlank()) {
+                    startNtripInternal(config)
                 }
                 emitStatus()
             }
@@ -75,7 +75,8 @@ class RtkNtripPlugin : Plugin() {
                 emitUsbDevices()
             }
             override fun onUsbAttached() {
-                if (!RtkPrefs.getAutoModeEnabled(context)) return
+                // siempre agarra el receptor solo al detectarlo - sin flag que preguntar, sin
+                // clic manual (ver device_filter.xml/AndroidManifest.xml para el permiso USB)
                 if (usb.isConnected()) return
                 val drivers = usb.listDevices()
                 // prefiere el u-blox si hay varios USB conectados a la vez; si no hay ninguno con
@@ -125,7 +126,7 @@ class RtkNtripPlugin : Plugin() {
                     .put("deviceId", d.deviceId)
                     .put("vendorId", d.vendorId)
                     .put("productId", d.productId)
-                    .put("name", d.deviceName),
+                    .put("name", d.friendlyLabel()),
             )
         }
         val ret = JSObject()
@@ -271,20 +272,6 @@ class RtkNtripPlugin : Plugin() {
     }
 
     @PluginMethod
-    fun getAutoMode(call: PluginCall) {
-        val ret = JSObject()
-        ret.put("enabled", RtkPrefs.getAutoModeEnabled(context))
-        call.resolve(ret)
-    }
-
-    @PluginMethod
-    fun setAutoMode(call: PluginCall) {
-        val enabled = call.getBoolean("enabled") ?: return call.reject("enabled requerido")
-        RtkPrefs.setAutoModeEnabled(context, enabled)
-        call.resolve()
-    }
-
-    @PluginMethod
     fun stopNtrip(call: PluginCall) {
         ntrip?.disconnect()
         ntrip = null
@@ -343,6 +330,7 @@ class RtkNtripPlugin : Plugin() {
         val ret = JSObject()
         ret.put("usbConnected", usbConnected)
         ret.put("connectedUsbDeviceName", usb.connectedDeviceName)
+        ret.put("connectedUsbDeviceId", usb.connectedDeviceId)
         ret.put("usbDataRateBps", usbRate.currentBytesPerSecond())
         ret.put("usbTotalBytes", usbRate.totalBytes)
         ret.put("ntripConnected", ntripConnected)
@@ -353,7 +341,6 @@ class RtkNtripPlugin : Plugin() {
         ret.put("swMapsOutputRunning", swMapsServer.isRunning)
         ret.put("swMapsPort", RtkPrefs.getSwMapsPort(context))
         ret.put("correctionMode", RtkPrefs.getCorrectionMode(context).key)
-        ret.put("autoModeEnabled", RtkPrefs.getAutoModeEnabled(context))
         val fix = lastFix
         if (fix != null) {
             val fixObj = JSObject()

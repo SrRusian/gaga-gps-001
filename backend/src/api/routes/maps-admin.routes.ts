@@ -143,18 +143,44 @@ export function buildMapsAdminRouter({
 
   router.patch('/:id', canManage, async (req, res) => {
     try {
-      const { name } = req.body;
+      const { name, projectId } = req.body;
       if (!name) return res.status(400).json({ error: 'name es requerido' });
       const existing = await mapRepo.findById(Number(req.params.id));
       if (!existing) return res.status(404).json({ error: 'Mapa no encontrado' });
       if (!hasProjectAccess(req, existing.project_id)) {
         return res.status(403).json({ error: 'El mapa no pertenece a su proyecto' });
       }
-      const map = await mapRepo.rename(Number(req.params.id), name);
+
+      // reasignar de proyecto es exclusivo del admin global - un project_administrator solo
+      // administra el suyo, no hay "otro proyecto" al que mandarlo. Se rechaza aqui tambien (no
+      // solo ocultando el selector en el frontend) para que no se pueda forzar via API directa.
+      let targetProjectId: number | undefined;
+      if (projectId !== undefined) {
+        if (req.user!.role !== 'admin') {
+          return res
+            .status(403)
+            .json({ error: 'Solo el administrador global puede cambiar el proyecto de un mapa' });
+        }
+        targetProjectId = Number(projectId);
+        if (!Number.isInteger(targetProjectId)) {
+          return res.status(400).json({ error: 'projectId inválido' });
+        }
+      }
+
+      const map = await mapRepo.update(Number(req.params.id), { name, projectId: targetProjectId });
+      if (!map) return res.status(404).json({ error: 'Mapa no encontrado' });
+
+      // si el mapa activo cambio de proyecto, el viejo proyecto debe dejar de verlo en vivo y el
+      // nuevo debe empezar a verlo - re-emitir la lista de activos a ambos
+      if (map.active && targetProjectId !== undefined && targetProjectId !== existing.project_id) {
+        await broadcastActiveMaps(existing.project_id);
+        await broadcastActiveMaps(map.project_id);
+      }
+
       res.json(map);
     } catch (err) {
       console.error('maps-admin.routes PATCH /:id:', (err as Error).message);
-      res.status(500).json({ error: 'Error renombrando el mapa' });
+      res.status(500).json({ error: 'Error actualizando el mapa' });
     }
   });
 

@@ -13,7 +13,9 @@ export interface CreateGeofenceParams {
   radiusMeters?: number;
   geometry?: Polygon | LineString;
   corridorWidthMeters?: number;
-  corridorDangerMarginMeters?: number;
+  speedLimitKmh?: number;
+  filled?: boolean;
+  stayInside?: boolean;
 }
 
 export interface UpdateGeofenceParams {
@@ -25,16 +27,20 @@ export interface UpdateGeofenceParams {
   radiusMeters?: number;
   geometry?: Polygon | LineString;
   corridorWidthMeters?: number;
-  corridorDangerMarginMeters?: number;
+  speedLimitKmh?: number | null;
+  filled?: boolean;
+  stayInside?: boolean;
 }
 
+// solo lo que GeofenceAlertService realmente consume - la severidad/mensaje siempre los decide el
+// `type` (AREA_SEVERITY/AREA_ALERT_TEXT), asi que shape_type/filled/stay_inside/corridor_width_meters
+// ya no viajan hasta alla: el WHERE de findMatchingSpatial es quien decide si una fila "matchea"
 export interface GeofenceMatchRow {
   id: number;
   name: string;
   type: GeofenceType;
   shape_type: GeofenceShapeType;
-  corridor_width_meters: number | null;
-  corridor_danger_margin_meters: number | null;
+  speed_limit_kmh: number | null;
   distance_meters: number;
 }
 
@@ -94,18 +100,34 @@ class GeofenceRepository {
     longitude: number;
   }): Promise<GeofenceMatchRow[]> {
     try {
+      // La severidad de cada match la decide siempre el `type` en GeofenceAlertService
+      // (AREA_SEVERITY) - aqui solo se decide SI una geocerca aplica en este punto, segun su
+      // forma/relleno/modo:
+      //  - circle: dentro del radio (ST_DWithin, sin cambios)
+      //  - polygon filled=true: adentro de la zona completa (ST_Contains, sin cambios)
+      //  - polygon filled=false: cerca del borde (ST_DWithin contra ST_Boundary, un solo umbral)
+      //  - polyline stay_inside=true ("debe quedarse dentro"): FUERA del ancho de la linea
+      //  - polyline stay_inside=false ("no tocar"): cerca de la linea (ST_DWithin, un solo umbral)
       const { rows } = await query<GeofenceMatchRow>(
-        `SELECT g.id, g.name, g.type, g.shape_type,
-                g.corridor_width_meters, g.corridor_danger_margin_meters,
-                ST_Distance(g.geog, pt.g) AS distance_meters
+        `SELECT g.id, g.name, g.type, g.shape_type, g.speed_limit_kmh,
+                CASE
+                  WHEN g.shape_type = 'polygon' AND g.filled = FALSE
+                    THEN ST_Distance(ST_Boundary(g.geog::geometry)::geography, pt.g)
+                  ELSE ST_Distance(g.geog, pt.g)
+                END AS distance_meters
          FROM geofences g,
               LATERAL (SELECT ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography AS g) pt
          WHERE g.active = TRUE
            AND g.project_id = $1
            AND (
              (g.shape_type = 'circle' AND ST_DWithin(g.geog, pt.g, g.radius_meters))
-             OR (g.shape_type = 'polygon' AND ST_Contains(g.geog::geometry, pt.g::geometry))
-             OR (g.shape_type = 'polyline')
+             OR (g.shape_type = 'polygon' AND g.filled = TRUE AND ST_Contains(g.geog::geometry, pt.g::geometry))
+             OR (g.shape_type = 'polygon' AND g.filled = FALSE
+                 AND ST_DWithin(ST_Boundary(g.geog::geometry)::geography, pt.g, g.corridor_width_meters))
+             OR (g.shape_type = 'polyline' AND g.stay_inside = TRUE
+                 AND NOT ST_DWithin(g.geog, pt.g, g.corridor_width_meters))
+             OR (g.shape_type = 'polyline' AND g.stay_inside = FALSE
+                 AND ST_DWithin(g.geog, pt.g, g.corridor_width_meters))
            )`,
         [projectId, latitude, longitude],
       );
@@ -126,16 +148,18 @@ class GeofenceRepository {
     radiusMeters,
     geometry,
     corridorWidthMeters,
-    corridorDangerMarginMeters,
+    speedLimitKmh,
+    filled,
+    stayInside,
   }: CreateGeofenceParams): Promise<GeofenceRow> {
     try {
       const { rows } = await query<GeofenceRow>(
         `INSERT INTO geofences
-           (name, project_id, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, corridor_danger_margin_meters, geog)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-           CASE $11
+           (name, project_id, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, speed_limit_kmh, filled, stay_inside, geog)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+           CASE $13
              WHEN 'circle' THEN ST_SetSRID(ST_MakePoint($6, $5), 4326)::geography
-             ELSE ST_GeomFromGeoJSON($12)::geography
+             ELSE ST_GeomFromGeoJSON($14)::geography
            END)
          RETURNING *`,
         [
@@ -148,7 +172,9 @@ class GeofenceRepository {
           radiusMeters ?? null,
           geometry ? JSON.stringify(geometry) : null,
           corridorWidthMeters ?? null,
-          corridorDangerMarginMeters ?? null,
+          speedLimitKmh ?? null,
+          filled ?? true,
+          stayInside ?? true,
           // duplican $4/$8 - mismo placeholder en dos contextos de tipo distinto confunde a pg
           shapeType,
           geometry ? JSON.stringify(geometry) : null,
@@ -171,7 +197,9 @@ class GeofenceRepository {
       radiusMeters,
       geometry,
       corridorWidthMeters,
-      corridorDangerMarginMeters,
+      speedLimitKmh,
+      filled,
+      stayInside,
     } = params;
 
     // SET armado a mano para los campos que un PATCH parcial puede querer cambiar de verdad
@@ -201,9 +229,17 @@ class GeofenceRepository {
       values.push(corridorWidthMeters);
       sets.push(`corridor_width_meters = $${values.length}`);
     }
-    if (corridorDangerMarginMeters !== undefined) {
-      values.push(corridorDangerMarginMeters);
-      sets.push(`corridor_danger_margin_meters = $${values.length}`);
+    if (filled !== undefined) {
+      values.push(filled);
+      sets.push(`filled = $${values.length}`);
+    }
+    if (stayInside !== undefined) {
+      values.push(stayInside);
+      sets.push(`stay_inside = $${values.length}`);
+    }
+    if (speedLimitKmh !== undefined) {
+      values.push(speedLimitKmh);
+      sets.push(`speed_limit_kmh = $${values.length}`);
     }
 
     values.push(centerLon ?? null);
@@ -266,7 +302,7 @@ class GeofenceRepository {
         shapeType: 'polyline',
         geometry: row.geometry as import('geojson').LineString,
         corridorWidthMeters: row.corridor_width_meters as number,
-        corridorDangerMarginMeters: row.corridor_danger_margin_meters ?? undefined,
+        stayInside: row.stay_inside,
       };
     }
     return {
@@ -276,6 +312,8 @@ class GeofenceRepository {
       projectId: row.project_id,
       shapeType: 'polygon',
       geometry: row.geometry as import('geojson').Polygon,
+      filled: row.filled,
+      corridorWidthMeters: row.corridor_width_meters ?? undefined,
     };
   }
 }

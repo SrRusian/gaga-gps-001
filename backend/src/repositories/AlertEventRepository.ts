@@ -7,7 +7,8 @@ export type AlertType =
   | 'proximity'
   | 'preventive_stop'
   | 'incident'
-  | 'equipment_variable';
+  | 'equipment_variable'
+  | 'speed';
 
 export type AlertSeverity = 'info' | 'warning' | 'danger';
 

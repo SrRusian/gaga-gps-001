@@ -97,15 +97,32 @@ class MapRepository {
     }
   }
 
-  async rename(id: number, name: string): Promise<MapRow | null> {
+  // SET armado a mano - solo entra projectId cuando de verdad se quiere cambiar (lo decide el
+  // caller, ver maps-admin.routes.ts: solo el admin global puede mandarlo)
+  async update(
+    id: number,
+    { name, projectId }: { name?: string; projectId?: number },
+  ): Promise<MapRow | null> {
+    const sets: string[] = [];
+    const values: unknown[] = [id];
+    if (name !== undefined) {
+      values.push(name);
+      sets.push(`name = $${values.length}`);
+    }
+    if (projectId !== undefined) {
+      values.push(projectId);
+      sets.push(`project_id = $${values.length}`);
+    }
+    if (sets.length === 0) return this.findById(id);
+
     try {
-      const { rows } = await query<MapRow>('UPDATE maps SET name = $2 WHERE id = $1 RETURNING *', [
-        id,
-        name,
-      ]);
+      const { rows } = await query<MapRow>(
+        `UPDATE maps SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
+        values,
+      );
       return rows[0] || null;
     } catch (err) {
-      console.error('MapRepository.rename:', (err as Error).message);
+      console.error('MapRepository.update:', (err as Error).message);
       throw err;
     }
   }

@@ -1,5 +1,9 @@
 import {
   createVehicleMarkerElement,
+  flyToBounds,
+  flyToPoint,
+  realignVehicleMarkerToBearing,
+  resolveVehicleCourse,
   setVehicleMarkerAccuracy,
   setVehicleMarkerStale,
   setVehicleMarkerThreat,
@@ -24,7 +28,7 @@ const GLIDE_FALLBACK_MS = 800;
 
 export interface MapViewHandle {
   flyTo(lat: number, lon: number): void;
-  follow(lat: number, lon: number): void;
+  follow(lat: number, lon: number, course?: number, speed?: number): void;
   frameThreat(my: [number, number], other: [number, number]): void;
 }
 
@@ -120,16 +124,28 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     ref,
     () => ({
       flyTo(lat: number, lon: number) {
-        map?.flyTo({ center: [lon, lat], zoom: 18, duration: 800 });
+        flyToPoint(map, lat, lon, { zoom: 18 });
       },
-      follow(lat: number, lon: number) {
-        map?.easeTo({ center: [lon, lat], duration: 600 });
+      // "seguir" se llama en cada posicion nueva mientras se conduce (varias veces por minuto) -
+      // se queda con un easeTo corto y sin la curva "alejar y acercar" a proposito, esa animacion
+      // es para centrados puntuales (un clic, un boton), repetirla en cada tick marearia.
+      // Modo "orientado al frente": el mapa gira para que mi rumbo siempre apunte hacia arriba -
+      // la flecha de mi propio vehiculo se queda fija (ver realineado de las demas mas abajo,
+      // reaccionan al 'rotate' del mapa). Se reusa resolveVehicleCourse (mismo criterio que los
+      // marcadores) para no rotar el mapa con un rumbo "fantasma" mientras el vehiculo esta
+      // detenido - se queda con el ultimo rumbo real conocido.
+      follow(lat: number, lon: number, course, speed) {
+        if (!map) return;
+        const { course: bearing } = resolveVehicleCourse(myDeviceId ?? '', course, speed);
+        map.easeTo({ center: [lon, lat], bearing, duration: 600 });
       },
+      // caso urgente (colision inminente) - se mantiene una duracion corta fija en vez de dejar
+      // que la velocidad natural decida, para que el encuadre pase de inmediato
       frameThreat(my: [number, number], other: [number, number]) {
-        map?.fitBounds([my, other], { padding: 80, maxZoom: 18, duration: 800 });
+        flyToBounds(map, [my, other], { padding: 80, maxZoom: 18, duration: 700 });
       },
     }),
-    [map],
+    [map, myDeviceId],
   );
 
   useEffect(() => {
@@ -140,10 +156,12 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     };
     map.on('dragstart', handler);
     map.on('zoomstart', handler);
+    map.on('rotatestart', handler);
 
     return () => {
       map.off('dragstart', handler);
       map.off('zoomstart', handler);
+      map.off('rotatestart', handler);
     };
   }, [map, onUserInteraction]);
 
@@ -204,7 +222,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           lngLat,
           previousFixAt ? now - previousFixAt : undefined,
         );
-        updateVehicleMarkerHeading(marker.getElement(), pos.deviceId, pos.course, pos.speed);
+        updateVehicleMarkerHeading(marker.getElement(), pos.deviceId, pos.course, pos.speed, map.getBearing());
         setVehicleMarkerStale(marker.getElement(), isStale);
         // Módulo círculo de precisión del vehículo (No modificar)
         setVehicleMarkerAccuracy(marker.getElement(), map, pos.latitude, pos.longitude, pos.accuracy);
@@ -213,7 +231,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
       const color = isMine ? colors.myVehicle : colors.otherVehicle;
       const el = createVehicleMarkerElement({ deviceId: pos.deviceId, isMine, color, clickable: false });
-      updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed);
+      updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed, map.getBearing());
       setVehicleMarkerStale(el, isStale);
       setVehicleMarkerAccuracy(el, map, pos.latitude, pos.longitude, pos.accuracy); // Módulo círculo de precisión del vehículo (No modificar)
 
@@ -237,6 +255,24 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     map.on('zoom', handler);
     return () => {
       map.off('zoom', handler);
+    };
+  }, [map]);
+
+  // modo "orientado al frente" - cuando el mapa gira (por seguimiento automatico, ver follow()
+  // arriba), la orientacion EN PANTALLA de cada flecha debe recalcularse de inmediato para seguir
+  // apuntando hacia su rumbo geografico real, no quedarse con el angulo de antes de girar
+  useEffect(() => {
+    if (!map) return;
+
+    const handler = () => {
+      const bearing = map.getBearing();
+      Object.values(markersRef.current).forEach((marker) => {
+        realignVehicleMarkerToBearing(marker.getElement(), bearing);
+      });
+    };
+    map.on('rotate', handler);
+    return () => {
+      map.off('rotate', handler);
     };
   }, [map]);
 

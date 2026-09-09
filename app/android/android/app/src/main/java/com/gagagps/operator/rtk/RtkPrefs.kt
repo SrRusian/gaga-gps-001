@@ -70,11 +70,4 @@ object RtkPrefs {
 
     fun getSwMapsPort(context: Context): Int = prefs(context).getInt("sw_maps_port", DEFAULT_SW_MAPS_PORT)
     fun setSwMapsPort(context: Context, port: Int) = prefs(context).edit().putInt("sw_maps_port", port).apply()
-
-    // activado por el codigo de configuracion rapida del front - mientras este en true, conectar
-    // el USB dispara solo NTRIP+ubicacion simulada, y desconectar el USB los apaga solo (ver
-    // RtkNtripPlugin). Con esto en false, todo sigue siendo 100% manual como antes.
-    fun getAutoModeEnabled(context: Context): Boolean = prefs(context).getBoolean("auto_mode", false)
-    fun setAutoModeEnabled(context: Context, enabled: Boolean) =
-        prefs(context).edit().putBoolean("auto_mode", enabled).apply()
 }

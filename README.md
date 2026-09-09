@@ -34,7 +34,7 @@ web.
 11. [Instalación y despliegue](#instalación-y-despliegue)
     - [Variables de entorno](#variables-de-entorno)
     - [Caddy: HTTPS y dominio](#caddy-https-y-dominio)
-    - [Correr el backend sin Docker](#correr-el-backend-sin-docker-modo-desarrollo)
+    - [Desarrollo local](#desarrollo-local)
 12. [Configurar Traccar Client en las tabletas](#configurar-traccar-client-en-las-tabletas)
 13. [Referencia de la API](#referencia-de-la-api)
 14. [Eventos de Socket.io](#eventos-de-socketio)
@@ -155,7 +155,7 @@ gaga-gps-001/
 │   │   ├── main.tsx, App.tsx     # BrowserRouter + rutas protegidas + React.lazy() por rol
 │   │   └── features/
 │   │       ├── auth/              # LoginScreen (login único) + ProtectedRoute
-│   │       ├── admin/             # AdminApp + sections/ (Dashboard, Reportes, Sistema)
+│   │       ├── admin/             # AdminApp + sections/ (Dashboard, Sistema)
 │   │       └── supervisor/        # SupervisorApp - sala de control
 │   └── packages/                  # exclusivos de la web - nadie más los importa directo
 │       ├── client/                # fetch tipado + Socket.io tipado + sesión compartida
@@ -284,7 +284,7 @@ alcance global - todos los demás roles siempre tienen un proyecto.
   (sala de control), con el mapa y la lista de vehículos acotados a
   su **turno programado asignado**, no a todo el proyecto. Solo
   lectura - sin acceso a Dispositivos, Usuarios, Geocercas, Equipo
-  estático, Mapas, Historial de recorridos, Reportes ni Sistema
+  estático, Mapas, Historial de recorridos/CSV ni Sistema
   (conserva parada preventiva colectiva y resolver incidentes, por
   ser acciones operativas de seguridad en vivo, no edición de
   configuración). El historial de alertas (no de posiciones) se
@@ -329,7 +329,7 @@ la primera vez que se crea el volumen de PostgreSQL.
 | `projects`                | Sitios de operación aislados entre sí                                                               |
 | `devices`                 | Dispositivos/tabletas - `unique_id` es el identificador configurado en Traccar Client                |
 | `positions`                | Hypertable de TimescaleDB - una fila por posición GPS, particionada por `fix_time`                   |
-| `geofences`                | Geocercas - polígono o polilínea/corredor (círculo solo heredado); paleta fija de 8 tipos semánticos |
+| `geofences`                | Geocercas - polígono o polilínea/corredor (círculo solo heredado); paleta fija de 9 tipos semánticos |
 | `geofence_events`          | Auditoría de entradas/salidas de geocercas                                                          |
 | `static_equipment`         | Equipo estático con radio de giro/seguridad - `linked_device_id` vincula opcionalmente una tableta   |
 | `users`                    | Cuentas de todos los roles                                                                          |
@@ -352,16 +352,25 @@ Earth vía KML), evaluadas en tiempo real contra la posición de cada
 vehículo:
 
 - **Polígono** - área de forma arbitraria, dibujada en el mapa del
-  panel Admin.
-- **Línea/corredor** - ruta con un ancho real definido a cada lado,
-  con severidad progresiva (dentro del corredor → sin alerta, cerca
-  del borde → advertencia, fuera del margen → peligro).
+  panel Admin. Puede ser **con relleno** (zona completa - la alerta
+  se dispara mientras el vehículo está dentro) o **sin relleno**
+  (la alerta se dispara solo al acercarse a la línea del borde, sin
+  importar si está adentro o afuera).
+- **Línea/corredor** - trazo con un ancho real definido, con dos
+  comportamientos posibles: **debe quedarse dentro** del ancho (ej.
+  Ruta autorizada - alerta si el vehículo se aleja) o **no debe
+  tocarla** (alerta si el vehículo se acerca).
+
+En los cuatro casos, **la acción/severidad de la alerta la decide
+siempre el tipo de geocerca** (tabla de abajo) - la forma y el modo
+solo deciden en qué momento se dispara esa alerta, nunca escalan la
+severidad por distancia.
 
 (El círculo - centro + radio - sigue existiendo a nivel de datos para
 geocercas creadas antes de este cambio, pero ya no se ofrece como
 opción al crear una nueva.)
 
-**Paleta fija de 8 tipos semánticos**, cada uno con su color y
+**Paleta fija de 9 tipos semánticos**, cada uno con su color y
 comportamiento de alerta propios (el color se deriva siempre del
 tipo, no es libre):
 
@@ -370,11 +379,17 @@ tipo, no es libre):
 | `forbidden` - Zona prohibida | negro | crítica, mensaje propio |
 | `danger` - Peligro | rojo | crítica |
 | `warning` - Advertencia | amarillo | advertencia |
-| `authorized_route` - Ruta autorizada | naranja | corredor por distancia (mecanismo de arriba) |
+| `authorized_route` - Ruta autorizada | naranja | advertencia, mensaje propio |
 | `allowed` - Zona permitida | verde | ninguna, solo visual |
 | `parking` - Estacionamiento | azul | informativa, sin sirena |
 | `discharge` - Descarga | café | ninguna, solo visual |
+| `carga` - Carga | cyan | ninguna, solo visual |
 | `maintenance` - Mantenimiento | morado | advertencia, mensaje propio |
+
+Al importar un KML/GeoJSON de Google Earth, el tipo se detecta por el color más
+cercano (distancia RGB) al de esta tabla - no hace falta que el color exportado
+coincida exactamente, cualquier tono de la rueda de color de Google Earth cae en
+el tipo más parecido.
 
 Cada entrada/salida queda registrada en `geofence_events` para
 auditoría. Se crean/editan desde un panel flotante sobre el mapa
@@ -482,9 +497,12 @@ definida.
 **Admin/Administrador de Proyecto** (`/administrator`,
 `/project-admin`) - Dashboard (mapa grande con toda la operación,
 overlays de Proyectos/Turnos/Dispositivos/Usuarios/Geocercas/Equipo/
-Mapas), Reportes (exportación CSV), Sistema (configuración global -
-solo Admin - y health check en vivo). Historial de recorridos vive
-como modo dentro de Dashboard.
+Mapas, cada uno filtrado por el proyecto elegido en el selector -
+disponible también con "Global" seleccionado), Sistema (configuración
+global - solo Admin - y health check en vivo). Historial de
+recorridos vive como modo interactivo dentro de Dashboard (filtro de
+dispositivo/rango + reproducción sobre el mapa), con exportación a
+CSV como una opción más dentro del mismo filtro.
 
 **Supervisor/Encargado** (`/supervisor`, `/manager`) - mismo panel,
 sala de control con mapa, lista de vehículos, alertas activas/
@@ -618,30 +636,54 @@ docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 docker compose logs -f caddy
 ```
 
-### Correr el backend sin Docker (modo desarrollo)
+### Desarrollo local
 
-Docker sigue siendo la vía recomendada. Esta alternativa es para
-iterar rápido modificando código del backend - recompila y reinicia
-con cada guardado, sin esperar un rebuild de imagen:
+El backend **siempre** corre dentro de Docker, nunca nativo en la
+máquina del desarrollador (evita depender de GDAL u otras
+herramientas de sistema instaladas a mano):
 
 ```bash
-docker compose stop gaga-backend        # si ya estaba corriendo
-docker compose up -d postgres redis     # solo las dependencias
-npm run dev                             # instala dependencias si faltan + backend + frontend
+npm run dev
 ```
 
-`npm run dev` corre backend (`tsx watch`, puerto 3001) y frontend
-(Vite, puerto 5173 con hot module reload) a la vez. Mientras se edita
-frontend, usar `http://localhost:5173` (proxy ya configurado hacia
-`:3001` para `/api`, `/gps`, `/tiles` y el socket) - `:3001` directo
-sirve el último build estático, sin hot-reload.
+Un solo comando: instala dependencias si faltan, levanta
+`postgres`+`redis`+`gaga-backend` en Docker (imagen normal, la misma
+que producción - GDAL incluido) y el frontend con Vite en el host
+(puerto 5173, con hot module reload). Usar `http://localhost:5173`
+mientras se edita - proxy ya configurado hacia `:3001` para `/api`,
+`/gps`, `/tiles`, `/health` y el socket.
+
+**El backend no tiene hot-reload** - un cambio en `backend/src`
+requiere volver a correr `npm run dev` (o `npm run dev:backend`) para
+que Docker reconstruya la imagen y reinicie el contenedor.
 
 También pueden correrse por separado:
 
 ```bash
-npm run dev:backend
-npm run dev:web-app
+npm run dev:backend    # solo postgres+redis+backend, en Docker
+npm run dev:web-app    # solo frontend, espera a que el backend responda /health
 ```
+
+No espera a que haya un backend real respondiendo - las llamadas a la
+API van a fallar. Sirve únicamente para iterar rápido sobre lo
+visual, no para probar funcionalidad real con datos.
+
+### App Android
+
+El APK (`app/android`) empaqueta el mismo bundle de `web/` con
+Capacitor - un solo login, sin fork de código. Cada vez que cambie
+algo en `web/` y el APK deba llevarlo, hay que sincronizarlo a mano
+antes de compilar en Android Studio:
+
+```bash
+cd app/android
+npm run cap:sync
+```
+
+El proyecto Gradle a abrir en Android Studio es `app/android/android`
+(no `app/android` ni la raíz del repo). Guía completa - permisos,
+mock-location, RTK/NTRIP, "Modo Operador" - en
+[`app/android/README.md`](app/android/README.md).
 
 ## Configurar Traccar Client en las tabletas
 
@@ -804,11 +846,14 @@ servidor real para absorber ráfagas de conexión a mayor escala.
 
 ## Tests
 
-`npm test` corre Vitest sobre todo el monorepo - tests de
-**caracterización**: existen para congelar el comportamiento exacto
-de la lógica de seguridad antes de tocarla, no para perseguir un
-porcentaje de cobertura. 100% en memoria con fakes, sin tocar una
-base de datos real.
+Tres niveles, cada uno como su propio "proyecto" Vitest dentro del mismo `config/vitest.config.mts`
+(`test.projects`) - ver también [`tests/README.md`](tests/README.md) para dónde poner un test nuevo.
+
+**Unitarios** (`tests/unit/`, replicando la ruta del código que prueban - ej.
+`tests/unit/backend/src/services/alerts/X.test.ts` prueba `backend/src/services/alerts/X.ts`) -
+tests de **caracterización**: existen para congelar el comportamiento exacto de la lógica de
+seguridad antes de tocarla, no para perseguir un porcentaje de cobertura. 100% en memoria con
+fakes, sin tocar una base de datos real.
 
 ```bash
 npm test              # una vez - rápido, sin dependencias externas
@@ -816,19 +861,23 @@ npm run test:watch    # modo watch
 npm run lint          # ESLint sobre todo el monorepo
 ```
 
-**Tests de integración** (Postgres+PostGIS real) - un segundo
-"proyecto" Vitest dentro del mismo `config/vitest.config.mts`
-(`test.projects`), para lo que un fake en memoria no puede cubrir:
-consultas SQL/PostGIS reales. Conecta a la misma instancia de Docker
-Compose que ya usa el desarrollo local.
+**Integración** (`tests/integration/`, Postgres+PostGIS real) - para lo que un fake en memoria no
+puede cubrir: consultas SQL/PostGIS reales. Conecta a la misma instancia de Docker Compose que ya
+usa el desarrollo local.
+
+**End-to-end** (`tests/e2e/`) - contra el backend completo corriendo de verdad (HTTP real), para
+flujos que de verdad necesitan el proceso completo (ej. GDAL procesando un archivo real al
+importar un mapa satelital).
 
 ```bash
-npm run test:integration  # solo los de integración (requiere Docker)
-npm run test:all          # todos los tests, rápidos + integración
+npm run test:integration  # solo integración (levanta Postgres solo)
+npm run test:e2e          # solo e2e (levanta el stack completo solo)
+npm run test:all          # las tres suites en orden - correr antes de cada push
 ```
 
-Ninguno de los dos tipos de test llega a la imagen de Docker - el
-Dockerfile solo corre `npm run build`, nunca un script de test.
+Ninguno de los tres tipos de test llega a la imagen de Docker de producción - el Dockerfile solo
+corre `npm run build`, nunca un script de test (los e2e conectan a un backend ya corriendo, no se
+ejecutan dentro de él).
 
 ## Acceso directo a PostgreSQL y Redis
 

@@ -37,6 +37,7 @@ import GeofenceAlertService from './services/alerts/GeofenceAlertService';
 import SignalLostService from './services/alerts/SignalLostService';
 import CollisionRiskService from './services/alerts/CollisionRiskService';
 import VehicleProximityService from './services/alerts/VehicleProximityService';
+import SpeedAlertService from './services/alerts/SpeedAlertService';
 import IncidentAlertService from './services/alerts/IncidentAlertService';
 import PreventiveStopService from './services/alerts/PreventiveStopService';
 import StaticEquipmentManager from './services/static_equipment/StaticEquipmentManager';
@@ -47,6 +48,7 @@ import DeviceManager from './services/telemetry/DeviceManager';
 import PositionProcessor from './services/telemetry/PositionProcessor';
 import PositionFilterService from './services/telemetry/PositionFilterService';
 import SpeedEstimationService from './services/telemetry/SpeedEstimationService';
+import ActivityClassificationService from './services/telemetry/ActivityClassificationService';
 import ShiftResolverService from './services/telemetry/ShiftResolverService';
 import FleetSocketServer from './sockets/FleetSocketServer';
 
@@ -88,7 +90,9 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
-  transports: ['websocket', 'polling'],
+  // mismo orden que el cliente (web/packages/client/src/socket.ts) - polling primero, upgrade a
+  // websocket despues, para evitar el warning de WebSocket abortado bajo StrictMode en dev
+  transports: ['polling', 'websocket'],
 });
 
 // la app nativa Android (Capacitor) sirve el WebView desde su propio origen local (https://localhost),
@@ -149,6 +153,8 @@ const signalLostService = new SignalLostService({
 });
 const collisionService = new CollisionRiskService({ io, alertEventRepo });
 const proximityService = new VehicleProximityService({ io, alertEventRepo });
+// socketServer se asigna después, mismo patrón que geofenceService (evita ciclo con FleetSocketServer)
+const speedAlertService = new SpeedAlertService({ deviceRepo, alertEventRepo });
 const equipmentManager = new StaticEquipmentManager({ io });
 
 // ── Telemetría propia ───────────────────────────────────────────
@@ -164,9 +170,14 @@ const socketServer = new FleetSocketServer({
 });
 // mismo patrón de ciclo evitado que socketServer.incidentAlertService abajo
 geofenceService.socketServer = socketServer;
+speedAlertService.socketServer = socketServer;
 
 const positionFilter = new PositionFilterService(env.positionFilter);
 const speedEstimator = new SpeedEstimationService();
+const activityClassificationService = new ActivityClassificationService({
+  operatorSessionRepo,
+  equipmentActivityRepo,
+});
 
 // usa socketServer.broadcastToProject (no io directo) - incidentes ya traen su project_id
 const incidentAlertService = new IncidentAlertService({ socketServer, incidentRepo, alertEventRepo });
@@ -186,6 +197,8 @@ const positionProcessor = new PositionProcessor({
   equipmentManager,
   positionFilter,
   speedEstimator,
+  speedAlertService,
+  activityClassificationService,
 });
 
 // ── UI estática ──────────────────────────────────────────────────
@@ -267,6 +280,8 @@ app.use(
     signalLostService,
     collisionRiskService: collisionService,
     vehicleProximityService: proximityService,
+    speedAlertService,
+    activityClassificationService,
     incidentAlertService,
     equipmentRepo,
     equipmentManager,
@@ -293,7 +308,14 @@ app.use(
 app.use(
   '/api/reports',
   authMiddleware,
-  buildReportsRouter({ positionRepo, geofenceRepo, deviceRepo, requireRole }),
+  buildReportsRouter({
+    positionRepo,
+    geofenceRepo,
+    deviceRepo,
+    equipmentActivityRepo,
+    operatorSessionRepo,
+    requireRole,
+  }),
 );
 app.use(
   '/api/incidents',
@@ -347,6 +369,7 @@ app.use(
     equipmentManager,
     socketServer,
     shiftResolver,
+    activityClassificationService,
     authMiddleware,
     requireRole,
   }),
@@ -396,9 +419,9 @@ async function ensureDefaultAdmin(): Promise<void> {
   });
 
   console.warn(' ══════════════════════════════════════════════════════════');
-  console.warn(
-    ` Usuario admin creado automáticamente (primera vez): ${env.defaultAdminEmail} / ${env.defaultAdminPassword}`,
-  );
+  console.warn(` Usuario admin creado automáticamente (primera vez): ${env.defaultAdminEmail}`);
+  console.warn(' Contraseña: la definida por DEFAULT_ADMIN_PASSWORD en el .env de este servidor');
+  console.warn(' (no se imprime aquí por seguridad - no queda en los logs).');
   console.warn(' Inicia sesión en / y CAMBIA esta contraseña de inmediato.');
   console.warn(' ══════════════════════════════════════════════════════════');
 }

@@ -44,8 +44,8 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       TZ: America/Mexico_City
-      # fijo a proposito, sin importar lo que diga MAPS_DIR en .env (uso local sin Docker) - el
-      # volumen maps_data siempre esta montado en /app/maps, cambiar esto rompe la persistencia
+      # fijo a proposito - el volumen maps_data siempre esta montado en /app/maps,
+      # cambiar esto rompe la persistencia
       MAPS_DIR: maps
     volumes:
       - maps_data:/app/maps

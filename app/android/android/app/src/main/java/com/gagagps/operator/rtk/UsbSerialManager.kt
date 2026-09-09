@@ -14,6 +14,16 @@ import com.hoho.android.usbserial.driver.UsbSerialProber
 import com.hoho.android.usbserial.util.SerialInputOutputManager
 import java.util.concurrent.Executors
 
+// nombre amigable para mostrar en la UI - manufacturerName/productName vienen de los descriptores
+// USB cacheados por el sistema (no siempre presentes, algunos chips baratos no los declaran), asi
+// que cae a "vendor:producto" en hex - nunca a device.deviceName, que es la ruta cruda del nodo
+// (/dev/bus/usb/001/002), sin ningun significado para quien solo quiere ver "es este el receptor"
+fun UsbDevice.friendlyLabel(): String {
+    val parts = listOfNotNull(manufacturerName?.trim(), productName?.trim()).filter { it.isNotBlank() }
+    if (parts.isNotEmpty()) return parts.joinToString(" ")
+    return "USB %04x:%04x".format(vendorId, productId)
+}
+
 // Conexion USB-serial al receptor RTK (chips FTDI/CP210x/CH340/PL2303 - todos soportados por
 // usb-serial-for-android). Un receptor RTK conectado por USB se ve como un puerto serial normal,
 // no como un dispositivo GNSS especial - por eso esta clase no sabe nada de NMEA/RTCM, solo bytes.
@@ -39,6 +49,8 @@ class UsbSerialManager(private val context: Context) {
 
     var connectedDeviceName: String? = null
         private set
+    var connectedDeviceId: Int? = null
+        private set
 
     private val permissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
@@ -56,8 +68,8 @@ class UsbSerialManager(private val context: Context) {
 
     // deteccion automatica: al conectar/desconectar cualquier USB, avisa para refrescar la lista
     // sola en el front, sin que el usuario tenga que darle "Buscar dispositivos" a mano cada vez.
-    // onUsbAttached() solo dispara en el evento de conectar - lo usa RtkNtripPlugin para el
-    // auto-conectar del modo automatico (no tiene sentido intentar conectar en un evento de detach)
+    // onUsbAttached() solo dispara en el evento de conectar - lo usa RtkNtripPlugin para
+    // auto-conectar siempre (no tiene sentido intentar conectar en un evento de detach)
     private val hotplugReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             if (intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
@@ -166,7 +178,8 @@ class UsbSerialManager(private val context: Context) {
         )
         ioManager = manager
         Executors.newSingleThreadExecutor().submit(manager)
-        connectedDeviceName = device.deviceName
+        connectedDeviceName = device.friendlyLabel()
+        connectedDeviceId = device.deviceId
         listener?.onConnected()
     }
 
@@ -187,6 +200,7 @@ class UsbSerialManager(private val context: Context) {
         }
         port = null
         connectedDeviceName = null
+        connectedDeviceId = null
         listener?.onDisconnected()
     }
 

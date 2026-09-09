@@ -6,10 +6,26 @@ export interface PreventiveStopStatus {
 }
 
 export interface GeofenceAlertPayload {
-  type: 'geofence_red' | 'geofence_yellow' | 'geofence_parking' | 'geofence_forbidden' | 'geofence_maintenance';
+  type:
+    | 'geofence_red'
+    | 'geofence_yellow'
+    | 'geofence_parking'
+    | 'geofence_forbidden'
+    | 'geofence_maintenance'
+    | 'geofence_left_allowed';
   deviceId: string;
   geofenceId: number;
   geofenceName: string;
+  message: string;
+  loop: boolean;
+  timestamp: string;
+}
+
+export interface SpeedAlertPayload {
+  type: 'speed_warning' | 'speed_danger';
+  deviceId: string;
+  speedKmh: number;
+  limitKmh: number;
   message: string;
   loop: boolean;
   timestamp: string;
@@ -199,7 +215,9 @@ export type AlertEventType =
   | 'collision'
   | 'proximity'
   | 'preventive_stop'
-  | 'incident';
+  | 'incident'
+  | 'equipment_variable'
+  | 'speed';
 
 export type AlertEventSeverity = 'info' | 'warning' | 'danger';
 

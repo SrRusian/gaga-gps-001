@@ -60,6 +60,16 @@
   color: #e8eaed;
   margin-bottom: 10px;
 }
+.ds-subheading {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin: 16px 0 10px;
+  padding-top: 12px;
+  border-top: 1px solid #1a1e24;
+}
 
 .ds-label {
   display: block;
@@ -313,6 +323,202 @@
   color: #b7bec7;
   font-variant-numeric: tabular-nums;
   flex-wrap: wrap;
+}
+
+.ds-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ds-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.ds-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+.ds-switch-track {
+  position: absolute;
+  inset: 0;
+  background: #262b33;
+  border-radius: 999px;
+  transition: background 0.15s ease;
+  pointer-events: none;
+}
+.ds-switch-track::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  background: #8b949e;
+  border-radius: 50%;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.ds-switch input:checked ~ .ds-switch-track {
+  background: #1c3a5e;
+}
+.ds-switch input:checked ~ .ds-switch-track::before {
+  transform: translateX(18px);
+  background: #4f8ff0;
+}
+.ds-switch-label {
+  font-size: 13px;
+  color: #e8eaed;
+  font-weight: 600;
+}
+.ds-switch-spacer {
+  flex: 1 1 auto;
+}
+.ds-inline-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ds-inline-field .ds-label {
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+.ds-inline-field input {
+  width: 70px;
+  margin-bottom: 0;
+}
+
+.ds-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ds-profile-card {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  background: #0b0d10;
+  border: 1px solid #262b33;
+  border-radius: 8px;
+  padding: 4px;
+}
+.ds-profile-active {
+  border-color: #4f8ff0;
+}
+.ds-profile-select {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  background: none;
+  border: none;
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
+  width: auto;
+}
+.ds-profile-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ds-profile-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8eaed;
+}
+.ds-profile-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: #0b0d10;
+  background: #4f8ff0;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.ds-profile-summary {
+  font-size: 11px;
+  color: #8b949e;
+  word-break: break-all;
+}
+.ds-profile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  padding-right: 4px;
+}
+.ds-profile-actions button {
+  width: auto;
+  padding: 5px 10px;
+  font-size: 11px;
+  background: none;
+  border: 1px solid #262b33;
+  color: #8b949e;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ds-profile-actions button:hover {
+  color: #e8eaed;
+  border-color: #4f8ff0;
+}
+.ds-profile-actions button.ds-remove {
+  border-color: #e5484d;
+  color: #e5484d;
+}
+
+.ds-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4100;
+  background: rgba(11, 13, 16, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.ds-modal {
+  background: #14171c;
+  border: 1px solid #262b33;
+  border-radius: 10px;
+  padding: 22px;
+  width: 380px;
+  max-width: 100%;
+  max-height: 88vh;
+  overflow-y: auto;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+.ds-modal h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e8eaed;
+  margin-bottom: 14px;
+}
+.ds-modal input {
+  width: 100%;
+  padding: 9px 11px;
+  margin-bottom: 10px;
+  background: #0b0d10;
+  border: 1px solid #262b33;
+  border-radius: 6px;
+  color: #e8eaed;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.ds-modal input:focus {
+  outline: none;
+  border-color: #4f8ff0;
 }
 
 .ds-gear-btn {

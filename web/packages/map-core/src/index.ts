@@ -1,4 +1,5 @@
 export * from './useMapLibreMap';
+export * from './cameraFly';
 export * from './geometry';
 export * from './positionFilter';
 export * from './mapMode';

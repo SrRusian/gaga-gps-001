@@ -2,12 +2,14 @@ import { clearSession, getStoredToken, getStoredUser, resolveRolePath } from '@g
 import { Capacitor } from '@capacitor/core';
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { LoginScreen } from './features/auth/LoginScreen';
-import './features/auth/auth.css';
-import { ProtectedRoute } from './features/auth/ProtectedRoute';
+import { LoginScreen } from './panels/auth/LoginScreen';
+import './panels/auth/auth.css';
+import { ProtectedRoute } from './panels/auth/ProtectedRoute';
 
-const AdminApp = lazy(() => import('./features/admin/AdminApp'));
-const SupervisorApp = lazy(() => import('./features/supervisor/SupervisorApp'));
+const AdminApp = lazy(() => import('./panels/admin'));
+const ProjectAdministratorApp = lazy(() => import('./panels/project-administrator'));
+const SupervisorApp = lazy(() => import('./panels/supervisor'));
+const ProjectManagerApp = lazy(() => import('./panels/project-manager'));
 // Operador es exclusivo de la app instalada - el codigo fuente vive en app/packages/operator-ui,
 // no en web/. Este import por nombre (no por ruta relativa) es el mismo patron ya usado con
 // @gaga-gps/android-bridge: web/ sigue siendo quien compila el bundle unico, pero el codigo le
@@ -68,7 +70,7 @@ export default function App() {
             path="/project-admin/*"
             element={
               <ProtectedRoute role="project_administrator">
-                <AdminApp />
+                <ProjectAdministratorApp />
               </ProtectedRoute>
             }
           />
@@ -84,7 +86,7 @@ export default function App() {
             path="/manager"
             element={
               <ProtectedRoute role="project_manager">
-                <SupervisorApp />
+                <ProjectManagerApp />
               </ProtectedRoute>
             }
           />

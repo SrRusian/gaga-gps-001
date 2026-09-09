@@ -1,9 +1,11 @@
 import type { Position } from '@gaga-gps/shared-types';
 import type PositionRepository from '../../repositories/PositionRepository';
+import type ActivityClassificationService from './ActivityClassificationService';
 import type CollisionRiskService from '../alerts/CollisionRiskService';
 import type GeofenceAlertService from '../alerts/GeofenceAlertService';
 import type IncidentAlertService from '../alerts/IncidentAlertService';
 import type SignalLostService from '../alerts/SignalLostService';
+import type SpeedAlertService from '../alerts/SpeedAlertService';
 import type VehicleProximityService from '../alerts/VehicleProximityService';
 import type StaticEquipmentManager from '../static_equipment/StaticEquipmentManager';
 import type DeviceManager from './DeviceManager';
@@ -29,6 +31,8 @@ export interface PositionProcessorDeps {
   equipmentManager?: StaticEquipmentManager;
   positionFilter?: PositionFilterService;
   speedEstimator?: SpeedEstimationService;
+  speedAlertService?: SpeedAlertService;
+  activityClassificationService?: ActivityClassificationService;
 }
 
 class PositionProcessor {
@@ -44,6 +48,8 @@ class PositionProcessor {
   equipmentManager?: StaticEquipmentManager;
   positionFilter?: PositionFilterService;
   speedEstimator?: SpeedEstimationService;
+  speedAlertService?: SpeedAlertService;
+  activityClassificationService?: ActivityClassificationService;
 
   constructor({
     positionRepo,
@@ -58,6 +64,8 @@ class PositionProcessor {
     equipmentManager,
     positionFilter,
     speedEstimator,
+    speedAlertService,
+    activityClassificationService,
   }: PositionProcessorDeps) {
     this.positionRepo = positionRepo;
     this.fleetState = fleetState;
@@ -73,6 +81,8 @@ class PositionProcessor {
 
     this.positionFilter = positionFilter;
     this.speedEstimator = speedEstimator;
+    this.speedAlertService = speedAlertService;
+    this.activityClassificationService = activityClassificationService;
   }
 
   async process(position: Position): Promise<Position> {
@@ -148,8 +158,29 @@ class PositionProcessor {
 
       await this.fleetState.update(position);
 
+      let geofenceMatches: Awaited<ReturnType<GeofenceAlertService['evaluate']>> = [];
       if (this.geofenceService) {
-        await this.geofenceService.evaluate({ ...position, projectId: position.projectId ?? null });
+        geofenceMatches = await this.geofenceService.evaluate({
+          ...position,
+          projectId: position.projectId ?? null,
+        });
+      }
+
+      if (this.speedAlertService) {
+        await this.speedAlertService.evaluate({
+          deviceId: position.deviceId,
+          speedKmh: (position.speed ?? 0) * 3.6,
+          projectId: position.projectId ?? null,
+          geofenceMatches,
+        });
+      }
+
+      if (this.activityClassificationService) {
+        await this.activityClassificationService.evaluate({
+          deviceId: position.deviceId,
+          speedKmh: (position.speed ?? 0) * 3.6,
+          timestamp: new Date(position.fixTime).getTime(),
+        });
       }
 
       if (this.collisionService) {

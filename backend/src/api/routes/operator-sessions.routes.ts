@@ -8,6 +8,7 @@ import type EquipmentRepository from '../../repositories/EquipmentRepository';
 import type { EquipmentRow } from '../../repositories/EquipmentRepository';
 import type { UserRole } from '../../repositories/UserRepository';
 import type ShiftResolverService from '../../services/telemetry/ShiftResolverService';
+import type ActivityClassificationService from '../../services/telemetry/ActivityClassificationService';
 import type StaticEquipmentManager from '../../services/static_equipment/StaticEquipmentManager';
 
 interface SocketServerLike {
@@ -21,6 +22,7 @@ export interface OperatorSessionsRouterDeps {
   equipmentManager: StaticEquipmentManager;
   socketServer: SocketServerLike;
   shiftResolver: ShiftResolverService;
+  activityClassificationService?: ActivityClassificationService;
   authMiddleware: RequestHandler;
   requireRole: (...roles: UserRole[]) => RequestHandler;
 }
@@ -42,6 +44,7 @@ export function buildOperatorSessionsRouter({
   equipmentManager,
   socketServer,
   shiftResolver,
+  activityClassificationService,
   authMiddleware,
   requireRole,
 }: OperatorSessionsRouterDeps) {
@@ -112,6 +115,7 @@ export function buildOperatorSessionsRouter({
       const session = await operatorSessionRepo.end(Number(req.params.id));
       if (!session) return res.status(404).json({ error: 'Turno no encontrado o ya cerrado' });
       await setEquipmentStatusForDevice(session.device_id, 'inactive');
+      activityClassificationService?.endSession(session.device_id);
       res.json(session);
     } catch (err) {
       console.error('operator-sessions.routes POST /:id/end:', (err as Error).message);

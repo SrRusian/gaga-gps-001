@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+
 // Config persistida del dispositivo (app nativa Android) - vive en localStorage, sobrevive
 // reinstalaciones normales de Android Studio (solo se pierde con "Clear data" o desinstalar de verdad).
 
@@ -5,11 +7,23 @@ const API_BASE_URL_KEY = 'gaga_api_base_url';
 const TELEMETRY_TOKEN_KEY = 'gaga_telemetry_token';
 export const DEVICE_ID_KEY = 'gaga_operator_device_id';
 
-// vacio = mismo origen (comportamiento normal en navegador, donde Express sirve la SPA y la API
-// desde el mismo host). Solo hace falta un valor real cuando no hay "mismo origen" posible - la
-// app nativa Android (Capacitor) carga los assets desde su propio origen local, no desde el backend.
-export function getApiBaseUrl(): string {
+// servidor real de produccion - fallback automatico SOLO dentro de la app nativa, para que un
+// rol que no sea operador (Admin/Encargado/Supervisor) pueda instalar el APK y hacer login sin
+// entrar nunca a Ajustes a configurar nada a mano. En navegador normal nunca aplica (ahi "vacio"
+// siempre significa mismo origen, que es correcto - Express sirve la SPA y la API del mismo host).
+export const PRODUCTION_SERVER_URL = 'https://app.gaga-maquinaria.com';
+
+// valor guardado tal cual, SIN el fallback de produccion de abajo - lo usa la migracion de
+// perfiles (DeviceSettingsPanel.tsx) para distinguir "nunca se configuro nada" de "ya apunta a
+// produccion porque es el default", y no crear un perfil falso a partir del default.
+export function getStoredApiBaseUrl(): string {
   return localStorage.getItem(API_BASE_URL_KEY) ?? '';
+}
+
+export function getApiBaseUrl(): string {
+  const stored = getStoredApiBaseUrl();
+  if (stored) return stored;
+  return Capacitor.isNativePlatform() ? PRODUCTION_SERVER_URL : '';
 }
 
 export function setApiBaseUrl(url: string): void {
@@ -18,8 +32,9 @@ export function setApiBaseUrl(url: string): void {
   else localStorage.removeItem(API_BASE_URL_KEY);
 }
 
+// true solo si alguien configuro un servidor explicitamente - no cuenta el fallback de produccion
 export function hasApiBaseUrl(): boolean {
-  return getApiBaseUrl() !== '';
+  return getStoredApiBaseUrl() !== '';
 }
 
 // clave compartida (TELEMETRY_SHARED_SECRET del backend) para autenticar el envio de posicion
@@ -44,6 +59,52 @@ export function setDeviceId(deviceId: string): void {
   const trimmed = deviceId.trim();
   if (trimmed) localStorage.setItem(DEVICE_ID_KEY, trimmed);
   else localStorage.removeItem(DEVICE_ID_KEY);
+}
+
+export interface ServerProfile {
+  id: string;
+  name: string;
+  serverUrl: string;
+  token: string;
+  deviceId: string;
+}
+
+const SERVER_PROFILES_KEY = 'gaga_server_profiles';
+const ACTIVE_SERVER_PROFILE_KEY = 'gaga_active_server_profile_id';
+
+// varias configuraciones guardadas de servidor+token+identificador (una tableta puede probarse
+// contra distintos servidores/proyectos) - cambiar entre una y otra aplica sus 3 valores a las
+// claves "en vivo" de arriba (getApiBaseUrl/getTelemetryToken/getDeviceId), que son las que de
+// verdad lee el resto de la app (envio de posicion, llamadas a la API)
+export function listServerProfiles(): ServerProfile[] {
+  try {
+    const raw = localStorage.getItem(SERVER_PROFILES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function upsertServerProfile(profile: ServerProfile): void {
+  const profiles = listServerProfiles();
+  const idx = profiles.findIndex((p) => p.id === profile.id);
+  if (idx >= 0) profiles[idx] = profile;
+  else profiles.push(profile);
+  localStorage.setItem(SERVER_PROFILES_KEY, JSON.stringify(profiles));
+}
+
+export function deleteServerProfile(id: string): void {
+  const remaining = listServerProfiles().filter((p) => p.id !== id);
+  localStorage.setItem(SERVER_PROFILES_KEY, JSON.stringify(remaining));
+  if (getActiveServerProfileId() === id) localStorage.removeItem(ACTIVE_SERVER_PROFILE_KEY);
+}
+
+export function getActiveServerProfileId(): string {
+  return localStorage.getItem(ACTIVE_SERVER_PROFILE_KEY) ?? '';
+}
+
+export function setActiveServerProfileId(id: string): void {
+  localStorage.setItem(ACTIVE_SERVER_PROFILE_KEY, id);
 }
 
 const SETTINGS_PASSWORD_KEY = 'gaga_settings_password';

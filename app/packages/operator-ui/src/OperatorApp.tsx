@@ -110,7 +110,7 @@ export default function OperatorApp() {
 
   useEffect(() => {
     if (!myDisplay || !autoFollow || framingThreat) return;
-    mapRef.current?.follow(myDisplay.latitude, myDisplay.longitude);
+    mapRef.current?.follow(myDisplay.latitude, myDisplay.longitude, myDisplay.course, myDisplay.speed);
   }, [myDisplay, autoFollow, framingThreat]);
 
   useEffect(() => {

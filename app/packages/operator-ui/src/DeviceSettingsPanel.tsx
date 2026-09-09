@@ -1,8 +1,6 @@
 import {
   RtkNtrip,
   TraccarSender,
-  type CorrectionMode,
-  type NtripConfig,
   type NtripMountpoint,
   type RtkFixLabel,
   type RtkStatus,
@@ -11,20 +9,35 @@ import {
   type TraccarServer,
 } from '@gaga-gps/android-bridge';
 import {
+  deleteServerProfile,
   enableOperatorMode,
-  getApiBaseUrl,
+  getActiveServerProfileId,
   getDeviceId,
   getSettingsPassword,
+  getStoredApiBaseUrl,
   getTelemetryToken,
   hasSettingsPassword,
   isOperatorModeEnabled,
+  listServerProfiles,
+  PRODUCTION_SERVER_URL,
+  setActiveServerProfileId,
   setApiBaseUrl,
   setDeviceId,
   setSettingsPassword,
   setTelemetryToken,
+  upsertServerProfile,
+  type ServerProfile,
 } from '@gaga-gps/client';
 import { useEffect, useState } from 'react';
 import './device-settings.css';
+import {
+  deleteNtripProfile,
+  getActiveNtripProfileId,
+  listNtripProfiles,
+  setActiveNtripProfileId,
+  upsertNtripProfile,
+  type NtripProfile,
+} from './ntripProfiles';
 
 const MAIN_SERVER_ID = 'gaga-main';
 
@@ -38,14 +51,6 @@ function buildMainServerUrl(serverUrl: string, token: string): string {
   return `${base}/gps${query}`;
 }
 
-function emptyExtraServer(): TraccarServer {
-  return { id: crypto.randomUUID(), url: '', enabled: true };
-}
-
-// valores de prueba precargados a pedido del usuario mientras se hacen las pruebas de campo -
-// solo rellenan el formulario la primera vez (si ya hay algo guardado, gana lo guardado)
-const TEST_DEFAULTS = { serverUrl: 'https://app.gaga-maquinaria.com', token: 'test', deviceId: 'T2' };
-
 // codigo de "configuracion rapida" - rellena servidor/token/NTRIP conocidos y activa el modo
 // automatico de un golpe, para no tener que escribirlo a mano en cada tableta que se provisiona.
 // El identificador del dispositivo y el mount point NUNCA se llenan solos a proposito (varian por
@@ -56,15 +61,20 @@ const TEST_DEFAULTS = { serverUrl: 'https://app.gaga-maquinaria.com', token: 'te
 // app. Cambiar el codigo aqui si hace falta.
 const OPERATOR_MODE_CODE = '3009';
 
-const QUICK_FILL_CODE = '4077';
-const QUICK_FILL_VALUES = {
-  serverUrl: 'https://app.gaga-maquinaria.com',
-  token: 'test',
-  ntripHost: 'ntrip.earthscope.org',
-  ntripPort: 2101,
-  ntripUsername: 'nervous_raman',
-  ntripPassword: 'Lh4lI10A0brg43QO',
-  ntripVersion: 'v2' as const,
+// id fijo para el perfil de servidor/NTRIP "de fabrica" - se usa tanto al activar Modo Operador
+// por primera vez como desde el boton "Restaurar valores por defecto", asi repetir la accion
+// actualiza el mismo perfil en vez de ir creando duplicados cada vez
+const DEFAULT_PROFILE_ID = 'principal';
+
+// valores NTRIP conocidos que "Restaurar valores por defecto"/activar Modo Operador dejan listos
+// de fabrica (ver applyDefaultProvisioning) - el mount point se queda vacio a proposito, varia por
+// tableta/ubicacion, se elige con "Buscar puntos de montura"
+const DEFAULT_NTRIP_VALUES = {
+  host: 'ntrip.earthscope.org',
+  port: 2101,
+  username: 'nervous_raman',
+  password: 'Lh4lI10A0brg43QO',
+  version: 'v2' as const,
 };
 
 function formatLogTime(ts: number): string {
@@ -114,6 +124,7 @@ function fixBadgeLabel(label: RtkFixLabel): string {
 const EMPTY_RTK_STATUS: RtkStatus = {
   usbConnected: false,
   connectedUsbDeviceName: null,
+  connectedUsbDeviceId: null,
   usbDataRateBps: 0,
   usbTotalBytes: 0,
   ntripConnected: false,
@@ -124,7 +135,6 @@ const EMPTY_RTK_STATUS: RtkStatus = {
   swMapsOutputRunning: false,
   swMapsPort: 11123,
   correctionMode: 'ntrip',
-  autoModeEnabled: false,
 };
 
 export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
@@ -139,17 +149,15 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   const [lockPasswordInput, setLockPasswordInput] = useState('');
   const [lockSavedMessage, setLockSavedMessage] = useState('');
 
-  const [showQuickFill, setShowQuickFill] = useState(false);
-  const [quickFillInput, setQuickFillInput] = useState('');
-  const [quickFillError, setQuickFillError] = useState('');
-  const [quickFillMessage, setQuickFillMessage] = useState('');
+  const [profiles, setProfiles] = useState<ServerProfile[]>([]);
+  const [activeProfileId, setActiveProfileIdState] = useState(getActiveServerProfileId());
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileForm, setProfileForm] = useState<ServerProfile | null>(null);
+  const [profileFormError, setProfileFormError] = useState('');
+  const [profileMessage, setProfileMessage] = useState('');
 
-  const [serverUrl, setServerUrl] = useState(getApiBaseUrl() || TEST_DEFAULTS.serverUrl);
-  const [token, setToken] = useState(getTelemetryToken() || TEST_DEFAULTS.token);
-  const [deviceId, setDeviceIdInput] = useState(getDeviceId() || TEST_DEFAULTS.deviceId);
-  const [savedMessage, setSavedMessage] = useState('');
+  const activeProfile = profiles.find((p) => p.id === activeProfileId) ?? null;
 
-  const [extraServers, setExtraServers] = useState<TraccarServer[]>([]);
   const [senderRunning, setSenderRunning] = useState(false);
   const [senderError, setSenderError] = useState<string | null>(null);
   const [bufferedCount, setBufferedCount] = useState(0);
@@ -159,11 +167,18 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   const [showLog, setShowLog] = useState(false);
   const [logEntries, setLogEntries] = useState<TraccarLogEntry[]>([]);
 
-  const [ntripConfig, setNtripConfig] = useState<Partial<NtripConfig>>({ port: 2101, version: 'v2' });
+  const [ntripProfiles, setNtripProfiles] = useState<NtripProfile[]>([]);
+  const [ntripActiveProfileId, setNtripActiveProfileIdState] = useState(getActiveNtripProfileId());
+  const [showNtripProfileModal, setShowNtripProfileModal] = useState(false);
+  const [ntripProfileForm, setNtripProfileForm] = useState<NtripProfile | null>(null);
+  const [ntripProfileFormError, setNtripProfileFormError] = useState('');
+  const [ntripProfileMessage, setNtripProfileMessage] = useState('');
+
+  const activeNtripProfile = ntripProfiles.find((p) => p.id === ntripActiveProfileId) ?? null;
+
   const [usbDevices, setUsbDevices] = useState<{ deviceId: number; name: string | null }[]>([]);
   const [selectedUsbDeviceId, setSelectedUsbDeviceId] = useState<number | null>(null);
   const [baudRate, setBaudRateInput] = useState(460800);
-  const [correctionMode, setCorrectionModeState] = useState<CorrectionMode>('ntrip');
   const [swMapsPortInput, setSwMapsPortInput] = useState(11123);
   const [gnssBusy, setGnssBusy] = useState(false);
   const [rtkStatus, setRtkStatus] = useState<RtkStatus>(EMPTY_RTK_STATUS);
@@ -184,16 +199,70 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   }
 
   useEffect(() => {
+    if (!operatorMode) return;
+    const existing = listServerProfiles();
+    if (existing.length > 0) {
+      setProfiles(existing);
+      return;
+    }
+    // migracion de una sola vez: solo si el dispositivo YA tenia servidor/token/id guardados
+    // sueltos de antes de que existieran los perfiles (getStoredApiBaseUrl es el valor crudo,
+    // sin el fallback de produccion) - una instalacion nueva no debe ver nada precargado, se
+    // queda vacia hasta que alguien use "Configuracion rapida" o cree una a mano
+    const storedUrl = getStoredApiBaseUrl();
+    const storedToken = getTelemetryToken();
+    const storedDeviceId = getDeviceId();
+    if (!storedUrl && !storedToken && !storedDeviceId) return;
+
+    const seeded: ServerProfile = {
+      id: crypto.randomUUID(),
+      name: 'Principal',
+      serverUrl: storedUrl,
+      token: storedToken,
+      deviceId: storedDeviceId,
+    };
+    upsertServerProfile(seeded);
+    setActiveServerProfileId(seeded.id);
+    setProfiles([seeded]);
+    setActiveProfileIdState(seeded.id);
+  }, [operatorMode]);
+
+  useEffect(() => {
+    if (!operatorMode) return;
+    const existing = listNtripProfiles();
+    if (existing.length > 0) {
+      setNtripProfiles(existing);
+      return;
+    }
+    // misma migracion de una sola vez que "Servidor e identidad" - solo si el dispositivo YA
+    // tenia una config NTRIP guardada nativa de antes de que existieran los perfiles
+    RtkNtrip.getNtripConfig().then((c) => {
+      if (!c.host) return;
+      const seeded: NtripProfile = {
+        id: crypto.randomUUID(),
+        name: 'Principal',
+        host: c.host,
+        port: c.port ?? 2101,
+        mountpoint: c.mountpoint ?? '',
+        username: c.username ?? '',
+        password: c.password ?? '',
+        version: c.version ?? 'v2',
+      };
+      upsertNtripProfile(seeded);
+      setActiveNtripProfileId(seeded.id);
+      setNtripProfiles([seeded]);
+      setNtripActiveProfileIdState(seeded.id);
+    });
+  }, [operatorMode]);
+
+  useEffect(() => {
     // en modo basico (sin activar) no se llama a ningun plugin nativo - ni una vez, ni en el
     // polling periodico de abajo - asi Android nunca pide permisos de ubicacion/USB de mas
     if (!operatorMode) return;
 
-    TraccarSender.getServers().then((r) => setExtraServers(r.servers.filter((s) => s.id !== MAIN_SERVER_ID)));
     TraccarSender.getSendSettings().then(setSendSettings);
     refreshState();
-    RtkNtrip.getNtripConfig().then((c) => setNtripConfig((prev) => ({ ...prev, ...c })));
     RtkNtrip.getBaudRate().then((r) => setBaudRateInput(r.baudRate));
-    RtkNtrip.getCorrectionMode().then((r) => setCorrectionModeState(r.mode));
     RtkNtrip.listUsbDevices().then((r) => setUsbDevices(r.devices));
     RtkNtrip.getStatus().then((s) => {
       setRtkStatus(s);
@@ -213,38 +282,78 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     // debe correr una vez de verdad en ese momento, no solo al montar
   }, [operatorMode]);
 
-  async function persistExtraServers(next: TraccarServer[]) {
-    setExtraServers(next);
+  async function applyMainServer(mainUrl: string, mainToken: string) {
     const mainServer: TraccarServer = {
       id: MAIN_SERVER_ID,
-      url: buildMainServerUrl(serverUrl, token),
+      url: buildMainServerUrl(mainUrl, mainToken),
       enabled: true,
     };
-    await TraccarSender.saveServers({
-      servers: [mainServer, ...next.filter((s) => s.url.trim() !== '')],
-    });
+    await TraccarSender.saveServers({ servers: [mainServer] });
   }
 
-  async function saveMainConfig() {
-    setApiBaseUrl(serverUrl);
-    setTelemetryToken(token);
-    setDeviceId(deviceId);
-    await TraccarSender.setDeviceId({ deviceId: deviceId.trim() || 'GAGA-DEVICE' });
-    await persistExtraServers(extraServers);
-    setSavedMessage('Guardado');
-    setTimeout(() => setSavedMessage(''), 2000);
+  // aplica una configuracion guardada como la "activa" - las claves en vivo que de verdad lee el
+  // resto de la app (getApiBaseUrl/getTelemetryToken/getDeviceId, TraccarSender)
+  async function applyProfile(profile: ServerProfile) {
+    setApiBaseUrl(profile.serverUrl);
+    setTelemetryToken(profile.token);
+    setDeviceId(profile.deviceId);
+    await TraccarSender.setDeviceId({ deviceId: profile.deviceId.trim() || 'GAGA-DEVICE' });
+    await applyMainServer(profile.serverUrl, profile.token);
+    setActiveServerProfileId(profile.id);
+    setActiveProfileIdState(profile.id);
   }
 
-  function updateExtraServer(id: string, patch: Partial<TraccarServer>) {
-    persistExtraServers(extraServers.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  async function selectProfile(id: string) {
+    const profile = profiles.find((p) => p.id === id);
+    if (!profile) return;
+    await applyProfile(profile);
+    setProfileMessage('Aplicada');
+    setTimeout(() => setProfileMessage(''), 2000);
   }
 
-  function removeExtraServer(id: string) {
-    persistExtraServers(extraServers.filter((s) => s.id !== id));
+  function openCreateProfileModal() {
+    setProfileForm({ id: crypto.randomUUID(), name: '', serverUrl: '', token: '', deviceId: '' });
+    setProfileFormError('');
+    setShowProfileModal(true);
   }
 
-  function addExtraServer() {
-    persistExtraServers([...extraServers, emptyExtraServer()]);
+  function openEditProfileModal(profile: ServerProfile) {
+    setProfileForm({ ...profile });
+    setProfileFormError('');
+    setShowProfileModal(true);
+  }
+
+  function closeProfileModal() {
+    setShowProfileModal(false);
+    setProfileForm(null);
+    setProfileFormError('');
+  }
+
+  async function saveProfileModal() {
+    if (!profileForm) return;
+    if (!profileForm.name.trim() || !profileForm.serverUrl.trim()) {
+      setProfileFormError('Nombre y servidor son obligatorios');
+      return;
+    }
+    const isNew = !profiles.some((p) => p.id === profileForm.id);
+    const saved: ServerProfile = { ...profileForm, name: profileForm.name.trim() };
+    upsertServerProfile(saved);
+    setProfiles(isNew ? [...profiles, saved] : profiles.map((p) => (p.id === saved.id ? saved : p)));
+    // una configuracion nueva, o la que ya estaba activa, se aplica de inmediato - no tiene
+    // sentido crear/editar una configuracion y que el dispositivo se quede mandando datos con otra
+    if (isNew || saved.id === activeProfileId) await applyProfile(saved);
+    closeProfileModal();
+    setProfileMessage('Guardada');
+    setTimeout(() => setProfileMessage(''), 2000);
+  }
+
+  function removeProfile(id: string) {
+    const profile = profiles.find((p) => p.id === id);
+    if (!profile) return;
+    if (!confirm(`Eliminar la configuracion "${profile.name}"?`)) return;
+    deleteServerProfile(id);
+    setProfiles(profiles.filter((p) => p.id !== id));
+    if (activeProfileId === id) setActiveProfileIdState('');
   }
 
   async function toggleSender() {
@@ -281,46 +390,111 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     TraccarSender.setSendSettings(patch);
   }
 
-  async function handleResetSendSettings() {
-    const restored = await TraccarSender.resetSendSettings();
-    setSendSettings(restored);
-  }
-
-  async function refreshUsbDevices() {
-    const { devices } = await RtkNtrip.listUsbDevices();
-    setUsbDevices(devices);
-  }
-
   async function refreshRtkStatus() {
     RtkNtrip.getStatus().then(setRtkStatus);
   }
 
+  // el baud rate se persiste al cambiarlo, no solo al conectar - el auto-conectar al enchufar el
+  // receptor (siempre activo, del lado nativo) corre sin pasar por connectUsb(), asi que necesita
+  // el valor ya guardado de antemano
+  async function updateBaudRate(value: number) {
+    setBaudRateInput(value);
+    await RtkNtrip.setBaudRate({ baudRate: value });
+  }
+
   async function connectUsb() {
     if (selectedUsbDeviceId == null) return;
-    await RtkNtrip.setBaudRate({ baudRate });
     await RtkNtrip.connectUsb({ deviceId: selectedUsbDeviceId, baudRate });
   }
 
-  async function saveNtripConfig() {
-    if (!ntripConfig.host || !ntripConfig.mountpoint) return;
+  async function toggleUsbConnection() {
+    if (rtkStatus.usbConnected) {
+      await RtkNtrip.disconnectUsb();
+      return;
+    }
+    await connectUsb();
+  }
+
+  async function applyNtripConfig(profile: NtripProfile) {
     await RtkNtrip.setNtripConfig({
-      host: ntripConfig.host,
-      port: ntripConfig.port ?? 2101,
-      mountpoint: ntripConfig.mountpoint,
-      username: ntripConfig.username ?? '',
-      password: ntripConfig.password ?? '',
-      version: ntripConfig.version ?? 'v2',
+      host: profile.host,
+      port: profile.port,
+      mountpoint: profile.mountpoint,
+      username: profile.username,
+      password: profile.password,
+      version: profile.version,
     });
   }
 
-  async function searchMountpoints() {
-    if (!ntripConfig.host) return;
+  async function selectNtripProfile(id: string) {
+    const profile = ntripProfiles.find((p) => p.id === id);
+    if (!profile) return;
+    await applyNtripConfig(profile);
+    setActiveNtripProfileId(profile.id);
+    setNtripActiveProfileIdState(profile.id);
+    setNtripProfileMessage('Aplicada');
+    setTimeout(() => setNtripProfileMessage(''), 2000);
+  }
+
+  function openCreateNtripProfileModal() {
+    setNtripProfileForm({ id: crypto.randomUUID(), name: '', host: '', port: 2101, mountpoint: '', username: '', password: '', version: 'v2' });
+    setNtripProfileFormError('');
+    setMountpoints([]);
+    setMountpointsError('');
+    setShowNtripProfileModal(true);
+  }
+
+  function openEditNtripProfileModal(profile: NtripProfile) {
+    setNtripProfileForm({ ...profile });
+    setNtripProfileFormError('');
+    setMountpoints([]);
+    setMountpointsError('');
+    setShowNtripProfileModal(true);
+  }
+
+  function closeNtripProfileModal() {
+    setShowNtripProfileModal(false);
+    setNtripProfileForm(null);
+    setNtripProfileFormError('');
+  }
+
+  async function saveNtripProfileModal() {
+    if (!ntripProfileForm) return;
+    if (!ntripProfileForm.name.trim() || !ntripProfileForm.host.trim() || !ntripProfileForm.mountpoint.trim()) {
+      setNtripProfileFormError('Nombre, NTRIP address y mount point son obligatorios');
+      return;
+    }
+    const isNew = !ntripProfiles.some((p) => p.id === ntripProfileForm.id);
+    const saved: NtripProfile = { ...ntripProfileForm, name: ntripProfileForm.name.trim() };
+    upsertNtripProfile(saved);
+    setNtripProfiles(isNew ? [...ntripProfiles, saved] : ntripProfiles.map((p) => (p.id === saved.id ? saved : p)));
+    if (isNew || saved.id === ntripActiveProfileId) {
+      await applyNtripConfig(saved);
+      setActiveNtripProfileId(saved.id);
+      setNtripActiveProfileIdState(saved.id);
+    }
+    closeNtripProfileModal();
+    setNtripProfileMessage('Guardada');
+    setTimeout(() => setNtripProfileMessage(''), 2000);
+  }
+
+  function removeNtripProfile(id: string) {
+    const profile = ntripProfiles.find((p) => p.id === id);
+    if (!profile) return;
+    if (!confirm(`Eliminar la configuracion NTRIP "${profile.name}"?`)) return;
+    deleteNtripProfile(id);
+    setNtripProfiles(ntripProfiles.filter((p) => p.id !== id));
+    if (ntripActiveProfileId === id) setNtripActiveProfileIdState('');
+  }
+
+  async function searchNtripMountpoints() {
+    if (!ntripProfileForm?.host) return;
     setMountpointsLoading(true);
     setMountpointsError('');
     try {
       const { mountpoints: found } = await RtkNtrip.fetchSourceTable({
-        host: ntripConfig.host,
-        port: ntripConfig.port ?? 2101,
+        host: ntripProfileForm.host,
+        port: ntripProfileForm.port ?? 2101,
       });
       setMountpoints(found);
       if (found.length === 0) setMountpointsError('El caster no reporto ningun punto de montura');
@@ -335,7 +509,8 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
       await RtkNtrip.stopNtrip();
       return;
     }
-    await saveNtripConfig();
+    if (!activeNtripProfile) return;
+    await applyNtripConfig(activeNtripProfile);
     await RtkNtrip.startNtrip();
   }
 
@@ -364,12 +539,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     refreshRtkStatus();
   }
 
-  async function updateCorrectionMode(mode: CorrectionMode) {
-    if (mode !== 'ntrip') return; // pointperfect/usb_serial bloqueados, ver render mas abajo
-    setCorrectionModeState(mode);
-    await RtkNtrip.setCorrectionMode({ mode });
-  }
-
   // "Servicio GNSS" agrupa las 4 piezas (USB, NTRIP, ubicacion simulada, salida SW Maps) en un
   // solo control - cada pieza sigue siendo un plugin nativo independiente, esto solo orquesta
   // el orden de arranque/apagado desde el front
@@ -380,7 +549,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
         await connectUsb();
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
-      await saveNtripConfig();
+      if (activeNtripProfile) await applyNtripConfig(activeNtripProfile);
       await RtkNtrip.startNtrip().catch(() => {});
       await RtkNtrip.startMockLocation().catch(() => {});
       await RtkNtrip.startSwMapsOutput({ port: swMapsPortInput }).catch(() => {});
@@ -408,7 +577,54 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     await activateGnssService();
   }
 
-  function handleActivateOperatorMode() {
+  // valores "de fabrica" completos - servidor de produccion (token/id vacios, varian por
+  // tableta), envio continuo activado con intervalo 1s, NTRIP con DEFAULT_NTRIP_VALUES (mount
+  // point vacio, se elige con "Buscar puntos de montura"), baud rate 460800 y salida SW Maps
+  // activada en el puerto 11123. Se usa tanto al activar Modo Operador por primera vez como
+  // desde "Restaurar valores por defecto" (id fijo, no duplica)
+  async function applyDefaultProvisioning() {
+    const serverProfile: ServerProfile = {
+      id: DEFAULT_PROFILE_ID,
+      name: 'Principal',
+      serverUrl: PRODUCTION_SERVER_URL,
+      token: '',
+      deviceId: '',
+    };
+    upsertServerProfile(serverProfile);
+    await applyProfile(serverProfile);
+    setProfiles(listServerProfiles());
+
+    try {
+      await TraccarSender.start();
+      setSenderRunning(true);
+      setSenderError(null);
+    } catch (e) {
+      setSenderError(e instanceof Error ? e.message : 'No se pudo iniciar el envio');
+    }
+    setSendSettings(await TraccarSender.resetSendSettings());
+
+    const ntripProfile: NtripProfile = {
+      id: DEFAULT_PROFILE_ID,
+      name: 'Principal',
+      host: DEFAULT_NTRIP_VALUES.host,
+      port: DEFAULT_NTRIP_VALUES.port,
+      mountpoint: '',
+      username: DEFAULT_NTRIP_VALUES.username,
+      password: DEFAULT_NTRIP_VALUES.password,
+      version: DEFAULT_NTRIP_VALUES.version,
+    };
+    upsertNtripProfile(ntripProfile);
+    setActiveNtripProfileId(ntripProfile.id);
+    setNtripActiveProfileIdState(ntripProfile.id);
+    setNtripProfiles(listNtripProfiles());
+
+    await updateBaudRate(460800);
+    setSwMapsPortInput(11123);
+    await RtkNtrip.startSwMapsOutput({ port: 11123 }).catch(() => {});
+    await refreshRtkStatus();
+  }
+
+  async function handleActivateOperatorMode() {
     if (operatorModeCodeInput.trim() !== OPERATOR_MODE_CODE) {
       setOperatorModeError('Codigo incorrecto');
       return;
@@ -423,6 +639,18 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     setOperatorMode(true);
     setOperatorModeCodeInput('');
     setOperatorModeError('');
+    await applyDefaultProvisioning();
+  }
+
+  async function handleRestoreDefaults() {
+    const confirmed = confirm(
+      'Esto reemplaza la configuracion "Principal" de servidor y NTRIP con los valores de ' +
+        'fabrica (servidor de produccion, token/identificador vacios, NTRIP sin mount point), ' +
+        'reinicia el envio continuo y reactiva la salida SW Maps. No borra otras ' +
+        'configuraciones guardadas.\n\n¿Continuar?',
+    );
+    if (!confirmed) return;
+    await applyDefaultProvisioning();
   }
 
   function handleUnlock() {
@@ -440,37 +668,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     setLockPasswordInput('');
     setLockSavedMessage(lockPasswordInput.trim() ? 'Ajustes bloqueados' : 'Bloqueo quitado');
     setTimeout(() => setLockSavedMessage(''), 2500);
-  }
-
-  // rellena servidor/token/NTRIP conocidos y activa el modo automatico de un golpe - deviceId y
-  // mountpoint se quedan sin tocar a proposito, esos siempre son manuales por tableta/ubicacion
-  async function handleQuickFill() {
-    if (quickFillInput.trim() !== QUICK_FILL_CODE) {
-      setQuickFillError('Codigo incorrecto');
-      return;
-    }
-    setQuickFillError('');
-    setServerUrl(QUICK_FILL_VALUES.serverUrl);
-    setToken(QUICK_FILL_VALUES.token);
-    setNtripConfig((prev) => ({
-      ...prev,
-      host: QUICK_FILL_VALUES.ntripHost,
-      port: QUICK_FILL_VALUES.ntripPort,
-      username: QUICK_FILL_VALUES.ntripUsername,
-      password: QUICK_FILL_VALUES.ntripPassword,
-      version: QUICK_FILL_VALUES.ntripVersion,
-    }));
-    await RtkNtrip.setAutoMode({ enabled: true });
-    await refreshRtkStatus();
-    setQuickFillInput('');
-    setShowQuickFill(false);
-    setQuickFillMessage('Listo - falta identificador del dispositivo y elegir el mount point NTRIP');
-    setTimeout(() => setQuickFillMessage(''), 6000);
-  }
-
-  async function disableAutoMode() {
-    await RtkNtrip.setAutoMode({ enabled: false });
-    await refreshRtkStatus();
   }
 
   if (!unlocked) {
@@ -513,74 +710,66 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
         <section className="ds-section">
           <h3>Servidor e identidad</h3>
           <div className="ds-actions">
-            <button onClick={() => setShowQuickFill((v) => !v)}>Configuracion rapida</button>
+            <button onClick={openCreateProfileModal}>+ Nueva configuracion</button>
+            {profileMessage && <span className="ds-saved">{profileMessage}</span>}
           </div>
-          {showQuickFill && (
-            <div className="ds-row">
-              <input
-                placeholder="Codigo de 4 digitos"
-                value={quickFillInput}
-                onChange={(e) => setQuickFillInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleQuickFill()}
-              />
-              <button onClick={handleQuickFill}>Aplicar</button>
-            </div>
+
+          {profiles.length === 0 && (
+            <p className="ds-hint">Sin configuraciones guardadas todavia - agrega una para poder enviar posicion.</p>
           )}
-          {quickFillError && <div className="ds-error-block">{quickFillError}</div>}
-          {quickFillMessage && <div className="ds-saved">{quickFillMessage}</div>}
-          <label className="ds-label">Servidor GAGA GPS</label>
-          <input
-            placeholder="http://192.168.1.50:3001"
-            value={serverUrl}
-            onChange={(e) => setServerUrl(e.target.value)}
-          />
-          <label className="ds-label">Token de telemetria</label>
-          <input
-            placeholder="TELEMETRY_SHARED_SECRET del servidor"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-          />
-          <label className="ds-label">Identificador del dispositivo</label>
-          <input
-            placeholder="Igual que en Traccar Client"
-            value={deviceId}
-            onChange={(e) => setDeviceIdInput(e.target.value)}
-          />
-          <div className="ds-actions">
-            <button onClick={saveMainConfig}>Guardar</button>
-            {savedMessage && <span className="ds-saved">{savedMessage}</span>}
+          <div className="ds-profile-list">
+            {profiles.map((p) => {
+              const isActive = p.id === activeProfileId;
+              return (
+                <div className={`ds-profile-card${isActive ? ' ds-profile-active' : ''}`} key={p.id}>
+                  <button className="ds-profile-select" onClick={() => selectProfile(p.id)}>
+                    <span className="ds-profile-top">
+                      <span className="ds-profile-name">{p.name}</span>
+                      {isActive && <span className="ds-profile-badge">Activa</span>}
+                    </span>
+                    <span className="ds-profile-summary">{p.serverUrl || '(sin servidor)'}</span>
+                    <span className="ds-profile-summary">ID: {p.deviceId || '(sin identificador)'}</span>
+                  </button>
+                  <div className="ds-profile-actions">
+                    <button onClick={() => openEditProfileModal(p)}>Editar</button>
+                    <button className="ds-remove" onClick={() => removeProfile(p.id)}>
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <p className="ds-hint">
-            El envio de posicion manda a {serverUrl ? buildMainServerUrl(serverUrl, token) : '(configura el servidor primero)'}
-          </p>
-        </section>
 
-        <section className="ds-section">
-          <h3>Bloqueo de ajustes</h3>
           <p className="ds-hint">
-            {hasSettingsPassword()
-              ? 'Los ajustes estan protegidos con contrasena.'
-              : 'Sin contrasena - cualquiera puede abrir y cambiar los ajustes.'}
+            {activeProfile
+              ? `El envio de posicion manda a ${buildMainServerUrl(activeProfile.serverUrl, activeProfile.token)}`
+              : 'Sin configuracion activa - elige o crea una para poder enviar posicion.'}
           </p>
-          <input
-            type="password"
-            placeholder="Nueva contrasena (vacio = quitar bloqueo)"
-            value={lockPasswordInput}
-            onChange={(e) => setLockPasswordInput(e.target.value)}
-          />
-          <div className="ds-actions">
-            <button onClick={handleSetLockPassword}>
-              {hasSettingsPassword() ? 'Cambiar / quitar contrasena' : 'Bloquear con contrasena'}
-            </button>
-            {lockSavedMessage && <span className="ds-saved">{lockSavedMessage}</span>}
-          </div>
-        </section>
 
-        <section className="ds-section">
-          <h3>Envio de posicion</h3>
           <div className="ds-actions">
-            <button onClick={toggleSender}>{senderRunning ? 'Detener envio continuo' : 'Iniciar envio continuo'}</button>
             <button onClick={handleSendNow}>Enviar ubicacion ahora</button>
+            {sendNowMessage && <span className="ds-saved">{sendNowMessage}</span>}
+          </div>
+
+          <div className="ds-switch-row">
+            <label className="ds-switch">
+              <input type="checkbox" checked={senderRunning} onChange={toggleSender} />
+              <span className="ds-switch-track" />
+            </label>
+            <span className="ds-switch-label">Envio continuo</span>
+            <span className="ds-switch-spacer" />
+            {sendSettings && (
+              <div className="ds-inline-field">
+                <label className="ds-label">Intervalo (s)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={sendSettings.intervalSeconds}
+                  onChange={(e) => updateSendSettings({ intervalSeconds: Number(e.target.value) })}
+                />
+              </div>
+            )}
           </div>
           <div className="ds-actions">
             <span className="ds-status">
@@ -588,39 +777,10 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
               {bufferedCount > 0 && ` - ${bufferedCount} en buffer sin conexion`}
               {senderError && <span className="ds-error"> - {senderError}</span>}
             </span>
-            {sendNowMessage && <span className="ds-saved">{sendNowMessage}</span>}
           </div>
 
-          {sendSettings && (
-            <>
-              <label className="ds-label">Intervalo de envio (segundos)</label>
-              <input
-                type="number"
-                min={1}
-                value={sendSettings.intervalSeconds}
-                onChange={(e) => updateSendSettings({ intervalSeconds: Number(e.target.value) })}
-              />
-              <label className="ds-label">Contrasena (opcional, protocolo OsmAnd)</label>
-              <input
-                type="password"
-                value={sendSettings.password}
-                onChange={(e) => updateSendSettings({ password: e.target.value })}
-              />
-              <p className="ds-hint">
-                GPS y buffer sin conexion siempre estan activos al maximo - no hay ajustes que solo
-                empeorarian el envio, lo unico que tiene sentido tocar aqui es el intervalo.
-              </p>
-
-              <div className="ds-actions">
-                <button className="ds-remove" onClick={handleResetSendSettings}>
-                  Restaurar intervalo por defecto
-                </button>
-              </div>
-            </>
-          )}
-
           <button className="ds-add" onClick={() => setShowLog((v) => !v)}>
-            {showLog ? 'Ocultar bitacora' : 'Mostrar estado (bitacora de envio)'}
+            {showLog ? 'Ocultar bitacora' : 'Mostrar bitacora de envios'}
           </button>
           {showLog && (
             <div className="ds-log">
@@ -636,166 +796,89 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
           )}
         </section>
 
-        <section className="ds-section">
-          <h3>Servidores adicionales (opcional)</h3>
-          {extraServers.map((server) => (
-            <div className="ds-row" key={server.id}>
+        {showProfileModal && profileForm && (
+          <div className="ds-modal-overlay" onClick={closeProfileModal}>
+            <div className="ds-modal" onClick={(e) => e.stopPropagation()}>
+              <h3>{profiles.some((p) => p.id === profileForm.id) ? 'Editar configuracion' : 'Nueva configuracion'}</h3>
+              <label className="ds-label">Nombre</label>
               <input
-                placeholder="http://otro-servidor:5055"
-                value={server.url}
-                onChange={(e) => updateExtraServer(server.id, { url: e.target.value })}
+                placeholder="Ej. Servidor de pruebas"
+                value={profileForm.name}
+                onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
               />
-              <label className="ds-toggle">
-                <input
-                  type="checkbox"
-                  checked={server.enabled}
-                  onChange={(e) => updateExtraServer(server.id, { enabled: e.target.checked })}
-                />
-                Activo
-              </label>
-              <button className="ds-remove" onClick={() => removeExtraServer(server.id)}>
-                Quitar
-              </button>
+              <label className="ds-label">Servidor GAGA GPS</label>
+              <input
+                placeholder="http://192.168.1.50:3001"
+                value={profileForm.serverUrl}
+                onChange={(e) => setProfileForm({ ...profileForm, serverUrl: e.target.value })}
+              />
+              <label className="ds-label">Token de telemetria</label>
+              <input
+                placeholder="TELEMETRY_SHARED_SECRET del servidor"
+                value={profileForm.token}
+                onChange={(e) => setProfileForm({ ...profileForm, token: e.target.value })}
+              />
+              <label className="ds-label">Identificador del dispositivo</label>
+              <input
+                placeholder="Igual que en Traccar Client"
+                value={profileForm.deviceId}
+                onChange={(e) => setProfileForm({ ...profileForm, deviceId: e.target.value })}
+              />
+              {profileFormError && <div className="ds-error-block">{profileFormError}</div>}
+              <div className="ds-actions">
+                <button onClick={saveProfileModal}>Guardar</button>
+                <button className="ds-remove" onClick={closeProfileModal}>
+                  Cancelar
+                </button>
+              </div>
             </div>
-          ))}
-          <button className="ds-add" onClick={addExtraServer}>
-            + Agregar servidor adicional
-          </button>
-        </section>
-
-        <section className="ds-section">
-          <h3>Modo de correccion</h3>
-          <div className="ds-mode-row">
-            <label className={`ds-mode-option ${correctionMode === 'ntrip' ? 'ds-mode-active' : ''}`}>
-              <input
-                type="radio"
-                name="correctionMode"
-                checked={correctionMode === 'ntrip'}
-                onChange={() => updateCorrectionMode('ntrip')}
-              />
-              NTRIP Client
-            </label>
-            <label className="ds-mode-option ds-mode-disabled" title="Proximamente">
-              <input type="radio" name="correctionMode" disabled />
-              PointPerfect
-            </label>
-            <label className="ds-mode-option ds-mode-disabled" title="Proximamente">
-              <input type="radio" name="correctionMode" disabled />
-              USB Serial
-            </label>
           </div>
-          <p className="ds-hint">PointPerfect y USB Serial estan contempladas pero bloqueadas por ahora.</p>
-        </section>
+        )}
 
         <section className="ds-section">
-          <h3>Receptor RTK (USB)</h3>
+          <h3>Receptor RTK y correccion NTRIP</h3>
+          <p className="ds-hint">
+            Modo de correccion: NTRIP Client (unico disponible - PointPerfect y USB Serial vendran despues).
+          </p>
+
           <div className="ds-actions">
-            <button onClick={refreshUsbDevices}>Buscar dispositivos USB</button>
-            <span className="ds-status">
-              {rtkStatus.usbConnected
-                ? `Conectado - ${rtkStatus.connectedUsbDeviceName ?? 'USB'} - ${formatRate(rtkStatus.usbDataRateBps)} - ${formatTotalBytes(rtkStatus.usbTotalBytes)} total`
-                : 'Sin conectar'}
-            </span>
+            <button onClick={openCreateNtripProfileModal}>+ Nueva configuracion NTRIP</button>
+            {ntripProfileMessage && <span className="ds-saved">{ntripProfileMessage}</span>}
           </div>
-          {usbDevices.map((d) => (
-            <label className="ds-usb-option" key={d.deviceId}>
-              <input
-                type="radio"
-                name="usbDevice"
-                checked={selectedUsbDeviceId === d.deviceId}
-                onChange={() => setSelectedUsbDeviceId(d.deviceId)}
-              />
-              {d.name ?? `USB ${d.deviceId}`}
-            </label>
-          ))}
-          {usbDevices.length === 0 && <p className="ds-hint">Ningun dispositivo USB detectado todavia.</p>}
-          <label className="ds-label">Baud rate</label>
-          <input
-            type="number"
-            value={baudRate}
-            onChange={(e) => setBaudRateInput(Number(e.target.value))}
-          />
-          <div className="ds-actions">
-            <button onClick={connectUsb} disabled={selectedUsbDeviceId == null}>
-              Conectar
-            </button>
-            {rtkStatus.usbConnected && (
-              <button className="ds-remove" onClick={() => RtkNtrip.disconnectUsb()}>
-                Desconectar
-              </button>
-            )}
-          </div>
-        </section>
 
-        <section className="ds-section">
-          <h3>Correccion NTRIP</h3>
-          <div className="ds-row">
-            <input
-              placeholder="NTRIP address"
-              value={ntripConfig.host ?? ''}
-              onChange={(e) => setNtripConfig((prev) => ({ ...prev, host: e.target.value }))}
-            />
-            <input
-              placeholder="NTRIP port"
-              type="number"
-              value={ntripConfig.port ?? 2101}
-              onChange={(e) => setNtripConfig((prev) => ({ ...prev, port: Number(e.target.value) }))}
-            />
-          </div>
-          <div className="ds-row">
-            <input
-              placeholder="Mount point"
-              value={ntripConfig.mountpoint ?? ''}
-              onChange={(e) => setNtripConfig((prev) => ({ ...prev, mountpoint: e.target.value }))}
-            />
-            <button onClick={searchMountpoints} disabled={!ntripConfig.host || mountpointsLoading}>
-              {mountpointsLoading ? 'Buscando...' : 'Buscar puntos de montura'}
-            </button>
-          </div>
-          {mountpointsError && <div className="ds-error-block">{mountpointsError}</div>}
-          {mountpoints.length > 0 && (
-            <select
-              value=""
-              onChange={(e) => {
-                setNtripConfig((prev) => ({ ...prev, mountpoint: e.target.value }));
-              }}
-            >
-              <option value="" disabled>
-                {mountpoints.length} puntos de montura disponibles - elige uno
-              </option>
-              {mountpoints.map((m) => (
-                <option key={m.mountpoint} value={m.mountpoint}>
-                  {m.mountpoint} - {m.identifier || m.format} ({m.country}){m.nmeaRequired ? ' - pide GGA' : ''}
-                </option>
-              ))}
-            </select>
+          {ntripProfiles.length === 0 && (
+            <p className="ds-hint">Sin configuraciones NTRIP guardadas todavia.</p>
           )}
-          <div className="ds-row">
-            <input
-              placeholder="Usuario"
-              value={ntripConfig.username ?? ''}
-              onChange={(e) => setNtripConfig((prev) => ({ ...prev, username: e.target.value }))}
-            />
-            <input
-              placeholder="Contrasena"
-              type="password"
-              value={ntripConfig.password ?? ''}
-              onChange={(e) => setNtripConfig((prev) => ({ ...prev, password: e.target.value }))}
-            />
+          <div className="ds-profile-list">
+            {ntripProfiles.map((p) => {
+              const isActive = p.id === ntripActiveProfileId;
+              return (
+                <div className={`ds-profile-card${isActive ? ' ds-profile-active' : ''}`} key={p.id}>
+                  <button className="ds-profile-select" onClick={() => selectNtripProfile(p.id)}>
+                    <span className="ds-profile-top">
+                      <span className="ds-profile-name">{p.name}</span>
+                      {isActive && <span className="ds-profile-badge">Activa</span>}
+                    </span>
+                    <span className="ds-profile-summary">
+                      {p.host || '(sin servidor)'}:{p.port}
+                    </span>
+                    <span className="ds-profile-summary">Mount point: {p.mountpoint || '(sin elegir)'}</span>
+                  </button>
+                  <div className="ds-profile-actions">
+                    <button onClick={() => openEditNtripProfileModal(p)}>Editar</button>
+                    <button className="ds-remove" onClick={() => removeNtripProfile(p.id)}>
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <label className="ds-label">Version NTRIP</label>
-          <select
-            value={ntripConfig.version ?? 'v2'}
-            onChange={(e) => setNtripConfig((prev) => ({ ...prev, version: e.target.value as NtripConfig['version'] }))}
-          >
-            <option value="v1">V1</option>
-            <option value="v2">V2</option>
-          </select>
+
           <div className="ds-actions">
-            <button onClick={saveNtripConfig}>Guardar</button>
-            <button onClick={toggleNtrip}>{rtkStatus.ntripConnected ? 'Detener NTRIP' : 'Conectar NTRIP'}</button>
-          </div>
-          <div className="ds-actions">
+            <button onClick={toggleNtrip} disabled={!activeNtripProfile}>
+              {rtkStatus.ntripConnected ? 'Detener NTRIP' : 'Conectar NTRIP'}
+            </button>
             <span className="ds-status">
               {rtkStatus.ntripConnected
                 ? `Conectado - ${formatRate(rtkStatus.ntripDataRateBps)} - ${formatTotalBytes(rtkStatus.ntripTotalBytes)} total`
@@ -803,7 +886,142 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
             </span>
           </div>
           {rtkStatus.ntripError && <div className="ds-error-block">{rtkStatus.ntripError}</div>}
+
+          <h4 className="ds-subheading">Receptor RTK (USB)</h4>
+          <div className="ds-actions">
+            <span className="ds-status">
+              {rtkStatus.usbConnected
+                ? `Conectado - ${rtkStatus.connectedUsbDeviceName ?? 'USB'} - ${formatRate(rtkStatus.usbDataRateBps)} - ${formatTotalBytes(rtkStatus.usbTotalBytes)} total`
+                : 'Sin conectar'}
+            </span>
+          </div>
+          {usbDevices.map((d) => {
+            // "seleccionado" no depende solo del clic manual (selectedUsbDeviceId) - el receptor
+            // se auto-conecta solo al enchufarlo, sin que nadie haga clic en la lista, asi que
+            // tambien cuenta como seleccionada la fila que coincide con el dispositivo YA conectado
+            const isSelected =
+              selectedUsbDeviceId === d.deviceId ||
+              (rtkStatus.usbConnected && rtkStatus.connectedUsbDeviceId === d.deviceId);
+            return (
+              <label className="ds-usb-option" key={d.deviceId}>
+                <input
+                  type="radio"
+                  name="usbDevice"
+                  checked={isSelected}
+                  onChange={() => setSelectedUsbDeviceId(d.deviceId)}
+                />
+                {d.name ?? `USB ${d.deviceId}`}
+              </label>
+            );
+          })}
+          {usbDevices.length === 0 && <p className="ds-hint">Ningun dispositivo USB detectado todavia.</p>}
+          <label className="ds-label">Baud rate</label>
+          <input type="number" value={baudRate} onChange={(e) => updateBaudRate(Number(e.target.value))} />
+          <div className="ds-actions">
+            <button onClick={toggleUsbConnection} disabled={!rtkStatus.usbConnected && selectedUsbDeviceId == null}>
+              {rtkStatus.usbConnected ? 'Desconectar' : 'Conectar'}
+            </button>
+          </div>
+          <p className="ds-hint">
+            El receptor se conecta solo al enchufarlo - siempre, sin excepcion, sin pedir
+            confirmacion. Al conectar arranca tambien NTRIP (con la configuracion activa de
+            arriba, si ya tiene mount point) y la ubicacion simulada; al desconectarlo, todo se
+            apaga solo y la tableta vuelve a su GPS normal.
+          </p>
         </section>
+
+        {showNtripProfileModal && ntripProfileForm && (
+          <div className="ds-modal-overlay" onClick={closeNtripProfileModal}>
+            <div className="ds-modal" onClick={(e) => e.stopPropagation()}>
+              <h3>
+                {ntripProfiles.some((p) => p.id === ntripProfileForm.id)
+                  ? 'Editar configuracion NTRIP'
+                  : 'Nueva configuracion NTRIP'}
+              </h3>
+              <label className="ds-label">Nombre</label>
+              <input
+                placeholder="Ej. Caster EarthScope"
+                value={ntripProfileForm.name}
+                onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, name: e.target.value })}
+              />
+              <div className="ds-row">
+                <input
+                  placeholder="NTRIP address"
+                  value={ntripProfileForm.host}
+                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, host: e.target.value })}
+                />
+                <input
+                  placeholder="Puerto"
+                  type="number"
+                  value={ntripProfileForm.port}
+                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, port: Number(e.target.value) })}
+                />
+              </div>
+              <div className="ds-row">
+                <input
+                  placeholder="Mount point"
+                  value={ntripProfileForm.mountpoint}
+                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, mountpoint: e.target.value })}
+                />
+                <button onClick={searchNtripMountpoints} disabled={!ntripProfileForm.host || mountpointsLoading}>
+                  {mountpointsLoading ? 'Buscando...' : 'Buscar puntos de montura'}
+                </button>
+              </div>
+              {mountpointsError && <div className="ds-error-block">{mountpointsError}</div>}
+              {mountpoints.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, mountpoint: e.target.value })}
+                >
+                  <option value="" disabled>
+                    {mountpoints.length} puntos de montura disponibles - elige uno
+                  </option>
+                  {mountpoints.map((m) => (
+                    <option key={m.mountpoint} value={m.mountpoint}>
+                      {m.mountpoint} - {m.identifier || m.format} ({m.country}){m.nmeaRequired ? ' - pide GGA' : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <div className="ds-row">
+                <input
+                  placeholder="Usuario"
+                  value={ntripProfileForm.username}
+                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, username: e.target.value })}
+                />
+                <input
+                  placeholder="Contrasena"
+                  type="password"
+                  value={ntripProfileForm.password}
+                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, password: e.target.value })}
+                />
+              </div>
+              <label className="ds-label">Version NTRIP</label>
+              <select
+                value={ntripProfileForm.version}
+                onChange={(e) =>
+                  setNtripProfileForm({ ...ntripProfileForm, version: e.target.value as NtripProfile['version'] })
+                }
+              >
+                <option value="v1">V1</option>
+                <option value="v2">V2</option>
+              </select>
+              <p className="ds-hint">
+                V2 (default) usa el protocolo NTRIP moderno sobre HTTP/1.1 - funciona con la
+                mayoria de casters actuales, incluido EarthScope. V1 manda el formato minimo
+                original sin esos headers - usalo solo si el proveedor del caster pide
+                compatibilidad antigua.
+              </p>
+              {ntripProfileFormError && <div className="ds-error-block">{ntripProfileFormError}</div>}
+              <div className="ds-actions">
+                <button onClick={saveNtripProfileModal}>Guardar</button>
+                <button className="ds-remove" onClick={closeNtripProfileModal}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <section className="ds-section">
           <h3>Estado del fix GNSS</h3>
@@ -848,6 +1066,27 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
         </section>
 
         <section className="ds-section">
+          <h3>Bloqueo de ajustes</h3>
+          <p className="ds-hint">
+            {hasSettingsPassword()
+              ? 'Los ajustes estan protegidos con contrasena.'
+              : 'Sin contrasena - cualquiera puede abrir y cambiar los ajustes.'}
+          </p>
+          <input
+            type="password"
+            placeholder="Nueva contrasena (vacio = quitar bloqueo)"
+            value={lockPasswordInput}
+            onChange={(e) => setLockPasswordInput(e.target.value)}
+          />
+          <div className="ds-actions">
+            <button onClick={handleSetLockPassword}>
+              {hasSettingsPassword() ? 'Cambiar / quitar contrasena' : 'Bloquear con contrasena'}
+            </button>
+            {lockSavedMessage && <span className="ds-saved">{lockSavedMessage}</span>}
+          </div>
+        </section>
+
+        <section className="ds-section">
           <h3>Servicio GNSS</h3>
           <div className="ds-actions">
             <button onClick={activateGnssService} disabled={gnssBusy}>
@@ -861,22 +1100,18 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
             </button>
           </div>
           <p className="ds-hint">
-            Activa/apaga USB + NTRIP + ubicacion simulada + salida SW Maps juntos, en el orden correcto.
+            Activa/apaga USB + NTRIP + ubicacion simulada + salida SW Maps juntos, en el orden
+            correcto. El receptor ya se conecta y arranca todo esto solo al enchufarlo (ver
+            arriba) - este boton es para forzarlo a mano si hace falta.
           </p>
           <div className="ds-actions">
-            <span className="ds-status">
-              Modo automatico: {rtkStatus.autoModeEnabled ? 'Activado' : 'Desactivado'}
-            </span>
-            {rtkStatus.autoModeEnabled && (
-              <button className="ds-remove" onClick={disableAutoMode}>
-                Desactivar modo automatico
-              </button>
-            )}
+            <button className="ds-remove" onClick={handleRestoreDefaults}>
+              Restaurar valores por defecto
+            </button>
           </div>
           <p className="ds-hint">
-            Con el modo automatico activado: al conectar el USB del receptor se conecta y arranca NTRIP
-            solo (si ya hay un mount point guardado); al desconectarlo, todo se apaga solo y el sistema
-            usa el GPS normal de la tableta hasta que el receptor se vuelva a conectar.
+            Regresa servidor, NTRIP, envio continuo, baud rate y salida SW Maps a los mismos
+            valores de fabrica que se aplican solos al activar Modo Operador la primera vez.
           </p>
         </section>
           </>
