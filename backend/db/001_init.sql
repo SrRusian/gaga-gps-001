@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS geofences (
   project_id INTEGER REFERENCES projects(id),
   name VARCHAR(255) NOT NULL,
   type VARCHAR(20) NOT NULL CHECK (type IN (
-    'warning', 'danger', 'parking', 'forbidden', 'authorized_route', 'allowed', 'discharge', 'maintenance'
+    'warning', 'danger', 'parking', 'forbidden', 'authorized_route', 'allowed', 'discharge', 'maintenance', 'carga'
   )),
   shape_type VARCHAR(20) NOT NULL DEFAULT 'circle'
     CHECK (shape_type IN ('circle', 'polygon', 'polyline')),
@@ -120,8 +120,18 @@ CREATE TABLE IF NOT EXISTS geofences (
   radius_meters DOUBLE PRECISION,
   geometry JSONB,
   corridor_width_meters DOUBLE PRECISION,
+  -- ya no se usa en la logica de alertas (la severidad siempre la decide `type`, nunca la
+  -- distancia) - se deja la columna sin borrar para no perder datos historicos, simplemente ya no
+  -- se lee ni se escribe desde la aplicacion
   corridor_danger_margin_meters DOUBLE PRECISION,
   speed_limit_kmh DOUBLE PRECISION,
+  -- solo aplica a shape_type='polygon' - TRUE (default, zona completa) usa ST_Contains como
+  -- siempre; FALSE (sin relleno) reutiliza corridor_width_meters como unico umbral de deteccion
+  -- de cercania al borde - la severidad la decide `type`, no la distancia
+  filled BOOLEAN NOT NULL DEFAULT TRUE,
+  -- solo aplica a shape_type='polyline' - TRUE (default, "Ruta autorizada" historico) = debe
+  -- quedarse DENTRO del ancho (alerta si se aleja); FALSE = "no tocar" (alerta si se acerca)
+  stay_inside BOOLEAN NOT NULL DEFAULT TRUE,
   active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   geog GEOGRAPHY(GEOMETRY, 4326),
@@ -130,10 +140,14 @@ CREATE TABLE IF NOT EXISTS geofences (
       AND center_lat IS NOT NULL AND center_lon IS NOT NULL AND radius_meters IS NOT NULL
       AND geometry IS NULL AND corridor_width_meters IS NULL)
     OR
-    (shape_type = 'polygon'
+    (shape_type = 'polygon' AND filled = TRUE
       AND geometry IS NOT NULL
       AND center_lat IS NULL AND center_lon IS NULL AND radius_meters IS NULL
       AND corridor_width_meters IS NULL)
+    OR
+    (shape_type = 'polygon' AND filled = FALSE
+      AND geometry IS NOT NULL AND corridor_width_meters IS NOT NULL
+      AND center_lat IS NULL AND center_lon IS NULL AND radius_meters IS NULL)
     OR
     (shape_type = 'polyline'
       AND geometry IS NOT NULL AND corridor_width_meters IS NOT NULL

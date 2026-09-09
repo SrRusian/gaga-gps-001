@@ -23,7 +23,7 @@ export function toGeofence(row: GeofenceRow): Geofence {
       shapeType: 'polyline',
       geometry: row.geometry as LineString,
       corridorWidthMeters: row.corridor_width_meters as number,
-      corridorDangerMarginMeters: row.corridor_danger_margin_meters ?? undefined,
+      stayInside: row.stay_inside,
     };
   }
   return {
@@ -33,5 +33,7 @@ export function toGeofence(row: GeofenceRow): Geofence {
     projectId: row.project_id,
     shapeType: 'polygon',
     geometry: row.geometry as Polygon,
+    filled: row.filled,
+    corridorWidthMeters: row.corridor_width_meters ?? undefined,
   };
 }

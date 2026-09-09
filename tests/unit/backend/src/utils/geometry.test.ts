@@ -13,15 +13,11 @@ function circleGeofence(
 }
 
 function polygonGeofence(geometry: Polygon): PolygonGeofence {
-  return { ...GEOFENCE_BASE, shapeType: 'polygon', geometry };
+  return { ...GEOFENCE_BASE, shapeType: 'polygon', geometry, filled: true };
 }
 
-function polylineGeofence(
-  geometry: LineString,
-  corridorWidthMeters: number,
-  corridorDangerMarginMeters?: number,
-): PolylineGeofence {
-  return { ...GEOFENCE_BASE, shapeType: 'polyline', geometry, corridorWidthMeters, corridorDangerMarginMeters };
+function polylineGeofence(geometry: LineString, corridorWidthMeters: number): PolylineGeofence {
+  return { ...GEOFENCE_BASE, shapeType: 'polyline', geometry, corridorWidthMeters, stayInside: true };
 }
 
 describe('haversineDistance', () => {
@@ -140,46 +136,5 @@ describe('isInsideGeofence', () => {
       50,
     );
     expect(geometry.isInsideGeofence(19.3, -103.55, geofence)).toBe(true);
-  });
-});
-
-describe('getCorridorSeverity', () => {
-  const corridorLine: LineString = {
-    type: 'LineString',
-    coordinates: [
-      [-103.6, 19.3],
-      [-103.5, 19.3],
-    ],
-  };
-  const geofence = {
-    corridorWidthMeters: 50,
-    corridorDangerMarginMeters: 30,
-    geometry: corridorLine,
-  };
-
-  it('null cuando está dentro del ancho del corredor', () => {
-    expect(geometry.getCorridorSeverity(19.3, -103.55, geofence)).toBeNull();
-  });
-
-  it('"warning" entre el ancho del corredor y el margen de peligro', () => {
-    const oneDegLat = 111320;
-    const lat = 19.3 + 65 / oneDegLat;
-    expect(geometry.getCorridorSeverity(lat, -103.55, geofence)).toBe('warning');
-  });
-
-  it('"danger" más allá del margen de peligro', () => {
-    const oneDegLat = 111320;
-    const lat = 19.3 + 200 / oneDegLat;
-    expect(geometry.getCorridorSeverity(lat, -103.55, geofence)).toBe('danger');
-  });
-
-  it('sin corridorDangerMarginMeters configurado, nunca escala a "danger" (binario)', () => {
-    const geofenceSinMargen = {
-      corridorWidthMeters: 50,
-      geometry: geofence.geometry,
-    };
-    const oneDegLat = 111320;
-    const lat = 19.3 + 5000 / oneDegLat; // muy lejos del eje
-    expect(geometry.getCorridorSeverity(lat, -103.55, geofenceSinMargen)).toBe('warning');
   });
 });

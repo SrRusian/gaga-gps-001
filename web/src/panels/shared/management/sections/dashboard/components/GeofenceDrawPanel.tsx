@@ -68,9 +68,50 @@ export function GeofenceDrawPanel({ scope, projects, geofence }: GeofenceDrawPan
             <option value="allowed">Zona permitida (verde)</option>
             <option value="parking">Estacionamiento (azul)</option>
             <option value="discharge">Descarga (café)</option>
+            <option value="carga">Carga (cyan)</option>
             <option value="maintenance">Mantenimiento (morado)</option>
           </select>
         </div>
+
+        {g.geoShape === 'polygon' && (
+          <div className="dash-field-group">
+            <span className="dash-field-group-title">Relleno</span>
+            <select
+              value={g.geofenceForm.filled ? 'filled' : 'unfilled'}
+              onChange={(e) =>
+                g.setGeofenceForm({ ...g.geofenceForm, filled: e.target.value === 'filled' })
+              }
+            >
+              <option value="filled">Con relleno (zona completa)</option>
+              <option value="unfilled">Sin relleno (alerta solo al cruzar el borde)</option>
+            </select>
+            <span className="dash-hint">
+              {g.geofenceForm.filled
+                ? 'La alerta se dispara mientras el vehículo esté dentro de la zona.'
+                : 'La alerta se dispara al acercarse a la línea del borde, sin importar si está adentro o afuera. La acción/severidad la sigue decidiendo el tipo elegido arriba.'}
+            </span>
+          </div>
+        )}
+
+        {g.geoShape === 'polyline' && (
+          <div className="dash-field-group">
+            <span className="dash-field-group-title">Comportamiento</span>
+            <select
+              value={g.geofenceForm.stayInside ? 'stay_inside' : 'keep_away'}
+              onChange={(e) =>
+                g.setGeofenceForm({ ...g.geofenceForm, stayInside: e.target.value === 'stay_inside' })
+              }
+            >
+              <option value="stay_inside">Debe quedarse dentro del ancho</option>
+              <option value="keep_away">No debe tocarla</option>
+            </select>
+            <span className="dash-hint">
+              {g.geofenceForm.stayInside
+                ? 'La alerta se dispara si el vehículo se ALEJA más del ancho indicado (ej. Ruta autorizada).'
+                : 'La alerta se dispara si el vehículo se ACERCA al ancho indicado (ej. una línea que no debe cruzarse).'}
+            </span>
+          </div>
+        )}
 
         {g.geoShape === 'circle' && (
           <div className="dash-field-group">
@@ -88,24 +129,19 @@ export function GeofenceDrawPanel({ scope, projects, geofence }: GeofenceDrawPan
             )}
           </div>
         )}
-        {g.geoShape === 'polyline' && (
+        {(g.geoShape === 'polyline' || (g.geoShape === 'polygon' && !g.geofenceForm.filled)) && (
           <div className="dash-field-group">
-            <span className="dash-field-group-title">Ancho del corredor</span>
+            <span className="dash-field-group-title">Ancho de detección (m)</span>
             <input
-              placeholder="Ancho seguro (m)"
+              placeholder="Ancho (m)"
               type="number"
               value={g.geofenceForm.corridorWidth}
               onChange={(e) => g.setGeofenceForm({ ...g.geofenceForm, corridorWidth: e.target.value })}
             />
-            <input
-              placeholder="Margen advertencia (m)"
-              type="number"
-              value={g.geofenceForm.corridorMargin}
-              onChange={(e) => g.setGeofenceForm({ ...g.geofenceForm, corridorMargin: e.target.value })}
-            />
             <span className="dash-hint">
-              Vista previa en morado sobre el mapa (franja segura + margen) - se actualiza mientras escribes o
-              mueves un vértice.
+              {g.geoShape === 'polyline'
+                ? 'Vista previa en morado sobre el mapa - se actualiza mientras escribes o mueves un vértice.'
+                : 'Qué tan cerca del borde del polígono cuenta como haber cruzado la línea.'}
             </span>
           </div>
         )}

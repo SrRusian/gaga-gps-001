@@ -8,7 +8,8 @@ export type GeofenceType =
   | 'authorized_route'
   | 'allowed'
   | 'discharge'
-  | 'maintenance';
+  | 'maintenance'
+  | 'carga';
 export type GeofenceShapeType = 'circle' | 'polygon' | 'polyline';
 
 interface GeofenceBase {
@@ -27,15 +28,21 @@ export interface CircleGeofence extends GeofenceBase {
 export interface PolygonGeofence extends GeofenceBase {
   shapeType: 'polygon';
   geometry: Polygon;
+  // false = "sin relleno" - alerta por cercania al borde (reusa corridorWidthMeters como umbral
+  // unico de deteccion) en vez de area completa. La severidad la decide siempre el `type`
+  // (GeofenceAlertService.AREA_SEVERITY), no la distancia.
+  filled: boolean;
+  corridorWidthMeters?: number;
 }
 
 export interface PolylineGeofence extends GeofenceBase {
   shapeType: 'polyline';
   geometry: LineString;
   corridorWidthMeters: number;
-  corridorDangerMarginMeters?: number;
+  // true (default, comportamiento historico de "Ruta autorizada") = debe permanecer DENTRO del
+  // ancho; false = "no tocar" - alerta al ACERCARSE al ancho de la linea. En ambos casos la
+  // severidad la decide el `type`, no la distancia.
+  stayInside: boolean;
 }
 
 export type Geofence = CircleGeofence | PolygonGeofence | PolylineGeofence;
-
-export type CorridorSeverity = 'warning' | 'danger' | null;

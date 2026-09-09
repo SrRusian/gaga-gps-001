@@ -27,7 +27,12 @@ export interface GeofenceFormState {
   type: string;
   radius: string;
   corridorWidth: string;
-  corridorMargin: string;
+  // solo aplica a poligono - true (default) = zona completa (ST_Contains), false = alerta al
+  // cruzar el borde (un solo ancho de deteccion, reusa corridorWidth)
+  filled: boolean;
+  // solo aplica a polilinea - true (default, "Ruta autorizada" historico) = debe quedarse DENTRO
+  // del ancho; false = "no tocar" - alerta al acercarse al ancho de la linea
+  stayInside: boolean;
 }
 
 export interface UseGeofencesAdminOptions {
@@ -53,9 +58,12 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
     type: 'warning',
     radius: '',
     corridorWidth: '',
-    corridorMargin: '',
+    filled: true,
+    stayInside: true,
   });
-  const [selectedExportIds, setSelectedExportIds] = useState<Set<number>>(new Set());
+  // seleccion de filas via checkbox - se reutiliza tanto para exportar (GeoJSON/KML) como para
+  // eliminar varias a la vez
+  const [selectedGeofenceIds, setSelectedGeofenceIds] = useState<Set<number>>(new Set());
   const [importFeedback, setImportFeedback] = useState<{ text: string; ok: boolean }>({
     text: '',
     ok: true,
@@ -73,7 +81,7 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
 
   async function loadGeofences() {
     setAllGeofences(await adminApi.get<GeofenceRow[]>('/api/geofences'));
-    setSelectedExportIds(new Set());
+    setSelectedGeofenceIds(new Set());
   }
 
   const scopedGeofences = useMemo(() => {
@@ -131,15 +139,7 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
         | (Feature & { geometry: LineString })
         | undefined;
       const widthMeters = parseFloat(geofenceForm.corridorWidth);
-      const marginMeters = parseFloat(geofenceForm.corridorMargin);
       if (line && widthMeters > 0) {
-        if (marginMeters > 0) {
-          features.push({
-            type: 'Feature',
-            properties: { ring: 'margin' },
-            geometry: lineToBufferPolygon(line.geometry, widthMeters + marginMeters),
-          });
-        }
         features.push({
           type: 'Feature',
           properties: { ring: 'core' },
@@ -156,12 +156,19 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
 
   useEffect(() => {
     updateDraftPreviewRef.current();
-  }, [showGeoPanel, geoShape, geoSelectedCenter, geofenceForm.radius, geofenceForm.corridorWidth, geofenceForm.corridorMargin]);
+  }, [showGeoPanel, geoShape, geoSelectedCenter, geofenceForm.radius, geofenceForm.corridorWidth]);
 
   function resetGeofenceForm() {
     setGeoEditingId(null);
     setGeoTargetProjectId('');
-    setGeofenceForm({ name: '', type: 'warning', radius: '', corridorWidth: '', corridorMargin: '' });
+    setGeofenceForm({
+      name: '',
+      type: 'warning',
+      radius: '',
+      corridorWidth: '',
+      filled: true,
+      stayInside: true,
+    });
     setGeoSelectedCenter(null);
     if (circleMarkerRef.current) {
       circleMarkerRef.current.remove();
@@ -186,8 +193,8 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
       type: g.type,
       radius: g.radius_meters != null ? String(g.radius_meters) : '',
       corridorWidth: g.corridor_width_meters != null ? String(g.corridor_width_meters) : '',
-      corridorMargin:
-        g.corridor_danger_margin_meters != null ? String(g.corridor_danger_margin_meters) : '',
+      filled: g.filled,
+      stayInside: g.stay_inside,
     });
     drawRef.current?.deleteAll();
     if (g.shape_type === 'circle') {
@@ -261,18 +268,28 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
             alert('Complete el nombre');
             return;
           }
+          const filled = geofenceForm.filled;
+          let corridorWidthMeters: number | undefined;
+          if (!filled) {
+            corridorWidthMeters = parseFloat(geofenceForm.corridorWidth);
+            if (!corridorWidthMeters) {
+              alert('Complete el ancho de detección del borde (polígono sin relleno)');
+              return;
+            }
+          }
           await adminApi[method](url, {
             name: geofenceForm.name,
             type: geofenceForm.type,
             shapeType: 'polygon',
             geometry,
+            filled,
+            ...(filled ? {} : { corridorWidthMeters }),
             ...(isEditing ? {} : { projectId: effectiveProjectId }),
           });
         } else {
           const corridorWidthMeters = parseFloat(geofenceForm.corridorWidth);
-          const corridorDangerMarginMeters = parseFloat(geofenceForm.corridorMargin) || null;
           if (!geofenceForm.name || !corridorWidthMeters) {
-            alert('Complete nombre y ancho seguro del corredor');
+            alert('Complete nombre y ancho de la línea');
             return;
           }
           await adminApi[method](url, {
@@ -281,7 +298,7 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
             shapeType: 'polyline',
             geometry,
             corridorWidthMeters,
-            corridorDangerMarginMeters,
+            stayInside: geofenceForm.stayInside,
             ...(isEditing ? {} : { projectId: effectiveProjectId }),
           });
         }
@@ -312,8 +329,41 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
     }
   }
 
-  function toggleExportCheck(id: number, checked: boolean) {
-    setSelectedExportIds((prev) => {
+  // borrado masivo - misma seleccion por casilla que ya se usaba para exportar. No se puede pedir
+  // escribir cada nombre exacto como en el borrado individual (serian N confirmaciones), asi que
+  // se lista lo que se va a eliminar en el propio mensaje y se pide una sola palabra fija
+  async function deleteSelectedGeofences() {
+    const selected = scopedGeofences.filter((g) => selectedGeofenceIds.has(g.id));
+    if (selected.length === 0) {
+      alert('Selecciona al menos una geocerca para eliminar (marca su casilla).');
+      return;
+    }
+    const names = selected.map((g) => g.name).join('\n- ');
+    const typed = prompt(
+      `Esta acción no se puede deshacer. Se dejará de evaluar en tiempo real cada una de estas ` +
+        `${selected.length} geocercas de inmediato:\n\n- ${names}\n\nPara confirmar, escriba ELIMINAR:`,
+    );
+    if (typed === null) return;
+    if (typed !== 'ELIMINAR') {
+      alert('No se escribió ELIMINAR - no se eliminó ninguna geocerca');
+      return;
+    }
+    const failed: string[] = [];
+    for (const g of selected) {
+      try {
+        await adminApi.delete(`/api/geofences/${g.id}`);
+      } catch (err) {
+        failed.push(`${g.name}: ${err instanceof Error ? err.message : 'error desconocido'}`);
+      }
+    }
+    loadGeofences();
+    if (failed.length > 0) {
+      alert(`No se pudieron eliminar ${failed.length} geocerca(s):\n\n${failed.join('\n')}`);
+    }
+  }
+
+  function toggleGeofenceSelected(id: number, checked: boolean) {
+    setSelectedGeofenceIds((prev) => {
       const next = new Set(prev);
       if (checked) next.add(id);
       else next.delete(id);
@@ -322,11 +372,11 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
   }
 
   function exportGeofences(format: 'geojson' | 'kml') {
-    if (selectedExportIds.size === 0) {
+    if (selectedGeofenceIds.size === 0) {
       alert('Selecciona al menos una geocerca para exportar (marca su casilla).');
       return;
     }
-    const ids = [...selectedExportIds].join(',');
+    const ids = [...selectedGeofenceIds].join(',');
     const token = getStoredToken();
     const a = document.createElement('a');
     a.href = `/api/geofences/export.${format}?ids=${ids}&token=${encodeURIComponent(token || '')}`;
@@ -409,8 +459,8 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
     setGeoTargetProjectId,
     geofenceForm,
     setGeofenceForm,
-    selectedExportIds,
-    setSelectedExportIds,
+    selectedGeofenceIds,
+    setSelectedGeofenceIds,
     importFeedback,
     geoImportModal,
     setGeoImportModal,
@@ -425,7 +475,8 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
     editGeofenceRow,
     saveGeofenceRow,
     deleteGeofenceRow,
-    toggleExportCheck,
+    deleteSelectedGeofences,
+    toggleGeofenceSelected,
     exportGeofences,
     openGeoImportModal,
     importGeofences,

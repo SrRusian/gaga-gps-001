@@ -57,8 +57,9 @@ export function buildGeofencesRouter({
         radiusMeters,
         geometry,
         corridorWidthMeters,
-        corridorDangerMarginMeters,
         speedLimitKmh,
+        filled,
+        stayInside,
       } = req.body;
 
       if (!name || !type) {
@@ -76,6 +77,7 @@ export function buildGeofencesRouter({
         radiusMeters,
         geometry,
         corridorWidthMeters,
+        filled,
       });
       if (validationError) {
         return res.status(400).json({ error: validationError });
@@ -91,8 +93,9 @@ export function buildGeofencesRouter({
         radiusMeters,
         geometry,
         corridorWidthMeters,
-        corridorDangerMarginMeters,
         speedLimitKmh,
+        filled,
+        stayInside,
       });
 
       geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(geofence));
@@ -126,8 +129,9 @@ export function buildGeofencesRouter({
         radiusMeters,
         geometry,
         corridorWidthMeters,
-        corridorDangerMarginMeters,
         speedLimitKmh,
+        filled,
+        stayInside,
       } = req.body;
 
       const geofence = await geofenceRepo.update(Number(req.params.id), {
@@ -139,8 +143,9 @@ export function buildGeofencesRouter({
         radiusMeters,
         geometry,
         corridorWidthMeters,
-        corridorDangerMarginMeters,
         speedLimitKmh,
+        filled,
+        stayInside,
       });
       if (!geofence) return res.status(404).json({ error: 'Geocerca no encontrada' });
 
@@ -272,11 +277,12 @@ interface ShapeFields {
   radiusMeters?: number;
   geometry?: Polygon | LineString;
   corridorWidthMeters?: number;
+  filled?: boolean;
 }
 
 function validateShapeFields(
   shapeType: string,
-  { centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters }: ShapeFields,
+  { centerLat, centerLon, radiusMeters, geometry, corridorWidthMeters, filled }: ShapeFields,
 ): string | null {
   if (shapeType === 'circle') {
     if (centerLat === undefined || centerLon === undefined || !radiusMeters) {
@@ -294,6 +300,10 @@ function validateShapeFields(
       poly.coordinates[0].length < 3
     ) {
       return 'Polígono requiere geometry GeoJSON tipo Polygon con al menos 3 puntos';
+    }
+    // "sin relleno" reusa el mismo mecanismo de corredor que polyline - misma exigencia de ancho
+    if (filled === false && !corridorWidthMeters) {
+      return 'Polígono sin relleno requiere corridorWidthMeters';
     }
     return null;
   }

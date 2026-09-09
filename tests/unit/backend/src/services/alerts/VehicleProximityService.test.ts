@@ -20,6 +20,7 @@ const corridor = {
   type: 'warning' as const,
   shapeType: 'polyline' as const,
   corridorWidthMeters: 20,
+  stayInside: true,
   geometry: {
     type: 'LineString' as const,
     coordinates: [

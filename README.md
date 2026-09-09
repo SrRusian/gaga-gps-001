@@ -329,7 +329,7 @@ la primera vez que se crea el volumen de PostgreSQL.
 | `projects`                | Sitios de operación aislados entre sí                                                               |
 | `devices`                 | Dispositivos/tabletas - `unique_id` es el identificador configurado en Traccar Client                |
 | `positions`                | Hypertable de TimescaleDB - una fila por posición GPS, particionada por `fix_time`                   |
-| `geofences`                | Geocercas - polígono o polilínea/corredor (círculo solo heredado); paleta fija de 8 tipos semánticos |
+| `geofences`                | Geocercas - polígono o polilínea/corredor (círculo solo heredado); paleta fija de 9 tipos semánticos |
 | `geofence_events`          | Auditoría de entradas/salidas de geocercas                                                          |
 | `static_equipment`         | Equipo estático con radio de giro/seguridad - `linked_device_id` vincula opcionalmente una tableta   |
 | `users`                    | Cuentas de todos los roles                                                                          |
@@ -352,16 +352,25 @@ Earth vía KML), evaluadas en tiempo real contra la posición de cada
 vehículo:
 
 - **Polígono** - área de forma arbitraria, dibujada en el mapa del
-  panel Admin.
-- **Línea/corredor** - ruta con un ancho real definido a cada lado,
-  con severidad progresiva (dentro del corredor → sin alerta, cerca
-  del borde → advertencia, fuera del margen → peligro).
+  panel Admin. Puede ser **con relleno** (zona completa - la alerta
+  se dispara mientras el vehículo está dentro) o **sin relleno**
+  (la alerta se dispara solo al acercarse a la línea del borde, sin
+  importar si está adentro o afuera).
+- **Línea/corredor** - trazo con un ancho real definido, con dos
+  comportamientos posibles: **debe quedarse dentro** del ancho (ej.
+  Ruta autorizada - alerta si el vehículo se aleja) o **no debe
+  tocarla** (alerta si el vehículo se acerca).
+
+En los cuatro casos, **la acción/severidad de la alerta la decide
+siempre el tipo de geocerca** (tabla de abajo) - la forma y el modo
+solo deciden en qué momento se dispara esa alerta, nunca escalan la
+severidad por distancia.
 
 (El círculo - centro + radio - sigue existiendo a nivel de datos para
 geocercas creadas antes de este cambio, pero ya no se ofrece como
 opción al crear una nueva.)
 
-**Paleta fija de 8 tipos semánticos**, cada uno con su color y
+**Paleta fija de 9 tipos semánticos**, cada uno con su color y
 comportamiento de alerta propios (el color se deriva siempre del
 tipo, no es libre):
 
@@ -370,11 +379,17 @@ tipo, no es libre):
 | `forbidden` - Zona prohibida | negro | crítica, mensaje propio |
 | `danger` - Peligro | rojo | crítica |
 | `warning` - Advertencia | amarillo | advertencia |
-| `authorized_route` - Ruta autorizada | naranja | corredor por distancia (mecanismo de arriba) |
+| `authorized_route` - Ruta autorizada | naranja | advertencia, mensaje propio |
 | `allowed` - Zona permitida | verde | ninguna, solo visual |
 | `parking` - Estacionamiento | azul | informativa, sin sirena |
 | `discharge` - Descarga | café | ninguna, solo visual |
+| `carga` - Carga | cyan | ninguna, solo visual |
 | `maintenance` - Mantenimiento | morado | advertencia, mensaje propio |
+
+Al importar un KML/GeoJSON de Google Earth, el tipo se detecta por el color más
+cercano (distancia RGB) al de esta tabla - no hace falta que el color exportado
+coincida exactamente, cualquier tono de la rueda de color de Google Earth cae en
+el tipo más parecido.
 
 Cada entrada/salida queda registrada en `geofence_events` para
 auditoría. Se crean/editan desde un panel flotante sobre el mapa

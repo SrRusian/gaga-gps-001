@@ -15,8 +15,9 @@ export interface GeofenceRow {
   radius_meters: number | null;
   geometry: Polygon | LineString | null;
   corridor_width_meters: number | null;
-  corridor_danger_margin_meters: number | null;
   speed_limit_kmh: number | null;
+  filled: boolean;
+  stay_inside: boolean;
 }
 
 function geofenceRowToFeature(row: GeofenceRow): Feature {
@@ -60,6 +61,7 @@ const GEOFENCE_COLORS: Record<GeofenceType, string> = {
   parking: '#2979ff',
   discharge: '#a1662f',
   maintenance: '#8e24aa',
+  carga: '#00acc1',
 };
 
 // #rrggbb (css) -> aabbggrr (kml)
@@ -93,14 +95,22 @@ function geofenceRowToKmlPlacemark(row: GeofenceRow): string {
     const coords = (row.geometry as LineString).coordinates.map(coordToKml).join(' ');
     geometryXml = `<LineString><coordinates>${coords}</coordinates></LineString>`;
   } else {
+    if (!row.filled) {
+      extendedData.push(
+        `<Data name="corridorWidthMeters"><value>${row.corridor_width_meters}</value></Data>`,
+      );
+    }
     const coords = (row.geometry as Polygon).coordinates[0].map(coordToKml).join(' ');
     geometryXml = `<Polygon><outerBoundaryIs><LinearRing><coordinates>${coords}</coordinates></LinearRing></outerBoundaryIs></Polygon>`;
   }
 
   const hex = GEOFENCE_COLORS[row.type] ?? GEOFENCE_COLORS.warning;
+  // <fill> solo importa para Polygon (togeojson lo expone como fill-opacity al reimportar) -
+  // circle/polyline lo escriben siempre en 1 sin que nadie lo lea de vuelta
+  const fillFlag = row.shape_type === 'polygon' && !row.filled ? 0 : 1;
   const styleXml =
     `<Style><LineStyle><color>${cssHexToKmlColor(hex)}</color><width>2</width></LineStyle>` +
-    `<PolyStyle><color>${cssHexToKmlColor(hex, '4d')}</color></PolyStyle></Style>`;
+    `<PolyStyle><color>${cssHexToKmlColor(hex, '4d')}</color><fill>${fillFlag}</fill></PolyStyle></Style>`;
 
   return `  <Placemark>
     <name>${escapeXml(row.name)}</name>
@@ -130,7 +140,12 @@ export interface GeofenceInput {
   radiusMeters?: number;
   geometry?: Polygon | LineString;
   corridorWidthMeters?: number;
+  filled?: boolean;
 }
+
+// Google Earth no tiene concepto de "ancho de corredor" - un poligono sin relleno (<fill>0</fill>)
+// importado sin ese dato propio entra con este default, editable despues a mano desde el panel
+const DEFAULT_UNFILLED_POLYGON_CORRIDOR_WIDTH_METERS = 10;
 
 interface FeatureConversionResult {
   input?: GeofenceInput;
@@ -153,15 +168,35 @@ function force2DLineString(geom: LineString): LineString {
 
 const VALID_GEOFENCE_TYPES = new Set(Object.keys(GEOFENCE_COLORS));
 
+function hexToRgb(hex: string): [number, number, number] {
+  return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+}
+
+const GEOFENCE_COLOR_RGB = (Object.entries(GEOFENCE_COLORS) as [GeofenceType, string][]).map(
+  ([type, hex]) => [type, hexToRgb(hex)] as const,
+);
+
 // KML nativo de Google Earth no trae nuestro "type" - togeojson si extrae bien el color real de
-// <LineStyle>/<PolyStyle> en props.stroke/fill (hex), asi que se hace match exacto contra la paleta
+// <LineStyle>/<PolyStyle> en props.stroke/fill (hex), pero el usuario elige ese color con la
+// paleta propia de Google Earth, casi nunca nuestro hex exacto - match exacto dejaba prácticamente
+// todo en "warning" (default). Se busca el tipo con el color más cercano (distancia euclidiana en
+// RGB) en vez de exigir coincidencia exacta - con 8 colores bien distintos entre sí, la distancia
+// simple en RGB es suficiente para acertar sin falsos positivos.
 function typeFromStyleColor(props: Record<string, unknown>): GeofenceType | null {
   const raw = props.stroke ?? props.fill;
   if (typeof raw !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(raw)) return null;
-  const hit = (Object.entries(GEOFENCE_COLORS) as [GeofenceType, string][]).find(
-    ([, hex]) => hex.toLowerCase() === raw.toLowerCase(),
-  );
-  return hit ? hit[0] : null;
+  const [r, g, b] = hexToRgb(raw);
+
+  let closest: GeofenceType | null = null;
+  let closestDistance = Infinity;
+  for (const [type, [tr, tg, tb]] of GEOFENCE_COLOR_RGB) {
+    const distance = (r - tr) ** 2 + (g - tg) ** 2 + (b - tb) ** 2;
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closest = type;
+    }
+  }
+  return closest;
 }
 
 // el editor de poligonos a mano de Google Earth nombra cada forma con su medida ("0.000"), no con
@@ -202,9 +237,22 @@ function featureToGeofenceInput(
   }
 
   if (geometry.type === 'Polygon') {
-    return {
-      input: { name, type, shapeType: 'polygon', geometry: force2DPolygon(geometry as Polygon) },
+    // togeojson expone <fill> de PolyStyle como 'fill-opacity' (0 o 1) - Google Earth marca "sin
+    // relleno" asi, y el usuario ya dibuja sus zonas de esa forma (confirmado con un KML real)
+    const filled = props['fill-opacity'] === undefined ? true : props['fill-opacity'] !== 0;
+    const polygonInput: GeofenceInput = {
+      name,
+      type,
+      shapeType: 'polygon',
+      geometry: force2DPolygon(geometry as Polygon),
+      filled,
     };
+    if (!filled) {
+      const corridorFromFile = Number(props.corridorWidthMeters);
+      polygonInput.corridorWidthMeters =
+        corridorFromFile > 0 ? corridorFromFile : DEFAULT_UNFILLED_POLYGON_CORRIDOR_WIDTH_METERS;
+    }
+    return { input: polygonInput };
   }
 
   if (geometry.type === 'LineString') {

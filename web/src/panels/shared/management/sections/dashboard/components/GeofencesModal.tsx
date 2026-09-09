@@ -40,6 +40,13 @@ export function GeofencesModal({
           <button className="btn btn-sm" onClick={admin.openGeoImportModal}>
             Importar (GeoJSON/KML)
           </button>
+          <button
+            className="btn btn-sm btn-danger"
+            disabled={admin.selectedGeofenceIds.size === 0}
+            onClick={admin.deleteSelectedGeofences}
+          >
+            Eliminar seleccionadas{admin.selectedGeofenceIds.size > 0 ? ` (${admin.selectedGeofenceIds.size})` : ''}
+          </button>
         </div>
         {admin.scopedGeofences.length === 0 ? (
           <div className="org-empty">Sin geocercas todavía.</div>
@@ -52,7 +59,7 @@ export function GeofencesModal({
                     type="checkbox"
                     title="Seleccionar todas"
                     onChange={(e) =>
-                      admin.setSelectedExportIds(
+                      admin.setSelectedGeofenceIds(
                         e.target.checked ? new Set(admin.scopedGeofences.map((g) => g.id)) : new Set(),
                       )
                     }
@@ -70,8 +77,8 @@ export function GeofencesModal({
                   <td>
                     <input
                       type="checkbox"
-                      checked={admin.selectedExportIds.has(g.id)}
-                      onChange={(e) => admin.toggleExportCheck(g.id, e.target.checked)}
+                      checked={admin.selectedGeofenceIds.has(g.id)}
+                      onChange={(e) => admin.toggleGeofenceSelected(g.id, e.target.checked)}
                     />
                   </td>
                   <td>{g.name}</td>

@@ -40,7 +40,8 @@ export interface GeofenceRow {
     | 'authorized_route'
     | 'allowed'
     | 'discharge'
-    | 'maintenance';
+    | 'maintenance'
+    | 'carga';
   shape_type: GeofenceShapeType;
   active: boolean;
   project_id: number | null;
@@ -49,7 +50,8 @@ export interface GeofenceRow {
   radius_meters: number | null;
   geometry: Polygon | LineString | null;
   corridor_width_meters: number | null;
-  corridor_danger_margin_meters: number | null;
+  filled: boolean;
+  stay_inside: boolean;
 }
 
 export interface EquipmentRow {

@@ -1,4 +1,4 @@
-import type { CorridorSeverity, Geofence, PolygonGeofence } from '@gaga-gps/shared-types';
+import type { Geofence, PolygonGeofence } from '@gaga-gps/shared-types';
 import type { LineString, Polygon } from 'geojson';
 
 const EARTH_RADIUS_METERS = 6371000;
@@ -100,24 +100,4 @@ export function isInsideGeofence(lat: number, lon: number, geofence: Geofence): 
         geofence.radiusMeters
       );
   }
-}
-
-export function getCorridorSeverity(
-  lat: number,
-  lon: number,
-  geofence: {
-    geometry: LineString;
-    corridorWidthMeters: number;
-    corridorDangerMarginMeters?: number;
-  },
-): CorridorSeverity {
-  const distance = distancePointToLineMeters(lat, lon, geofence.geometry);
-
-  if (distance <= geofence.corridorWidthMeters) return null;
-
-  const dangerMargin = geofence.corridorDangerMarginMeters;
-  if (dangerMargin && distance > geofence.corridorWidthMeters + dangerMargin) {
-    return 'danger';
-  }
-  return 'warning';
 }

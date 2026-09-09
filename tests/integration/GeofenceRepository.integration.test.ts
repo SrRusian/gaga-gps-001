@@ -104,11 +104,11 @@ describe('GeofenceRepository - PostGIS real', () => {
     expect(outside.map((g) => g.id)).not.toContain(polygon.id);
   });
 
-  it('corredor: siempre vuelve (la severidad la calcula quien llama) con distance_meters correcto', async () => {
-    const corridor = await repo.create({
-      name: 'Corredor de prueba',
+  it('línea "debe quedarse dentro" (stayInside=true, default): matchea lejos del eje, no cerca', async () => {
+    const route = await repo.create({
+      name: 'Ruta de prueba',
       projectId: testProjectId,
-      type: 'warning',
+      type: 'authorized_route',
       shapeType: 'polyline',
       geometry: {
         type: 'LineString',
@@ -119,25 +119,99 @@ describe('GeofenceRepository - PostGIS real', () => {
       },
       corridorWidthMeters: 20,
     });
-    createdGeofenceIds.push(corridor.id);
+    createdGeofenceIds.push(route.id);
 
     const onAxis = await repo.findMatchingSpatial({
       projectId: testProjectId,
       latitude: 19.35,
       longitude: -103.55,
     });
-    const onAxisRow = onAxis.find((g) => g.id === corridor.id);
-    expect(onAxisRow).toBeDefined();
-    expect(onAxisRow!.distance_meters).toBeLessThan(5);
+    expect(onAxis.map((g) => g.id)).not.toContain(route.id);
 
     const farFromAxis = await repo.findMatchingSpatial({
       projectId: testProjectId,
       latitude: 19.36,
       longitude: -103.55,
     });
-    const farRow = farFromAxis.find((g) => g.id === corridor.id);
-    expect(farRow).toBeDefined();
-    expect(farRow!.distance_meters).toBeGreaterThan(1000);
+    expect(farFromAxis.map((g) => g.id)).toContain(route.id);
+  });
+
+  it('línea "no tocar" (stayInside=false): matchea cerca del eje, no lejos', async () => {
+    const keepAway = await repo.create({
+      name: 'Línea a no tocar',
+      projectId: testProjectId,
+      type: 'danger',
+      shapeType: 'polyline',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [-103.6, 19.34],
+          [-103.5, 19.34],
+        ],
+      },
+      corridorWidthMeters: 20,
+      stayInside: false,
+    });
+    createdGeofenceIds.push(keepAway.id);
+
+    const onAxis = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 19.34,
+      longitude: -103.55,
+    });
+    expect(onAxis.map((g) => g.id)).toContain(keepAway.id);
+
+    const farFromAxis = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 19.35,
+      longitude: -103.55,
+    });
+    expect(farFromAxis.map((g) => g.id)).not.toContain(keepAway.id);
+  });
+
+  it('polígono sin relleno (filled=false): matchea cerca del borde, no en el centro ni muy lejos', async () => {
+    const unfilled = await repo.create({
+      name: 'Polígono sin relleno de prueba',
+      projectId: testProjectId,
+      type: 'forbidden',
+      shapeType: 'polygon',
+      filled: false,
+      corridorWidthMeters: 15,
+      geometry: {
+        type: 'Polygon',
+        coordinates: [
+          [
+            [-103.581, 19.329],
+            [-103.579, 19.329],
+            [-103.579, 19.331],
+            [-103.581, 19.331],
+            [-103.581, 19.329],
+          ],
+        ],
+      },
+    });
+    createdGeofenceIds.push(unfilled.id);
+
+    const nearBorder = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 19.329,
+      longitude: -103.58,
+    });
+    expect(nearBorder.map((g) => g.id)).toContain(unfilled.id);
+
+    const centerOfPolygon = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 19.33,
+      longitude: -103.58,
+    });
+    expect(centerOfPolygon.map((g) => g.id)).not.toContain(unfilled.id);
+
+    const farOutside = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 19.4,
+      longitude: -103.6,
+    });
+    expect(farOutside.map((g) => g.id)).not.toContain(unfilled.id);
   });
 
   it('aislamiento por proyecto: una geocerca de otro proyecto nunca matchea', async () => {

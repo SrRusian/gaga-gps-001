@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import GeofenceAlertService, { type GeofenceMatchRow } from '../../../../../../backend/src/services/alerts/GeofenceAlertService';
 
+// La severidad SIEMPRE la decide `type` (AREA_SEVERITY/AREA_ALERT_TEXT) - shape_type/filled/
+// stay_inside/corridor_width_meters ya no viajan hasta aca, esos deciden SI una fila aparece en
+// `matches` (responsabilidad de GeofenceRepository.findMatchingSpatial, cubierto en su propio
+// integration test contra Postgres real) - aqui solo importa el `type` de lo que ya matcheo.
 const dangerCircleRow = {
   id: 1,
   name: 'Zona Roja',
   type: 'danger' as const,
   shape_type: 'circle' as const,
-  corridor_width_meters: null,
-  corridor_danger_margin_meters: null,
   speed_limit_kmh: null,
   distance_meters: 10,
 };
@@ -17,8 +19,6 @@ const warningCircleRow = {
   name: 'Zona Amarilla',
   type: 'warning' as const,
   shape_type: 'circle' as const,
-  corridor_width_meters: null,
-  corridor_danger_margin_meters: null,
   speed_limit_kmh: null,
   distance_meters: 10,
 };
@@ -28,8 +28,6 @@ const parkingCircleRow = {
   name: 'Estacionamiento Norte',
   type: 'parking' as const,
   shape_type: 'circle' as const,
-  corridor_width_meters: null,
-  corridor_danger_margin_meters: null,
   speed_limit_kmh: null,
   distance_meters: 10,
 };
@@ -39,8 +37,6 @@ const forbiddenPolygonRow = {
   name: 'Polvorín',
   type: 'forbidden' as const,
   shape_type: 'polygon' as const,
-  corridor_width_meters: null,
-  corridor_danger_margin_meters: null,
   speed_limit_kmh: null,
   distance_meters: 10,
 };
@@ -50,8 +46,6 @@ const maintenancePolygonRow = {
   name: 'Reparación de talud',
   type: 'maintenance' as const,
   shape_type: 'polygon' as const,
-  corridor_width_meters: null,
-  corridor_danger_margin_meters: null,
   speed_limit_kmh: null,
   distance_meters: 10,
 };
@@ -61,8 +55,6 @@ const allowedPolygonRow = {
   name: 'Patio de maniobras',
   type: 'allowed' as const,
   shape_type: 'polygon' as const,
-  corridor_width_meters: null,
-  corridor_danger_margin_meters: null,
   speed_limit_kmh: null,
   distance_meters: 10,
 };
@@ -72,24 +64,21 @@ const dischargePolygonRow = {
   name: 'Tolva',
   type: 'discharge' as const,
   shape_type: 'polygon' as const,
-  corridor_width_meters: null,
-  corridor_danger_margin_meters: null,
   speed_limit_kmh: null,
   distance_meters: 10,
 };
 
-function corridorRow(distanceMeters: number, corridorDangerMarginMeters: number | null = null) {
-  return {
-    id: 4,
-    name: 'Ruta autorizada',
-    type: 'warning' as const,
-    shape_type: 'polyline' as const,
-    corridor_width_meters: 20,
-    corridor_danger_margin_meters: corridorDangerMarginMeters,
-    speed_limit_kmh: null,
-    distance_meters: distanceMeters,
-  };
-}
+// mismo type que antes usaba escalada por distancia (corridorSeverityFromDistance) - ahora tiene
+// severidad fija 'warning' y mensaje propio, sin importar la forma (polyline, o polygon sin
+// relleno) ni la distancia real - eso ya lo filtro el WHERE de findMatchingSpatial
+const authorizedRouteRow = {
+  id: 4,
+  name: 'Ruta autorizada',
+  type: 'authorized_route' as const,
+  shape_type: 'polyline' as const,
+  speed_limit_kmh: null,
+  distance_meters: 10,
+};
 
 function pos(deviceId = 'V1', projectId: number | null = 7) {
   return { deviceId, latitude: 19.35, longitude: -103.56, projectId };
@@ -244,20 +233,23 @@ describe('GeofenceAlertService', () => {
     );
   });
 
-  it('polilínea: severidad progresiva por distancia, no el binario dentro/fuera', async () => {
-    findMatchingSpatial.mockResolvedValue([corridorRow(5)]);
+  it('"authorized_route" tiene severidad y mensaje propios, fijos (sin escalada por distancia)', async () => {
+    findMatchingSpatial.mockResolvedValue([authorizedRouteRow]);
     await service.evaluate(pos());
-    expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
 
-    findMatchingSpatial.mockResolvedValue([corridorRow(500)]);
-    await service.evaluate(pos());
-    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(7, 'alert:warning', expect.anything());
-  });
-
-  it('polilínea: escala a danger al superar el margen configurado', async () => {
-    findMatchingSpatial.mockResolvedValue([corridorRow(500, 100)]);
-    await service.evaluate(pos());
-    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(7, 'alert:critical', expect.anything());
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+      7,
+      'alert:warning',
+      expect.objectContaining({
+        type: 'geofence_route',
+        message: expect.stringContaining('FUERA DE RUTA AUTORIZADA'),
+      }),
+    );
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalledWith(
+      7,
+      'alert:critical',
+      expect.anything(),
+    );
   });
 
   it('_persistEvent es fire-and-forget vía geofenceEventRepo si se provee', async () => {
