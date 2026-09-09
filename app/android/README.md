@@ -2,6 +2,8 @@
 
 Este APK sirve para **cualquier rol** (Admin, Encargado de Proyecto, Supervisor, Operador) - es el mismo `web` de siempre empacado con Capacitor, con un solo login que decide la vista según el rol, igual que en el navegador. Un dispositivo recién instalado queda en **modo básico**: solo login, sin pedir ningún permiso extra. Las 3 piezas de abajo (Traccar/GNSS Master) solo son relevantes para Operador, y quedan ocultas hasta que alguien del equipo activa el **"Modo Operador"** desde Ajustes con un código interno de 4 dígitos (ver `DeviceSettingsPanel.tsx`, constante `OPERATOR_MODE_CODE`) - una vez activado no se puede desactivar sin reinstalar la app. Esto evita que cualquiera que instale el APK active el envío de datos por accidente o a propósito.
 
+**El login funciona sin configurar nada** - el APK, sin importar el rol, apunta automáticamente a `https://app.gaga-maquinaria.com` (`PRODUCTION_SERVER_URL` en `web/packages/client/src/deviceConfig.ts`) mientras nadie haya guardado un servidor distinto en Ajustes. Esto es a propósito: un Admin/Encargado/Supervisor debe poder instalar el APK e iniciar sesión de inmediato, sin nunca tener que abrir Ajustes a configurar a dónde apuntar - eso solo tiene sentido para Operador (que sí necesita elegir servidor/token/id de telemetría). Este fallback solo aplica dentro de la app nativa (`Capacitor.isNativePlatform()`); en el navegador normal siempre es mismo origen, sin cambios.
+
 En modo operador, el APK unifica en un solo lugar las 3 apps que hoy usa la tableta:
 
 1. **Operador GAGA** (mapa, alertas, turnos, incidentes) - el mismo código web que ya corre en el navegador, sin fork. Vive en `web`, esta app solo lo empaqueta con Capacitor.

@@ -82,6 +82,10 @@ export type CorrectionMode = 'ntrip' | 'pointperfect' | 'usb_serial';
 export interface RtkStatus {
   usbConnected: boolean;
   connectedUsbDeviceName: string | null;
+  // id del dispositivo USB conectado (mismo campo que UsbDeviceInfo.deviceId) - para saber cual
+  // fila de la lista es "la conectada" sin depender de un name que puede repetirse entre 2
+  // receptores identicos
+  connectedUsbDeviceId: number | null;
   usbDataRateBps: number;
   usbTotalBytes: number;
   ntripConnected: boolean;
@@ -92,9 +96,6 @@ export interface RtkStatus {
   swMapsOutputRunning: boolean;
   swMapsPort: number;
   correctionMode: CorrectionMode;
-  // activado por el codigo de configuracion rapida - mientras este en true, conectar el USB
-  // dispara solo NTRIP+ubicacion simulada, y desconectarlo los apaga solo, sin intervencion manual
-  autoModeEnabled: boolean;
   lastFix?: RtkFix;
 }
 
@@ -124,8 +125,6 @@ export interface RtkNtripPlugin {
   setCorrectionMode(options: { mode: CorrectionMode }): Promise<void>;
   startNtrip(): Promise<void>;
   stopNtrip(): Promise<void>;
-  getAutoMode(): Promise<{ enabled: boolean }>;
-  setAutoMode(options: { enabled: boolean }): Promise<void>;
   startMockLocation(): Promise<void>;
   stopMockLocation(): Promise<void>;
   startSwMapsOutput(options?: { port?: number }): Promise<void>;
@@ -179,8 +178,6 @@ const webRtkFallback: RtkNtripPlugin = {
   setCorrectionMode: async () => unavailable('RtkNtrip'),
   startNtrip: async () => unavailable('RtkNtrip'),
   stopNtrip: async () => unavailable('RtkNtrip'),
-  getAutoMode: async () => ({ enabled: false }),
-  setAutoMode: async () => unavailable('RtkNtrip'),
   startMockLocation: async () => unavailable('RtkNtrip'),
   stopMockLocation: async () => unavailable('RtkNtrip'),
   startSwMapsOutput: async () => unavailable('RtkNtrip'),
@@ -188,6 +185,7 @@ const webRtkFallback: RtkNtripPlugin = {
   getStatus: async () => ({
     usbConnected: false,
     connectedUsbDeviceName: null,
+    connectedUsbDeviceId: null,
     usbDataRateBps: 0,
     usbTotalBytes: 0,
     ntripConnected: false,
@@ -198,7 +196,6 @@ const webRtkFallback: RtkNtripPlugin = {
     swMapsOutputRunning: false,
     swMapsPort: 11123,
     correctionMode: 'ntrip',
-    autoModeEnabled: false,
   }),
   addListener: (async () => ({ remove: async () => {} })) as RtkNtripPlugin['addListener'],
 };

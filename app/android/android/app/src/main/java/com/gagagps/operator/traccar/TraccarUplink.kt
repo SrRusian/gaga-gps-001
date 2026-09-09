@@ -110,6 +110,13 @@ object TraccarUplink {
 
     private fun drainLoop(context: Context) {
         val db = store(context)
+        // se reenvia contra el/los servidor(es) configurados AHORA - no contra item.serverUrl (el
+        // que estaba activo cuando ese punto se encolo). Bug real reportado: cambiar de servidor
+        // (ej. probar una URL de prueba y volver a la real) dejaba el buffer viejo atorado para
+        // siempre, reintentando contra la URL vieja que ya nadie usa, aunque el envio en vivo
+        // funcionara perfecto contra la URL nueva - la cuenta de "en buffer" nunca bajaba.
+        val servers = TraccarPrefs.getServers(context).filter { it.enabled }
+        if (servers.isEmpty()) return
         while (true) {
             val batch = db.peekOldest(DRAIN_BATCH_SIZE)
             if (batch.isEmpty()) return
@@ -117,14 +124,19 @@ object TraccarUplink {
             val futures = batch.map { item ->
                 drainWorkers.submit(
                     Callable {
-                        try {
-                            sendOsmAnd(item.serverUrl, item.deviceId, item.password, item.location)
-                            db.delete(item.rowId)
-                            addLog(TraccarLogEntry(System.currentTimeMillis(), item.serverUrl, true, "OK (buffer)"))
-                            true
-                        } catch (e: Exception) {
-                            false
+                        val ok = servers.all { server ->
+                            try {
+                                sendOsmAnd(server.url, item.deviceId, item.password, item.location)
+                                true
+                            } catch (e: Exception) {
+                                false
+                            }
                         }
+                        if (ok) {
+                            db.delete(item.rowId)
+                            addLog(TraccarLogEntry(System.currentTimeMillis(), servers.first().url, true, "OK (buffer)"))
+                        }
+                        ok
                     },
                 )
             }

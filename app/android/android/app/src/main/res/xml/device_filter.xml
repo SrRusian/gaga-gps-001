@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Vendor id de los chips serial que este proyecto ya soporta (ver comentario en UsbSerialManager.kt -
+FTDI/CP210x/CH340/PL2303 via usb-serial-for-android, mas u-blox como fabricante de receptor real
+usado en campo). Declarar esto aqui + el intent-filter de USB_DEVICE_ATTACHED en AndroidManifest.xml
+en MainActivity es el mecanismo oficial de Android para que el sistema otorgue el permiso de acceso
+USB solo, sin pasar por UsbManager.requestPermission() (que es el dialogo "Solicitud de conexion
+USB" que aparecia en cada conexion) - ver developer.android.com/develop/connectivity/usb/host.
+Los valores son DECIMALES (no hex) - es el formato que exige este XML.
+-->
+<resources>
+    <!-- u-blox (receptor RTK real usado en este proyecto) - 0x1546 -->
+    <usb-device vendor-id="5446" />
+    <!-- FTDI - 0x0403 -->
+    <usb-device vendor-id="1027" />
+    <!-- Silicon Labs CP210x - 0x10C4 -->
+    <usb-device vendor-id="4292" />
+    <!-- WCH CH340/CH341 - 0x1A86 -->
+    <usb-device vendor-id="6790" />
+    <!-- Prolific PL2303 - 0x067B -->
+    <usb-device vendor-id="1659" />
+</resources>
