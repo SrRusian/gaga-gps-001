@@ -1,5 +1,5 @@
 import { getStoredToken } from '@gaga-gps/client';
-import { circleToPolygon, lineToBufferPolygon } from '@gaga-gps/map-core';
+import { circleToPolygon, flyToBounds, flyToPoint, lineToBufferPolygon } from '@gaga-gps/map-core';
 import type MapboxDraw from '@mapbox/mapbox-gl-draw';
 import type { Feature, FeatureCollection, LineString } from 'geojson';
 import maplibregl from 'maplibre-gl';
@@ -203,7 +203,7 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
       circleMarkerRef.current = new maplibregl.Marker()
         .setLngLat([g.center_lon as number, g.center_lat as number])
         .addTo(map);
-      map.flyTo({ center: [g.center_lon as number, g.center_lat as number], zoom: 15 });
+      flyToPoint(map, g.center_lat as number, g.center_lon as number, { zoom: 15 });
     } else if (g.geometry) {
       const addedIds = drawRef.current?.add({ type: 'Feature', properties: {}, geometry: g.geometry });
       const featureId = addedIds?.[0];
@@ -217,7 +217,7 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
           (b, c) => b.extend(c as [number, number]),
           new maplibregl.LngLatBounds(coords[0] as [number, number], coords[0] as [number, number]),
         );
-        map.fitBounds(bounds, { padding: 80, maxZoom: 17 });
+        flyToBounds(map, bounds, { padding: 80, maxZoom: 17 });
       }
     }
   }

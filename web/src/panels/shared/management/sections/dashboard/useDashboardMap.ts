@@ -1,5 +1,6 @@
 import {
   createVehicleMarkerElement,
+  flyToPoint,
   setVehicleMarkerAccuracy,
   setVehicleMarkerSelected,
   setVehicleMarkerStale,
@@ -136,7 +137,7 @@ export function useDashboardMap({ scope, scopedDevices, historyMode, hasMaps }: 
   function selectVehicle(deviceId: string) {
     setSelectedVehicle(deviceId);
     const pos = livePositions[deviceId];
-    if (pos && map) map.flyTo({ center: [pos.longitude, pos.latitude], zoom: 18, duration: 800 });
+    if (pos && map) flyToPoint(map, pos.latitude, pos.longitude, { zoom: 18 });
   }
   selectVehicleRef.current = selectVehicle;
 

@@ -1,5 +1,6 @@
 import {
   createVehicleMarkerElement,
+  flyToPoint,
   setVehicleMarkerAccuracy,
   setVehicleMarkerSelected,
   setVehicleMarkerStale,
@@ -75,7 +76,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     ref,
     () => ({
       flyTo(lat: number, lon: number) {
-        map?.flyTo({ center: [lon, lat], zoom: 18, duration: 800 });
+        flyToPoint(map, lat, lon, { zoom: 18 });
       },
     }),
     [map],

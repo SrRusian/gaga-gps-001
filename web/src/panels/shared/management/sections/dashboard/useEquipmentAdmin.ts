@@ -1,4 +1,4 @@
-import { circleToPolygon, EQUIPMENT_CORE_COLOR, EQUIPMENT_OUTER_COLOR } from '@gaga-gps/map-core';
+import { circleToPolygon, EQUIPMENT_CORE_COLOR, EQUIPMENT_OUTER_COLOR, flyToPoint } from '@gaga-gps/map-core';
 import type { EquipmentMarkerData } from '@gaga-gps/map-core';
 import type { Feature, FeatureCollection } from 'geojson';
 import maplibregl from 'maplibre-gl';
@@ -210,7 +210,7 @@ export function useEquipmentAdmin({
     });
     setEquipmentPosition({ lat: eq.latitude, lon: eq.longitude });
     placeEquipmentMarker(eq.latitude, eq.longitude);
-    map.flyTo({ center: [eq.longitude, eq.latitude], zoom: 16 });
+    flyToPoint(map, eq.latitude, eq.longitude, { zoom: 16 });
   }
 
   async function saveEquipmentRow() {

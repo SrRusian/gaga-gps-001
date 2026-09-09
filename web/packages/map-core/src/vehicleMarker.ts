@@ -161,18 +161,37 @@ export function setVehicleMarkerAccuracy(
   circle.style.height = `${diameterPx}px`;
 }
 
+// mapBearing (grados, default 0 = sin cambio para Admin/Supervisor cuyo mapa nunca rota) resta el
+// rumbo del mapa al rumbo real del vehiculo - asi en modo "orientado al frente" (mapa rotado para
+// que el vehiculo seguido siempre apunte hacia arriba) el resto de los vehiculos se ven girados
+// correctamente en pantalla, no con su rumbo geografico crudo
 export function updateVehicleMarkerHeading(
   el: HTMLElement,
   deviceId: string,
   course: number | undefined,
   speed: number | undefined,
+  mapBearing = 0,
 ): void {
   const arrow = el.querySelector<HTMLDivElement>('.vehicle-marker__arrow');
   if (!arrow) return;
 
   const { course: resolvedCourse, stopped } = resolveVehicleCourse(deviceId, course, speed);
-  arrow.style.transform = `rotate(${resolvedCourse}deg)`;
+  // se guarda el rumbo geografico ya resuelto (no el crudo) para que realignVehicleMarkerToBearing
+  // pueda re-aplicar solo la rotacion en pantalla cuando el mapa gira, sin volver a decidir
+  // "detenido/en movimiento" (eso solo debe cambiar cuando llega una posicion real)
+  arrow.dataset.course = String(resolvedCourse);
+  arrow.style.transform = `rotate(${resolvedCourse - mapBearing}deg)`;
   arrow.style.opacity = stopped ? '0.55' : '1';
+}
+
+// re-aplica solo la orientacion en pantalla de un marcador ya existente cuando cambia el rumbo del
+// mapa (evento 'rotate') - lee el rumbo geografico guardado por updateVehicleMarkerHeading, no
+// vuelve a tocar opacidad/estado de "detenido"
+export function realignVehicleMarkerToBearing(el: HTMLElement, mapBearing: number): void {
+  const arrow = el.querySelector<HTMLDivElement>('.vehicle-marker__arrow');
+  if (!arrow) return;
+  const course = Number(arrow.dataset.course ?? '0');
+  arrow.style.transform = `rotate(${course - mapBearing}deg)`;
 }
 
 // agrega/quita el anillo amarillo - nunca toca el color de relleno (identidad/estado), así un

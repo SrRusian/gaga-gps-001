@@ -1,4 +1,5 @@
 import { getStoredToken } from '@gaga-gps/client';
+import { flyToBounds } from '@gaga-gps/map-core';
 import type { Feature, FeatureCollection } from 'geojson';
 import maplibregl from 'maplibre-gl';
 import type { GeoJSONSource } from 'maplibre-gl';
@@ -122,7 +123,8 @@ export function useHistoryMode({ map, scope, historyMode, setHistoryMode }: UseH
 
       const lons = points.map((p) => p.longitude);
       const lats = points.map((p) => p.latitude);
-      map!.fitBounds(
+      flyToBounds(
+        map,
         [
           [Math.min(...lons), Math.min(...lats)],
           [Math.max(...lons), Math.max(...lats)],

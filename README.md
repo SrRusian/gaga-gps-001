@@ -668,6 +668,23 @@ No espera a que haya un backend real respondiendo - las llamadas a la
 API van a fallar. Sirve únicamente para iterar rápido sobre lo
 visual, no para probar funcionalidad real con datos.
 
+### App Android
+
+El APK (`app/android`) empaqueta el mismo bundle de `web/` con
+Capacitor - un solo login, sin fork de código. Cada vez que cambie
+algo en `web/` y el APK deba llevarlo, hay que sincronizarlo a mano
+antes de compilar en Android Studio:
+
+```bash
+cd app/android
+npm run cap:sync
+```
+
+El proyecto Gradle a abrir en Android Studio es `app/android/android`
+(no `app/android` ni la raíz del repo). Guía completa - permisos,
+mock-location, RTK/NTRIP, "Modo Operador" - en
+[`app/android/README.md`](app/android/README.md).
+
 ## Configurar Traccar Client en las tabletas
 
 En la app Traccar Client (Android/iOS):
