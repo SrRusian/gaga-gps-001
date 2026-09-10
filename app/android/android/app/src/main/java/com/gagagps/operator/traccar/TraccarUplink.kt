@@ -77,6 +77,7 @@ object TraccarUplink {
         if (servers.isEmpty()) return
 
         val deviceId = TraccarPrefs.getDeviceId(context)
+        if (deviceId.isBlank()) return // sin id real configurado - nada que mandar todavia
         val password = TraccarPrefs.getPassword(context)
         var anySuccess = false
 

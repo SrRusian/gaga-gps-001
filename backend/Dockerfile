@@ -49,7 +49,7 @@ COPY --from=build /app ./
 RUN rm -rf web
 COPY --from=build /app/web/dist ./web
 
-RUN mkdir -p /app/maps/sources /app/maps/tmp \
+RUN mkdir -p /app/maps/sources /app/maps/tmp /app/releases \
     && chown -R node:node /app
 
 USER node

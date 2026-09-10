@@ -1,7 +1,9 @@
 import {
+  AppUpdate,
   Kiosk,
   RtkNtrip,
   TraccarSender,
+  type AppUpdateStatus,
   type KioskStatus,
   type NtripMountpoint,
   type RtkFixLabel,
@@ -14,6 +16,7 @@ import {
   deleteServerProfile,
   enableOperatorMode,
   getActiveServerProfileId,
+  getAutoLoginCredentials,
   getDeviceId,
   getSettingsPassword,
   getStoredApiBaseUrl,
@@ -24,10 +27,12 @@ import {
   PRODUCTION_SERVER_URL,
   setActiveServerProfileId,
   setApiBaseUrl,
+  setAutoLoginCredentials,
   setDeviceId,
   setSettingsPassword,
   setTelemetryToken,
   upsertServerProfile,
+  type AutoLoginCredentials,
   type ServerProfile,
 } from '@gaga-gps/client';
 import { useEffect, useState } from 'react';
@@ -123,6 +128,17 @@ function fixBadgeLabel(label: RtkFixLabel): string {
   }
 }
 
+const EMPTY_UPDATE_STATUS: AppUpdateStatus = {
+  enabled: false,
+  currentVersionCode: 0,
+  currentVersionName: '',
+  latestVersionCode: null,
+  latestVersionName: null,
+  checking: false,
+  lastCheckAt: null,
+  lastError: null,
+};
+
 const EMPTY_RTK_STATUS: RtkStatus = {
   usbConnected: false,
   connectedUsbDeviceName: null,
@@ -196,6 +212,15 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   const [kioskBusy, setKioskBusy] = useState(false);
   const [kioskError, setKioskError] = useState('');
 
+  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus>(EMPTY_UPDATE_STATUS);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateError, setUpdateError] = useState('');
+
+  const [autoLoginInput, setAutoLoginInput] = useState<AutoLoginCredentials>(
+    getAutoLoginCredentials() ?? { email: '', password: '' },
+  );
+  const [autoLoginSavedMessage, setAutoLoginSavedMessage] = useState('');
+
   function refreshState() {
     TraccarSender.getState().then((s) => {
       setSenderRunning(s.running);
@@ -206,6 +231,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     // respaldo por si se pierde algun evento nativo "rtkStatus" - sin este poll, el data rate se
     // podia quedar pegado en el ultimo valor visto en vez de bajar a 0 cuando el flujo se detiene
     RtkNtrip.getStatus().then(setRtkStatus);
+    AppUpdate.getStatus().then(setUpdateStatus);
   }
 
   useEffect(() => {
@@ -273,6 +299,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     TraccarSender.getSendSettings().then(setSendSettings);
     refreshState();
     Kiosk.getStatus().then(setKioskStatus);
+    AppUpdate.getStatus().then(setUpdateStatus);
     RtkNtrip.getBaudRate().then((r) => setBaudRateInput(r.baudRate));
     RtkNtrip.listUsbDevices().then((r) => setUsbDevices(r.devices));
     RtkNtrip.getStatus().then((s) => {
@@ -308,10 +335,17 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     setApiBaseUrl(profile.serverUrl);
     setTelemetryToken(profile.token);
     setDeviceId(profile.deviceId);
-    await TraccarSender.setDeviceId({ deviceId: profile.deviceId.trim() || 'GAGA-DEVICE' });
+    await TraccarSender.setDeviceId({ deviceId: profile.deviceId.trim() });
     await applyMainServer(profile.serverUrl, profile.token);
     setActiveServerProfileId(profile.id);
     setActiveProfileIdState(profile.id);
+    // el actualizador nativo reusa el mismo servidor+token ya configurados aqui (el token YA es
+    // el TELEMETRY_SHARED_SECRET, ver buildMainServerUrl) - nunca pisa el switch "enabled" actual
+    await AppUpdate.configure({
+      apiBaseUrl: profile.serverUrl.trim(),
+      key: profile.token.trim(),
+      enabled: updateStatus.enabled,
+    }).catch(() => {});
   }
 
   async function selectProfile(id: string) {
@@ -696,6 +730,55 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     } finally {
       setKioskBusy(false);
     }
+  }
+
+  async function toggleAppUpdate() {
+    setUpdateError('');
+    const nextEnabled = !updateStatus.enabled;
+    if (nextEnabled) {
+      const confirmed = confirm(
+        'Esto activa la actualizacion automatica: la tableta va a revisar periodicamente si hay ' +
+          'una version nueva de la app en el servidor y, si la hay, la descarga, verifica su ' +
+          'integridad y la instala sola, sin ningun aviso ni confirmacion en pantalla.\n\n¿Continuar?',
+      );
+      if (!confirmed) return;
+    }
+    setUpdateBusy(true);
+    try {
+      await AppUpdate.configure({
+        apiBaseUrl: (activeProfile?.serverUrl ?? getStoredApiBaseUrl()).trim(),
+        key: (activeProfile?.token ?? getTelemetryToken()).trim(),
+        enabled: nextEnabled,
+      });
+      setUpdateStatus(await AppUpdate.getStatus());
+    } catch (e) {
+      setUpdateError(e instanceof Error ? e.message : 'No se pudo cambiar la actualizacion automatica');
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  async function checkForUpdateNow() {
+    setUpdateError('');
+    setUpdateBusy(true);
+    try {
+      await AppUpdate.checkNow();
+      setUpdateStatus(await AppUpdate.getStatus());
+    } catch (e) {
+      setUpdateError(e instanceof Error ? e.message : 'No se pudo revisar actualizaciones');
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  function saveAutoLoginCredentials() {
+    setAutoLoginCredentials(
+      autoLoginInput.email.trim() && autoLoginInput.password
+        ? { email: autoLoginInput.email.trim(), password: autoLoginInput.password }
+        : null,
+    );
+    setAutoLoginSavedMessage(autoLoginInput.email.trim() ? 'Guardado' : 'Quitado');
+    setTimeout(() => setAutoLoginSavedMessage(''), 2000);
   }
 
   function handleUnlock() {
@@ -1165,6 +1248,77 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
             salir (mantenimiento, actualizar la app, etc.) hay que volver a este mismo panel de
             Ajustes y apagar el switch - por eso necesita contrasena de ajustes puesta.
           </p>
+        </section>
+
+        <section className="ds-section">
+          <h3>Actualizacion automatica</h3>
+          <p className="ds-hint">
+            Version instalada: {updateStatus.currentVersionName || '?'} (build {updateStatus.currentVersionCode || '?'})
+            {updateStatus.latestVersionCode !== null && (
+              <>
+                {' '}- ultima publicada: {updateStatus.latestVersionName} (build {updateStatus.latestVersionCode})
+              </>
+            )}
+          </p>
+          <div className="ds-switch-row">
+            <label className="ds-switch">
+              <input
+                type="checkbox"
+                checked={updateStatus.enabled}
+                onChange={toggleAppUpdate}
+                disabled={updateBusy}
+              />
+              <span className="ds-switch-track" />
+            </label>
+            <span className="ds-switch-label">
+              Actualizacion automatica {updateStatus.checking ? '(revisando ahora)' : ''}
+            </span>
+          </div>
+          <div className="ds-actions">
+            <button onClick={checkForUpdateNow} disabled={updateBusy}>
+              Buscar actualizacion ahora
+            </button>
+          </div>
+          {updateStatus.lastCheckAt && (
+            <p className="ds-hint">Ultima revision: {new Date(updateStatus.lastCheckAt).toLocaleString()}</p>
+          )}
+          {(updateError || updateStatus.lastError) && (
+            <div className="ds-error-block">{updateError || updateStatus.lastError}</div>
+          )}
+          <p className="ds-hint">
+            Con esto activado: la tableta revisa el servidor cada cierto tiempo, y si hay una
+            version mas nueva la descarga, confirma que el archivo llego completo e integro
+            (hash), y la instala sola - sin ningun dialogo en pantalla, aprovechando que esta
+            tableta ya es Device Owner. Si el archivo no pasa la verificacion, se descarta y no
+            se instala nada. Pensado para tabletas fuera de alcance fisico (montadas en un
+            vehiculo) - publicar una version nueva se hace subiendo el APK a
+            POST /api/app/release desde una cuenta de admin.
+          </p>
+        </section>
+
+        <section className="ds-section">
+          <h3>Inicio de sesion automatico</h3>
+          <p className="ds-hint">
+            Guarda un correo y contrasena para que esta tableta inicie sesion sola, sin que nadie
+            tenga que escribirlos a mano - pensado solo para una tableta de prueba fuera de
+            alcance fisico. Vacio = comportamiento normal (login manual siempre).
+          </p>
+          <input
+            type="email"
+            placeholder="Correo"
+            value={autoLoginInput.email}
+            onChange={(e) => setAutoLoginInput({ ...autoLoginInput, email: e.target.value })}
+          />
+          <input
+            type="password"
+            placeholder="Contrasena"
+            value={autoLoginInput.password}
+            onChange={(e) => setAutoLoginInput({ ...autoLoginInput, password: e.target.value })}
+          />
+          <div className="ds-actions">
+            <button onClick={saveAutoLoginCredentials}>Guardar</button>
+            {autoLoginSavedMessage && <span className="ds-saved">{autoLoginSavedMessage}</span>}
+          </div>
         </section>
 
         <section className="ds-section">

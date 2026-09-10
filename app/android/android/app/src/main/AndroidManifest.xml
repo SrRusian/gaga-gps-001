@@ -48,8 +48,17 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- se dispara sola cuando termina una auto-actualizacion silenciosa (ver
+                     update/AppUpdateManager.kt) - Android mata el proceso igual que en un reboot -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- Actualizacion automatica sin Play Store - ver update/AppUpdateManager.kt. Ambos
+             receivers solo se invocan con un Intent explicito (AlarmManager/PackageInstaller),
+             nunca por un intent-filter implicito - exported=false a proposito. -->
+        <receiver android:name=".update.UpdateCheckReceiver" android:enabled="true" android:exported="false" />
+        <receiver android:name=".update.UpdateInstallReceiver" android:enabled="true" android:exported="false" />
 
         <!-- Modo Kiosko - ver res/xml/device_admin_policies.xml y KioskManager.kt. Requiere que la
              app se aprovisione una sola vez como Device Owner (adb, ver app/android/README.md) -
@@ -94,5 +103,10 @@
     <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" />
     <!-- para que el envio de posicion se retome solo si la tableta se reinicia por completo -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- actualizacion automatica sin Play Store (ver update/AppUpdateManager.kt) - la instalacion
+         en si es silenciosa solo porque la app es Device Owner (PackageInstaller +
+         INSTALL_REASON_POLICY); este permiso es defensivo, sin el algunas versiones/fabricantes
+         de Android podrian mostrar la pantalla de confirmacion de instalacion igual -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
 </manifest>

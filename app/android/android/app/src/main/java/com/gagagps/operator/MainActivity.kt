@@ -15,6 +15,7 @@ import com.gagagps.operator.rtk.RtkNtripPlugin
 import com.gagagps.operator.traccar.TraccarPrefs
 import com.gagagps.operator.traccar.TraccarSenderPlugin
 import com.gagagps.operator.traccar.TraccarSenderService
+import com.gagagps.operator.update.AppUpdatePlugin
 import com.getcapacitor.BridgeActivity
 
 // Tableta montada en el equipo, uso continuo - la barra de estado/navegacion no aporta nada aqui,
@@ -24,6 +25,7 @@ class MainActivity : BridgeActivity() {
         registerPlugin(TraccarSenderPlugin::class.java)
         registerPlugin(RtkNtripPlugin::class.java)
         registerPlugin(KioskPlugin::class.java)
+        registerPlugin(AppUpdatePlugin::class.java)
         super.onCreate(savedInstanceState)
         hideSystemBars()
         keepScreenAwakeAndBright()

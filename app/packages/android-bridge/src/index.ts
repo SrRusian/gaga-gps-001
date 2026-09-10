@@ -220,6 +220,41 @@ const webKioskFallback: KioskPlugin = {
   disable: async () => unavailable('Kiosk'),
 };
 
+export interface AppUpdateStatus {
+  enabled: boolean;
+  currentVersionCode: number;
+  currentVersionName: string;
+  // ultimo manifest visto en el servidor - null si nunca se pudo consultar todavia
+  latestVersionCode: number | null;
+  latestVersionName: string | null;
+  checking: boolean;
+  lastCheckAt: number | null;
+  lastError: string | null;
+}
+
+export interface AppUpdatePlugin {
+  // apiBaseUrl+key vienen del mismo perfil de servidor ya configurado en "Servidor e identidad" -
+  // no es una clave nueva, es el TELEMETRY_SHARED_SECRET que la tableta ya conoce como "token"
+  configure(options: { apiBaseUrl: string; key: string; enabled: boolean }): Promise<void>;
+  checkNow(): Promise<void>;
+  getStatus(): Promise<AppUpdateStatus>;
+}
+
+const webAppUpdateFallback: AppUpdatePlugin = {
+  configure: async () => unavailable('AppUpdate'),
+  checkNow: async () => unavailable('AppUpdate'),
+  getStatus: async () => ({
+    enabled: false,
+    currentVersionCode: 0,
+    currentVersionName: '',
+    latestVersionCode: null,
+    latestVersionName: null,
+    checking: false,
+    lastCheckAt: null,
+    lastError: null,
+  }),
+};
+
 export const TraccarSender = registerPlugin<TraccarSenderPlugin>('TraccarSender', {
   web: webTraccarFallback,
 });
@@ -230,4 +265,8 @@ export const RtkNtrip = registerPlugin<RtkNtripPlugin>('RtkNtrip', {
 
 export const Kiosk = registerPlugin<KioskPlugin>('Kiosk', {
   web: webKioskFallback,
+});
+
+export const AppUpdate = registerPlugin<AppUpdatePlugin>('AppUpdate', {
+  web: webAppUpdateFallback,
 });

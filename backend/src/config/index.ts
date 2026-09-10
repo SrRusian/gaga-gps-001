@@ -20,6 +20,8 @@ export interface Env {
   operatorSessionMaxIdleDays: number;
   mapsDir: string;
   maxMapUploadMb: number;
+  releasesDir: string;
+  maxApkUploadMb: number;
   telemetrySharedSecret: string | null;
   defaultAdminEmail: string;
   defaultAdminPassword: string;
@@ -34,6 +36,8 @@ export const env: Env = {
   operatorSessionMaxIdleDays: parseInt(process.env.OPERATOR_SESSION_MAX_IDLE_DAYS || '7', 10),
   mapsDir: process.env.MAPS_DIR || 'maps',
   maxMapUploadMb: parseInt(process.env.MAX_MAP_UPLOAD_MB || '500', 10),
+  releasesDir: process.env.RELEASES_DIR || 'releases',
+  maxApkUploadMb: parseInt(process.env.MAX_APK_UPLOAD_MB || '200', 10),
   telemetrySharedSecret: process.env.TELEMETRY_SHARED_SECRET || null,
 
   defaultAdminEmail: process.env.DEFAULT_ADMIN_EMAIL || 'admin@gaga.com',

@@ -691,6 +691,13 @@ comando `adb` de una sola vez por tableta física (con la tableta sin
 ninguna cuenta agregada en ese momento). Paso a paso completo en
 [`app/android/README.md`](app/android/README.md#modo-kiosko-tableta-bloqueada-dentro-de-la-app).
 
+**Actualización automática sin Play Store** (para tabletas fuera de
+alcance físico) - la app revisa el servidor periódicamente y se
+actualiza sola en silencio, aprovechando el mismo Device Owner del
+Modo Kiosko. Detalle completo (cómo publicar una versión nueva,
+gotchas de firma) en
+[`app/android/README.md`](app/android/README.md#actualización-automática-sin-play-store).
+
 ## Configurar Traccar Client en las tabletas
 
 En la app Traccar Client (Android/iOS):

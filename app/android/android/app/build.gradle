@@ -32,6 +32,11 @@ android {
     kotlinOptions {
         jvmTarget = '21'
     }
+    // AGP 8+ ya no genera BuildConfig por defecto - update/AppUpdateManager.kt lo necesita para
+    // comparar BuildConfig.VERSION_CODE contra la version publicada en el servidor
+    buildFeatures {
+        buildConfig true
+    }
 }
 
 repositories {

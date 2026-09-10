@@ -121,6 +121,49 @@ Entra a la app (ya vas a estar dentro, no hay otra forma), ve a Ajustes con la c
 
 Un diálogo del sistema que necesite mostrarse (poco común, ya que el fix de permiso USB de `device_filter.xml` evita el más frecuente) podría quedar bloqueado por Lock Task Mode en algunos casos - no se ha probado en campo con el kiosko activo todavía. Probar bien antes de dar esto por resuelto en producción.
 
+## Actualización automática (sin Play Store)
+
+Para una tableta fuera de alcance físico (montada en un vehículo de prueba, en movimiento) que necesita recibir versiones nuevas de la app sin que nadie la toque. Reutiliza el mismo Device Owner del Modo Kiosko - **sin Play Store, sin cuenta de Google, sin ningún servicio de terceros**: el propio backend sirve el APK, y la app se instala sola a sí misma.
+
+### Cómo funciona
+
+- `update/AppUpdateManager.kt` revisa `GET /api/app/latest` (clave compartida, el mismo `TELEMETRY_SHARED_SECRET` que ya usa la tableta como "token" en "Servidor e identidad" - no es una clave nueva) cada 6 horas (`update/UpdateScheduler.kt`, `AlarmManager` inexacto) y también apenas se activa el switch desde Ajustes.
+- Si el `versionCode` publicado es mayor al instalado (`BuildConfig.VERSION_CODE`), descarga el APK completo de `GET /api/app/download` a un archivo temporal, calcula su SHA-256 y lo compara contra el que el servidor publicó. **Si no coincide (descarga interrumpida, corrupta, a medias), se descarta - nunca se instala un archivo sin verificar.**
+- Solo si el hash coincide, se instala en silencio vía `PackageInstaller` (API oficial de Android, sin ningún diálogo en pantalla) - esto **requiere que la tableta ya sea Device Owner** (mismo aprovisionamiento de "Modo Kiosko" arriba, un solo comando `adb` por tableta física). Sin Device Owner, la revisión y descarga funcionan igual, pero la instalación se salta y queda un error visible en Ajustes.
+- Tras instalarse, Android reinicia el proceso de la app - `BootReceiver.kt` (ya existente, ahora también escucha `ACTION_MY_PACKAGE_REPLACED`, no solo `BOOT_COMPLETED`) la vuelve a abrir sola si el Modo Kiosko está activo, igual que en un reinicio normal de la tableta.
+
+### Activarlo
+
+Se activa desde el mismo panel de Ajustes, sección "Actualización automática" (switch + botón "Buscar actualización ahora" para forzar una revisión inmediata). Muestra la versión instalada, la última publicada en el servidor, y el último error si algo falló (hash no coincide, no es Device Owner todavía, sin conexión, etc.).
+
+### Publicar una versión nueva
+
+1. Sube el `versionCode` (entero, siempre mayor al anterior) y `versionName` en `app/android/android/app/build.gradle` antes de compilar - la tableta compara contra `versionCode`, no contra el nombre.
+2. Genera el APK firmado (Android Studio > Build > Generate Signed Bundle/APK).
+3. Súbelo al servidor con una cuenta de `admin`:
+   ```bash
+   curl -X POST https://app.gaga-maquinaria.com/api/app/release \
+     -H "Authorization: Bearer <JWT de admin>" \
+     -F "versionCode=2" \
+     -F "versionName=1.1" \
+     -F "apk=@app-release.apk"
+   ```
+   El backend calcula el hash SHA-256 él mismo al recibir el archivo - no hace falta calcularlo a mano.
+4. En la próxima revisión (hasta 6 horas, o de inmediato con "Buscar actualización ahora" desde Ajustes) cualquier tableta con el switch activado la descarga, verifica y se actualiza sola.
+
+### Gotcha real de Android, no de esta implementación
+
+**El APK nuevo tiene que estar firmado con la MISMA llave (keystore) que el que ya está instalado** - es una regla dura de Android para cualquier actualización de cualquier app, no algo específico de este mecanismo. Si el keystore cambia (se pierde el archivo, se usa un build de debug sin firmar consistentemente, etc.), la instalación silenciosa falla (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) y la única forma de recuperar la tableta es desinstalar la app a mano y volver a aprovisionarla desde cero (Device Owner incluido). Guarda el keystore de verdad, no solo en esta PC.
+
+### Sin verificar en hardware real todavía
+
+A diferencia del resto del Modo Kiosko (ya confirmado en campo), este mecanismo **no se ha probado con una actualización real de punta a punta** - el código se escribió y revisó a mano en un entorno sin SDK de Android ni tableta física. Dos puntos concretos a confirmar en el primer ensayo real:
+
+- Que la instalación silenciosa de la app **sobre sí misma** (no de otra app) efectivamente no pida ningún diálogo de confirmación siendo Device Owner - es el comportamiento documentado por Android para este caso, pero nunca se confirmó en este proyecto específicamente.
+- Que la alarma de `AlarmManager` siga disparando de forma confiable si la tableta pasa tiempo en reposo profundo (Doze) - es un mecanismo estándar y ampliamente usado, pero sin WorkManager de por medio (no se agregó esa dependencia para mantener el proyecto simple) conviene confirmarlo con un caso real de varias horas sin uso.
+
+Recomendado: la primera vez, publica una versión de prueba (`versionCode` +1 sin cambios reales) y confirma en Ajustes que la tableta la detecta, descarga, instala y vuelve a abrirse sola antes de confiar en esto para una actualización real.
+
 ## Limitaciones conocidas (honestas)
 
 - El RTK/NTRIP corre mientras la app está viva - no es un servicio 100% independiente de la actividad (a diferencia de Traccar, que ya corre en un foreground service real con wakelock). Para el caso de uso real (tableta con pantalla encendida en la máquina durante el turno) no debería notarse.

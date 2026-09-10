@@ -1,9 +1,18 @@
-import { ApiError, type AuthUser, createApiClient, resolveRolePath, saveSession } from '@gaga-gps/client';
+import {
+  ApiError,
+  type AuthUser,
+  createApiClient,
+  getAutoLoginCredentials,
+  resolveRolePath,
+  saveSession,
+} from '@gaga-gps/client';
 import { Button } from '@gaga-gps/ui';
 import { Capacitor } from '@capacitor/core';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DeviceSettingsPanel } from '@gaga-gps/operator-ui/DeviceSettingsPanel';
+
+const AUTO_LOGIN_RETRY_MS = 30000;
 
 interface LoginResponse {
   token: string;
@@ -38,15 +47,20 @@ export function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [autoLoginActive, setAutoLoginActive] = useState(false);
+  const autoLoginTriedRef = useRef(false);
 
-  async function handleLogin() {
+  async function performLogin(emailValue: string, passwordValue: string): Promise<boolean> {
     setError('');
     setLoading(true);
     try {
       // se crea aqui (no a nivel de modulo) para siempre leer la URL de servidor mas reciente -
       // en la app nativa se puede configurar desde el engranaje sin recargar la pagina
       const api = createApiClient();
-      const data = await api.post<LoginResponse>('/api/auth/login', { email, password });
+      const data = await api.post<LoginResponse>('/api/auth/login', {
+        email: emailValue,
+        password: passwordValue,
+      });
 
       // Operador es exclusivo de la app instalada - nunca se debe poder ver este panel desde un
       // navegador normal, ni siquiera con credenciales validas. Se corta aqui, antes de guardar
@@ -54,17 +68,58 @@ export function LoginScreen() {
       if (data.user.role === 'operator' && !Capacitor.isNativePlatform()) {
         setError('Esta cuenta es de Operador - inicia sesión desde la app instalada en la tableta, no desde el navegador.');
         setLoading(false);
-        return;
+        return false;
       }
 
       saveSession(data.token, data.user);
       if (data.user.role !== 'operator') captureApproximateLocation(data.token);
       navigate(`/${resolveRolePath(data.user.role)}`, { replace: true });
+      return true;
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Error de inicio de sesión');
       setLoading(false);
+      return false;
     }
   }
+
+  function handleLogin() {
+    performLogin(email, password);
+  }
+
+  // inicio de sesion automatico - solo para una tableta de prueba fuera de alcance fisico
+  // (montada en un vehiculo movil) configurada explicitamente desde Ajustes con credenciales
+  // fijas (ver DeviceSettingsPanel.tsx, "Inicio de sesion automatico"). Sin eso configurado, el
+  // comportamiento es el de siempre - login manual. Reintenta cada AUTO_LOGIN_RETRY_MS si falla
+  // (red caida en el momento del arranque, por ejemplo) - nunca deja de intentar solo, no hay
+  // nadie ahi para reintentar a mano.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const creds = getAutoLoginCredentials();
+    if (!creds) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function attempt() {
+      if (cancelled) return;
+      setAutoLoginActive(true);
+      const ok = await performLogin(creds!.email, creds!.password);
+      if (!ok && !cancelled) {
+        timer = setTimeout(attempt, AUTO_LOGIN_RETRY_MS);
+      }
+    }
+
+    if (!autoLoginTriedRef.current) {
+      autoLoginTriedRef.current = true;
+      attempt();
+    }
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="gw-screen">
@@ -147,7 +202,7 @@ export function LoginScreen() {
           onClick={handleLogin}
           disabled={loading || !email || !password}
         >
-          {loading ? 'Ingresando…' : 'Ingresar'}
+          {loading ? (autoLoginActive ? 'Iniciando sesión automáticamente…' : 'Ingresando…') : 'Ingresar'}
         </Button>
         {error && <div className="gw-error">{error}</div>}
       </div>
