@@ -3,6 +3,7 @@ import {
   type AuthUser,
   createApiClient,
   getAutoLoginCredentials,
+  isAutoLoginSuppressed,
   resolveRolePath,
   saveSession,
 } from '@gaga-gps/client';
@@ -102,6 +103,13 @@ export function LoginScreen() {
 
     async function attempt() {
       if (cancelled) return;
+      // alguien acaba de cerrar sesion a proposito (ver OperatorApp.tsx logout()) - se respeta esa
+      // decision unos minutos en vez de reloguear encima antes de que le de tiempo de llegar a
+      // Ajustes; pasada la ventana, vuelve solo a su comportamiento normal
+      if (isAutoLoginSuppressed()) {
+        timer = setTimeout(attempt, AUTO_LOGIN_RETRY_MS);
+        return;
+      }
       setAutoLoginActive(true);
       const ok = await performLogin(creds!.email, creds!.password);
       if (!ok && !cancelled) {
