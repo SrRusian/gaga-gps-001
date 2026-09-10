@@ -69,6 +69,7 @@ import buildDevicesRouter from './api/routes/devices.routes';
 import buildGeofencesRouter from './api/routes/geofences.routes';
 import buildEquipmentRouter from './api/routes/equipment.routes';
 import buildFleetRouter from './api/routes/fleet.routes';
+import buildAppUpdateRouter from './api/routes/app-update.routes';
 import buildMapsRouter from './api/routes/maps.routes';
 import buildMapsAdminRouter from './api/routes/maps-admin.routes';
 import buildReportsRouter from './api/routes/reports.routes';
@@ -382,6 +383,13 @@ app.use(
 app.use(
   '/api/fleet',
   buildFleetRouter({ preventiveStopService, fleetState, authMiddleware, requireRole }),
+);
+
+// ── Distribucion de APK (auto-actualizacion sin Play Store) ─────
+const resolvedReleasesDir = path.join(__dirname, '../../', env.releasesDir);
+app.use(
+  '/api/app',
+  buildAppUpdateRouter({ releasesDir: resolvedReleasesDir, authMiddleware, requireRole }),
 );
 
 // ── Health check ───────────────────────────────────────────────

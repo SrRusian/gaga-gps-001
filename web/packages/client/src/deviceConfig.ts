@@ -139,3 +139,31 @@ export function isOperatorModeEnabled(): boolean {
 export function enableOperatorMode(): void {
   localStorage.setItem(OPERATOR_MODE_KEY, 'true');
 }
+
+export interface AutoLoginCredentials {
+  email: string;
+  password: string;
+}
+
+const AUTO_LOGIN_KEY = 'gaga_auto_login';
+
+// credenciales opcionales para que LoginScreen inicie sesion solo, sin intervencion humana -
+// pensado para una tableta de prueba fuera de alcance fisico (montada en un vehiculo movil) que
+// necesita seguir mandando datos y recibiendo actualizaciones aunque nadie pueda desbloquearla ni
+// escribir usuario/contrasena a mano. Vacio = comportamiento normal (login manual siempre).
+export function getAutoLoginCredentials(): AutoLoginCredentials | null {
+  try {
+    const raw = localStorage.getItem(AUTO_LOGIN_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setAutoLoginCredentials(creds: AutoLoginCredentials | null): void {
+  if (creds && creds.email.trim() && creds.password) {
+    localStorage.setItem(AUTO_LOGIN_KEY, JSON.stringify(creds));
+  } else {
+    localStorage.removeItem(AUTO_LOGIN_KEY);
+  }
+}

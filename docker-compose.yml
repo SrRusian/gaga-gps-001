@@ -9,6 +9,7 @@ volumes:
   postgres_data:
   redis_data:
   maps_data:
+  releases_data:
   caddy_data:
   caddy_config:
 
@@ -47,8 +48,11 @@ services:
       # fijo a proposito - el volumen maps_data siempre esta montado en /app/maps,
       # cambiar esto rompe la persistencia
       MAPS_DIR: maps
+      # mismo criterio - releases_data siempre montado en /app/releases
+      RELEASES_DIR: releases
     volumes:
       - maps_data:/app/maps
+      - releases_data:/app/releases
     depends_on:
       postgres:
         condition: service_healthy
