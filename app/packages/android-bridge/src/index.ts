@@ -200,10 +200,34 @@ const webRtkFallback: RtkNtripPlugin = {
   addListener: (async () => ({ remove: async () => {} })) as RtkNtripPlugin['addListener'],
 };
 
+export interface KioskStatus {
+  // true solo si la app ya se aprovisiono como Device Owner (comando adb, una sola vez por
+  // tableta) - sin esto, enable() rechaza y el modo kiosko no puede activarse desde la UI
+  isDeviceOwner: boolean;
+  enabled: boolean; // preferencia guardada - "debe reentrar al kiosko en cada arranque"
+  active: boolean; // Lock Task Mode realmente activo en este momento
+}
+
+export interface KioskPlugin {
+  getStatus(): Promise<KioskStatus>;
+  enable(): Promise<void>;
+  disable(): Promise<void>;
+}
+
+const webKioskFallback: KioskPlugin = {
+  getStatus: async () => ({ isDeviceOwner: false, enabled: false, active: false }),
+  enable: async () => unavailable('Kiosk'),
+  disable: async () => unavailable('Kiosk'),
+};
+
 export const TraccarSender = registerPlugin<TraccarSenderPlugin>('TraccarSender', {
   web: webTraccarFallback,
 });
 
 export const RtkNtrip = registerPlugin<RtkNtripPlugin>('RtkNtrip', {
   web: webRtkFallback,
+});
+
+export const Kiosk = registerPlugin<KioskPlugin>('Kiosk', {
+  web: webKioskFallback,
 });

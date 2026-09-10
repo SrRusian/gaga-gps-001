@@ -685,6 +685,12 @@ El proyecto Gradle a abrir en Android Studio es `app/android/android`
 mock-location, RTK/NTRIP, "Modo Operador" - en
 [`app/android/README.md`](app/android/README.md).
 
+**Modo Kiosko** (tableta bloqueada dentro de la app, para montaje en
+vehículo) usa Device Owner + Lock Task Mode de Android - requiere un
+comando `adb` de una sola vez por tableta física (con la tableta sin
+ninguna cuenta agregada en ese momento). Paso a paso completo en
+[`app/android/README.md`](app/android/README.md#modo-kiosko-tableta-bloqueada-dentro-de-la-app).
+
 ## Configurar Traccar Client en las tabletas
 
 En la app Traccar Client (Android/iOS):

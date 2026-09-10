@@ -1,6 +1,8 @@
 import {
+  Kiosk,
   RtkNtrip,
   TraccarSender,
+  type KioskStatus,
   type NtripMountpoint,
   type RtkFixLabel,
   type RtkStatus,
@@ -186,6 +188,14 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   const [mountpointsLoading, setMountpointsLoading] = useState(false);
   const [mountpointsError, setMountpointsError] = useState('');
 
+  const [kioskStatus, setKioskStatus] = useState<KioskStatus>({
+    isDeviceOwner: false,
+    enabled: false,
+    active: false,
+  });
+  const [kioskBusy, setKioskBusy] = useState(false);
+  const [kioskError, setKioskError] = useState('');
+
   function refreshState() {
     TraccarSender.getState().then((s) => {
       setSenderRunning(s.running);
@@ -262,6 +272,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
 
     TraccarSender.getSendSettings().then(setSendSettings);
     refreshState();
+    Kiosk.getStatus().then(setKioskStatus);
     RtkNtrip.getBaudRate().then((r) => setBaudRateInput(r.baudRate));
     RtkNtrip.listUsbDevices().then((r) => setUsbDevices(r.devices));
     RtkNtrip.getStatus().then((s) => {
@@ -651,6 +662,40 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     );
     if (!confirmed) return;
     await applyDefaultProvisioning();
+  }
+
+  async function toggleKiosk() {
+    setKioskError('');
+    if (kioskStatus.enabled) {
+      const confirmed = confirm(
+        'Esto apaga el Modo Kiosko: la tableta vuelve a mostrar la barra de estado y se puede ' +
+          'salir de la app con el boton de inicio/recientes, como un dispositivo normal.\n\n¿Continuar?',
+      );
+      if (!confirmed) return;
+      setKioskBusy(true);
+      try {
+        await Kiosk.disable();
+        setKioskStatus(await Kiosk.getStatus());
+      } finally {
+        setKioskBusy(false);
+      }
+      return;
+    }
+    const confirmed = confirm(
+      'Esto activa el Modo Kiosko: la tableta va a quedar bloqueada dentro de esta app - sin ' +
+        'barra de estado, sin boton de inicio/recientes. Solo se puede salir desde aqui mismo ' +
+        '(Ajustes), con la contrasena de ajustes.\n\n¿Continuar?',
+    );
+    if (!confirmed) return;
+    setKioskBusy(true);
+    try {
+      await Kiosk.enable();
+      setKioskStatus(await Kiosk.getStatus());
+    } catch (e) {
+      setKioskError(e instanceof Error ? e.message : 'No se pudo activar el Modo Kiosko');
+    } finally {
+      setKioskBusy(false);
+    }
   }
 
   function handleUnlock() {
@@ -1084,6 +1129,42 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
             </button>
             {lockSavedMessage && <span className="ds-saved">{lockSavedMessage}</span>}
           </div>
+        </section>
+
+        <section className="ds-section">
+          <h3>Modo Kiosko</h3>
+          <p className="ds-hint">
+            {kioskStatus.isDeviceOwner
+              ? 'Esta tableta ya esta aprovisionada (Device Owner) - el Modo Kiosko esta disponible.'
+              : 'Esta tableta todavia NO esta aprovisionada - hace falta el comando adb de una sola vez (ver app/android/README.md) antes de poder activar el Modo Kiosko.'}
+          </p>
+          {!hasSettingsPassword() && (
+            <p className="ds-hint">
+              Sin contrasena de ajustes todavia - ponle una arriba en "Bloqueo de ajustes" antes de
+              activar el kiosko, es la unica forma de volver a salir despues.
+            </p>
+          )}
+          <div className="ds-switch-row">
+            <label className="ds-switch">
+              <input
+                type="checkbox"
+                checked={kioskStatus.enabled}
+                onChange={toggleKiosk}
+                disabled={kioskBusy || (!kioskStatus.enabled && !kioskStatus.isDeviceOwner)}
+              />
+              <span className="ds-switch-track" />
+            </label>
+            <span className="ds-switch-label">
+              Modo Kiosko {kioskStatus.active ? '(activo ahora mismo)' : kioskStatus.enabled ? '(se activa al reabrir la app)' : ''}
+            </span>
+          </div>
+          {kioskError && <div className="ds-error-block">{kioskError}</div>}
+          <p className="ds-hint">
+            Con esto activado: la app se abre sola al encender la tableta, sin barra de estado ni
+            boton de inicio/recientes - nadie puede salir de la app desde fuera de aqui. Para
+            salir (mantenimiento, actualizar la app, etc.) hay que volver a este mismo panel de
+            Ajustes y apagar el switch - por eso necesita contrasena de ajustes puesta.
+          </p>
         </section>
 
         <section className="ds-section">

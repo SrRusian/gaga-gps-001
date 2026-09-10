@@ -51,6 +51,21 @@
             </intent-filter>
         </receiver>
 
+        <!-- Modo Kiosko - ver res/xml/device_admin_policies.xml y KioskManager.kt. Requiere que la
+             app se aprovisione una sola vez como Device Owner (adb, ver app/android/README.md) -
+             sin eso, este receiver existe pero nunca se activa. -->
+        <receiver
+            android:name=".kiosk.KioskAdminReceiver"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_policies" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

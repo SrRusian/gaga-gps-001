@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Politicas declaradas para el DeviceAdminReceiver del kiosko. Vacio a proposito - ser
+     "Device Owner" (dpm set-device-owner) ya otorga todo lo que Modo Kiosko necesita
+     (Lock Task Mode, deshabilitar barra de estado, actividad de inicio persistente) sin
+     tener que pedir politicas clasicas de "administrador de dispositivo" (borrado remoto,
+     forzar PIN, etc.) que no se usan aqui. -->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies />
+</device-admin>

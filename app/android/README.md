@@ -77,6 +77,50 @@ npm run cap:sync
 
 Esto recompila `web`, copia el resultado a `www/`, y sincroniza `android/`. Después, en Android Studio, vuelve a compilar/instalar.
 
+## Modo Kiosko (tableta bloqueada dentro de la app)
+
+Para una tableta montada en un vehículo (ej. Samsung Tab Active 5 con modo sin batería, que enciende/apaga sola con la corriente del vehículo) que debe abrir la app sola y no dejar salir a un operador normal. Implementado con las APIs estándar de Android para "dispositivos dedicados" (`Device Owner` + `Lock Task Mode`) - **sin depender de Knox Manage/Knox Configure ni de ninguna suscripción de Samsung**. Knox en sí (la plataforma de seguridad de hardware que trae cualquier Samsung) no bloquea ni interfiere con esto - es la capa PAGADA de Knox (Knox Manage/Configure, gestión de flotas por consola web) la que es opcional y no se usa aquí.
+
+### Qué es cada pieza
+
+- `kiosk/KioskAdminReceiver.kt` + `res/xml/device_admin_policies.xml` - requisito de Android para que la app pueda pedir ser "Device Owner" (dueño del dispositivo, el nivel de control más alto que existe en Android, normalmente reservado para MDMs empresariales).
+- `kiosk/KioskManager.kt` - una vez que la app YA es Device Owner, activa `Lock Task Mode` (bloquea recientes/inicio/barra de estado/notificaciones) y registra la app como pantalla de inicio automática.
+- `kiosk/KioskPlugin.kt` - puente hacia el panel de Ajustes (`DeviceSettingsPanel.tsx`, sección "Modo Kiosko") - ahí se activa/desactiva con un switch, protegido por la misma contraseña de "Bloqueo de ajustes".
+- `MainActivity.dismissKeyguard()` - hace que la app se muestre encima de la pantalla de bloqueo al arrancar.
+- `BootReceiver.kt` - relanza la app en cada arranque completo de la tableta si el Modo Kiosko está activado.
+
+### Paso manual obligatorio - una vez por CADA tableta física, esto NO se puede hacer desde aquí
+
+"Device Owner" es un estado que vive dentro de esa tableta en concreto - no viaja con la app ni se copia al instalar el mismo APK en otra tableta. Cualquier tableta nueva que se vaya a usar en Modo Kiosko necesita este mismo procedimiento, una vez, como parte de su preparación inicial. (Para preparar muchas tabletas seguido sin hacerlo una por una a mano, existen "Android zero-touch enrollment"/"Knox Mobile Enrollment" - no implementado aquí, avisar si hace falta escalar a eso.)
+
+Requiere una PC con el SDK de Android (trae `adb`, ya viene con Android Studio) conectada por USB a la tableta, y **que la tableta no tenga ninguna cuenta agregada en el momento de correr el comando** (Device Owner solo se puede activar sin cuentas - restricción de seguridad de Android, no de esta app). Esto es sobre el momento del comando, no algo permanente: **sí se puede agregar una cuenta de Google después**, para entrar a Play Store y descargar/actualizar apps normalmente.
+
+1. Si la tableta ya tiene una cuenta (ej. la agregaste sin querer al abrir Play Store), quítala primero: Ajustes de Android > Cuentas > la cuenta > Quitar cuenta. Si eso no basta (a veces Samsung deja algún residuo), resetea de fábrica (Ajustes > Administración general > Restablecer) y no agregues ninguna cuenta durante la configuración inicial.
+2. En Ajustes > Acerca de la tableta, toca 7 veces "Número de compilación" para activar Opciones de desarrollador, y ahí activa "Depuración USB".
+3. Instala la app (`npm run cap:sync` + Run desde Android Studio, o instala el APK firmado).
+4. Conecta la tableta a la PC por USB y confirma el diálogo de depuración USB en la tableta.
+5. `adb` no está en el PATH de Windows por default (ni siquiera en la terminal integrada de Android Studio, confirmado) - hay que agregar la carpeta `platform-tools` del SDK al PATH del usuario **una sola vez** (típicamente `%LOCALAPPDATA%\Android\Sdk\platform-tools` en Windows; en Mac/Linux revisa dónde instaló Android Studio el SDK). Después de agregarlo, cierra y vuelve a abrir la terminal (una ya abierta no toma el cambio solo). Con eso listo, desde cualquier terminal:
+   ```bash
+   adb devices
+   ```
+   Debe listar la tableta (no "unauthorized" - si sale así, revisa el diálogo de depuración USB en la pantalla de la tableta). Luego el comando real:
+   ```bash
+   adb shell dpm set-device-owner com.gagagps.operator/.kiosk.KioskAdminReceiver
+   ```
+   Debe responder `Success:` - si da un error tipo "not allowed" o menciona una cuenta existente, la tableta no está limpia, repite el paso 1.
+6. En Ajustes de Android (no de la app) > Pantalla de bloqueo, pon el bloqueo en **"Ninguno"** o **"Deslizar"** - con un PIN/patrón/contraseña real, Android SIEMPRE va a pedir el código al encender, sin importar el Modo Kiosko (ninguna app, ni siquiera Device Owner, puede saltarse eso - es una protección de seguridad real de Android). Si el bloqueo real importa para otra cosa, dilo y lo platicamos, pero para "cero toques al encender" tiene que estar así.
+7. Abre la app, entra a Ajustes (engranaje en el login), pon una contraseña de ajustes si no tiene una, y activa el switch "Modo Kiosko".
+
+Después de esto, la tableta queda lista: enciende con el vehículo, abre la app sola, sin pantalla de bloqueo, sin barra de estado, sin forma de salir salvo por Ajustes con la contraseña. Una cuenta de Google se puede agregar en cualquier momento después de este punto sin perder el estado de Device Owner.
+
+### Cómo salir del kiosko para mantenimiento
+
+Entra a la app (ya vas a estar dentro, no hay otra forma), ve a Ajustes con la contraseña, y apaga el switch "Modo Kiosko". Ahí sí vuelve a comportarse como una tableta normal (barra de estado, botón de inicio) hasta que se vuelva a activar. Quitar el estatus de Device Owner por completo (si algún día ya no se quiere ni la posibilidad) solo se puede haciendo un reset de fábrica.
+
+### Limitación real, no ocultada
+
+Un diálogo del sistema que necesite mostrarse (poco común, ya que el fix de permiso USB de `device_filter.xml` evita el más frecuente) podría quedar bloqueado por Lock Task Mode en algunos casos - no se ha probado en campo con el kiosko activo todavía. Probar bien antes de dar esto por resuelto en producción.
+
 ## Limitaciones conocidas (honestas)
 
 - El RTK/NTRIP corre mientras la app está viva - no es un servicio 100% independiente de la actividad (a diferencia de Traccar, que ya corre en un foreground service real con wakelock). Para el caso de uso real (tableta con pantalla encendida en la máquina durante el turno) no debería notarse.
