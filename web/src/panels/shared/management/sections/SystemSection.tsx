@@ -47,8 +47,6 @@ export function SystemSection() {
   const [releases, setReleases] = useState<AppReleaseRow[]>([]);
   const [devices, setDevices] = useState<DeviceRow[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadVersionCode, setUploadVersionCode] = useState('');
-  const [uploadVersionName, setUploadVersionName] = useState('');
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState('');
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
@@ -110,27 +108,15 @@ export function SystemSection() {
 
   async function handlePublish() {
     const file = fileInputRef.current?.files?.[0];
-    const versionCode = parseInt(uploadVersionCode, 10);
     setUploadError('');
     if (!file) return setUploadError('Selecciona un archivo .apk');
-    if (!Number.isInteger(versionCode)) return setUploadError('versionCode debe ser un número entero');
-    if (!uploadVersionName.trim()) return setUploadError('versionName es requerido');
-    if (latestRelease && versionCode <= latestRelease.version_code) {
-      return setUploadError(
-        `versionCode debe ser mayor al ya publicado (${latestRelease.version_code})`,
-      );
-    }
 
     const formData = new FormData();
-    formData.append('versionCode', String(versionCode));
-    formData.append('versionName', uploadVersionName.trim());
     formData.append('apk', file);
 
     setUploadProgress(0);
     try {
       await uploadApk(formData, setUploadProgress);
-      setUploadVersionCode('');
-      setUploadVersionName('');
       if (fileInputRef.current) fileInputRef.current.value = '';
       await loadReleases();
     } catch (err) {
@@ -196,26 +182,14 @@ export function SystemSection() {
             : 'Todavía no se ha publicado ningún release.'}
         </p>
 
+        <p style={{ fontSize: 12, color: '#8b949e' }}>
+          El version code y version name se leen directo del APK (lo que hayas puesto en
+          build.gradle antes de compilar) - no hace falta escribirlos aquí. Se rechaza si el
+          version code no es mayor al ya publicado.
+        </p>
         <div className="form-row">
           <label>Archivo APK</label>
           <input ref={fileInputRef} type="file" accept=".apk" />
-        </div>
-        <div className="form-row">
-          <label>Version code (entero, siempre mayor al anterior)</label>
-          <input
-            type="number"
-            value={uploadVersionCode}
-            onChange={(e) => setUploadVersionCode(e.target.value)}
-            placeholder={latestRelease ? String(latestRelease.version_code + 1) : '1'}
-          />
-        </div>
-        <div className="form-row">
-          <label>Version name</label>
-          <input
-            value={uploadVersionName}
-            onChange={(e) => setUploadVersionName(e.target.value)}
-            placeholder="1.1"
-          />
         </div>
         <button
           className="btn btn-sm"
