@@ -70,6 +70,7 @@ export default function ProjectManagerPanel() {
             vehicle={s.detail}
             offline={s.detailOffline}
             operatorSession={s.activeSession}
+            appVersion={s.detailAppVersion}
             onClose={s.closeVehicleDetail}
           />
         )}

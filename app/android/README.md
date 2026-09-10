@@ -127,8 +127,9 @@ Para una tableta fuera de alcance físico (montada en un vehículo de prueba, en
 
 ### Cómo funciona
 
-- `update/AppUpdateManager.kt` revisa `GET /api/app/latest` (clave compartida, el mismo `TELEMETRY_SHARED_SECRET` que ya usa la tableta como "token" en "Servidor e identidad" - no es una clave nueva) cada 6 horas (`update/UpdateScheduler.kt`, `AlarmManager` inexacto) y también apenas se activa el switch desde Ajustes.
-- Si el `versionCode` publicado es mayor al instalado (`BuildConfig.VERSION_CODE`), descarga el APK completo de `GET /api/app/download` a un archivo temporal, calcula su SHA-256 y lo compara contra el que el servidor publicó. **Si no coincide (descarga interrumpida, corrupta, a medias), se descarta - nunca se instala un archivo sin verificar.**
+- `update/AppUpdateManager.kt` revisa `GET /api/app/latest` (clave compartida, el mismo `TELEMETRY_SHARED_SECRET` que ya usa la tableta como "token" en "Servidor e identidad" - no es una clave nueva) **una vez al día a las 2 AM** (`update/UpdateScheduler.kt`, `AlarmManager` exacto - de madrugada a propósito, para no interrumpir un vehículo en operación durante el día), y también de inmediato al activar el switch desde Ajustes, al presionar "Buscar actualización ahora", o al recibir la señal de "Actualizar" desde el panel de Admin (ver abajo).
+- Cada revisión (incluso si no hay versión nueva, y aunque el switch esté apagado) reporta al servidor qué `versionCode`/`versionName` tiene instalados esta tableta ahora mismo (`POST /api/app/report-version`) - alimenta la columna "Versión app" del detalle de un vehículo en el panel de Admin/Supervisor/Encargado.
+- Si el `versionCode` publicado es mayor al instalado (`BuildConfig.VERSION_CODE`) **y el switch está activado**, descarga el APK completo de `GET /api/app/download` a un archivo temporal, calcula su SHA-256 y lo compara contra el que el servidor publicó. **Si no coincide (descarga interrumpida, corrupta, a medias), se descarta - nunca se instala un archivo sin verificar.**
 - Solo si el hash coincide, se instala en silencio vía `PackageInstaller` (API oficial de Android, sin ningún diálogo en pantalla) - esto **requiere que la tableta ya sea Device Owner** (mismo aprovisionamiento de "Modo Kiosko" arriba, un solo comando `adb` por tableta física). Sin Device Owner, la revisión y descarga funcionan igual, pero la instalación se salta y queda un error visible en Ajustes.
 - Tras instalarse, Android reinicia el proceso de la app - `BootReceiver.kt` (ya existente, ahora también escucha `ACTION_MY_PACKAGE_REPLACED`, no solo `BOOT_COMPLETED`) la vuelve a abrir sola si el Modo Kiosko está activo, igual que en un reinicio normal de la tableta.
 
@@ -136,20 +137,14 @@ Para una tableta fuera de alcance físico (montada en un vehículo de prueba, en
 
 Se activa desde el mismo panel de Ajustes, sección "Actualización automática" (switch + botón "Buscar actualización ahora" para forzar una revisión inmediata). Muestra la versión instalada, la última publicada en el servidor, y el último error si algo falló (hash no coincide, no es Device Owner todavía, sin conexión, etc.).
 
-### Publicar una versión nueva
+### Publicar una versión nueva y actualizar tabletas - desde el panel de Admin, ya no por curl
 
 1. Sube el `versionCode` (entero, siempre mayor al anterior) y `versionName` en `app/android/android/app/build.gradle` antes de compilar - la tableta compara contra `versionCode`, no contra el nombre.
 2. Genera el APK firmado (Android Studio > Build > Generate Signed Bundle/APK).
-3. Súbelo al servidor con una cuenta de `admin`:
-   ```bash
-   curl -X POST https://app.gaga-maquinaria.com/api/app/release \
-     -H "Authorization: Bearer <JWT de admin>" \
-     -F "versionCode=2" \
-     -F "versionName=1.1" \
-     -F "apk=@app-release.apk"
-   ```
-   El backend calcula el hash SHA-256 él mismo al recibir el archivo - no hace falta calcularlo a mano.
-4. En la próxima revisión (hasta 6 horas, o de inmediato con "Buscar actualización ahora" desde Ajustes) cualquier tableta con el switch activado la descarga, verifica y se actualiza sola.
+3. En el panel de Admin (rol `admin` únicamente) > Sistema > "Actualización de la app": selecciona el archivo `.apk`, escribe el `versionCode`/`versionName`, y dale "Publicar" - el backend calcula el SHA-256 él mismo al recibir el archivo, no hace falta calcularlo a mano. Ahí mismo se ve el historial completo de versiones publicadas (quién, cuándo, tamaño).
+4. Dos botones para forzar la actualización sin esperar a las 2 AM: **"Actualizar todos los dispositivos"** o, eligiendo una tableta del selector, **"Actualizar esta tableta"** - ambos piden confirmación explícita antes de mandar la señal.
+   - **Límite real de este mecanismo, no oculto**: la señal viaja por el socket que la tableta ya mantiene abierto mientras el Operador está en uso (`useOperatorSocket.ts` avisa su `deviceId` al conectar, `FleetSocketServer.sendToDevice`/`broadcast` lo usan para dirigir el evento) - **solo llega a una tableta que tenga la app abierta y el socket conectado en ese momento**. Una tableta apagada, reiniciando, o sin datos móviles en ese instante simplemente no la recibe - se pone al día sola en su siguiente revisión programada (2 AM) o la próxima vez que alguien fuerce la actualización con ella ya conectada. No hay (todavía) un mecanismo tipo notificación push que la despierte estando apagada/dormida.
+5. Sin forzar nada, cualquier tableta con el switch de Ajustes activado se pone al día sola en su revisión de las 2 AM.
 
 ### Gotcha real de Android, no de esta implementación
 
@@ -157,12 +152,13 @@ Se activa desde el mismo panel de Ajustes, sección "Actualización automática"
 
 ### Sin verificar en hardware real todavía
 
-A diferencia del resto del Modo Kiosko (ya confirmado en campo), este mecanismo **no se ha probado con una actualización real de punta a punta** - el código se escribió y revisó a mano en un entorno sin SDK de Android ni tableta física. Dos puntos concretos a confirmar en el primer ensayo real:
+A diferencia del resto del Modo Kiosko (ya confirmado en campo), este mecanismo **no se ha probado con una actualización real de punta a punta** - el código se escribió y revisó a mano en un entorno sin SDK de Android ni tableta física (sí se probó de punta a punta el lado del servidor: publicar, listar historial, forzar actualización, reportar versión, todo verificado con Docker real). Puntos concretos a confirmar en el primer ensayo real:
 
 - Que la instalación silenciosa de la app **sobre sí misma** (no de otra app) efectivamente no pida ningún diálogo de confirmación siendo Device Owner - es el comportamiento documentado por Android para este caso, pero nunca se confirmó en este proyecto específicamente.
-- Que la alarma de `AlarmManager` siga disparando de forma confiable si la tableta pasa tiempo en reposo profundo (Doze) - es un mecanismo estándar y ampliamente usado, pero sin WorkManager de por medio (no se agregó esa dependencia para mantener el proyecto simple) conviene confirmarlo con un caso real de varias horas sin uso.
+- Que `AlarmManager.setExactAndAllowWhileIdle()` dispare de forma confiable a las 2 AM aunque la tableta lleve horas en reposo profundo (Doze) - Device Owner está exento de la restricción de alarmas exactas de Android 12+ según la documentación de Android para dispositivos dedicados, pero no se ha confirmado en este proyecto específicamente. Sin WorkManager de por medio (no se agregó esa dependencia para mantener el proyecto simple).
+- Que el evento de "actualizar ahora" (socket) de verdad llegue y dispare `AppUpdate.checkNow()` con la app en primer plano real (Modo Kiosko activo) - la lógica está escrita y verificada a mano, sin poder abrir un socket real desde este entorno.
 
-Recomendado: la primera vez, publica una versión de prueba (`versionCode` +1 sin cambios reales) y confirma en Ajustes que la tableta la detecta, descarga, instala y vuelve a abrirse sola antes de confiar en esto para una actualización real.
+Recomendado: la primera vez, publica una versión de prueba (`versionCode` +1 sin cambios reales) y confirma en Ajustes (o con "Actualizar esta tableta" desde el panel) que la tableta la detecta, descarga, instala y vuelve a abrirse sola antes de confiar en esto para una actualización real.
 
 ## Limitaciones conocidas (honestas)
 

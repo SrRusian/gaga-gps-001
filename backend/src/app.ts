@@ -11,6 +11,7 @@ import { db, env, redis } from './config';
 
 // ── Repositorios ───────────────────────────────────────────────
 import DeviceRepository from './repositories/DeviceRepository';
+import AppReleaseRepository from './repositories/AppReleaseRepository';
 import PositionRepository from './repositories/PositionRepository';
 import DeviceSensorRepository from './repositories/DeviceSensorRepository';
 import ProjectRepository from './repositories/ProjectRepository';
@@ -113,6 +114,7 @@ app.use(requestLogger);
 
 // ── Repositorios ────────────────────────────────────────────────
 const deviceRepo = new DeviceRepository();
+const appReleaseRepo = new AppReleaseRepository();
 const positionRepo = new PositionRepository();
 const geofenceRepo = new GeofenceRepository();
 const geofenceEventRepo = new GeofenceEventRepository();
@@ -389,7 +391,14 @@ app.use(
 const resolvedReleasesDir = path.join(__dirname, '../../', env.releasesDir);
 app.use(
   '/api/app',
-  buildAppUpdateRouter({ releasesDir: resolvedReleasesDir, authMiddleware, requireRole }),
+  buildAppUpdateRouter({
+    releasesDir: resolvedReleasesDir,
+    appReleaseRepo,
+    deviceRepo,
+    socketServer,
+    authMiddleware,
+    requireRole,
+  }),
 );
 
 // ── Health check ───────────────────────────────────────────────

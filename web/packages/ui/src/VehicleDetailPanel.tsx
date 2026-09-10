@@ -20,16 +20,32 @@ export interface VehicleOperatorSession {
   started_at: string;
 }
 
+// version instalada del APK vs la ultima publicada (ver app-update.routes.ts) - installedVersionCode
+// null significa que esta tableta nunca reporto una version (app vieja sin el actualizador, o
+// nunca ha llegado a hacer su primera revision) - en ese caso el campo simplemente no se muestra
+export interface VehicleAppVersion {
+  installedVersionCode: number | null;
+  installedVersionName: string | null;
+  latestVersionCode: number | null;
+}
+
 export interface VehicleDetailPanelProps {
   vehicle: VehicleDetailData;
   offline: boolean;
   operatorSession?: VehicleOperatorSession | null;
+  appVersion?: VehicleAppVersion;
   onClose: () => void;
 }
 
 // panel de información de vehículo - un solo componente para los 3 paneles (Admin/Supervisor-Encargado/Operador),
 // no una copia por panel, así un cambio de campo/formato se ve en los 3 a la vez.
-export function VehicleDetailPanel({ vehicle, offline, operatorSession, onClose }: VehicleDetailPanelProps) {
+export function VehicleDetailPanel({
+  vehicle,
+  offline,
+  operatorSession,
+  appVersion,
+  onClose,
+}: VehicleDetailPanelProps) {
   return (
     <div className="gg-vehicle-detail">
       <div className="gg-vehicle-detail__title">
@@ -57,6 +73,25 @@ export function VehicleDetailPanel({ vehicle, offline, operatorSession, onClose 
           {operatorSession ? operatorSession.user_name : 'Sin turno abierto'}
         </span>
       </div>
+
+      {appVersion?.installedVersionCode != null && (
+        <div className="gg-vehicle-detail__row">
+          <span className="gg-vehicle-detail__label">Versión app</span>
+          <span
+            className={`gg-vehicle-detail__value ${
+              appVersion.latestVersionCode != null && appVersion.installedVersionCode < appVersion.latestVersionCode
+                ? 'gg-vehicle-detail__value--warn'
+                : 'gg-vehicle-detail__value--ok'
+            }`}
+          >
+            {appVersion.installedVersionName ?? appVersion.installedVersionCode}
+            {' - '}
+            {appVersion.latestVersionCode != null && appVersion.installedVersionCode < appVersion.latestVersionCode
+              ? 'Desactualizado'
+              : 'Actualizado'}
+          </span>
+        </div>
+      )}
 
       {operatorSession && (
         <div className="gg-vehicle-detail__row">

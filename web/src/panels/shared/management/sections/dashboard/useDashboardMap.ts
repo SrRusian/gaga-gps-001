@@ -12,6 +12,7 @@ import type { Position } from '@gaga-gps/shared-types';
 import maplibregl from 'maplibre-gl';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveOperatorSession } from '../../../hooks/useActiveOperatorSession';
+import { adminApi } from '../../api';
 import type { DeviceRow } from '../../types';
 import type { Scope } from './scope';
 
@@ -64,6 +65,23 @@ export function useDashboardMap({ scope, scopedDevices, historyMode, hasMaps }: 
     ? Date.now() - new Date(detail.fixTime).getTime() > OFFLINE_THRESHOLD_MS
     : false;
   const activeSession = useActiveOperatorSession(selectedVehicle);
+
+  const [latestAppVersionCode, setLatestAppVersionCode] = useState<number | null>(null);
+  useEffect(() => {
+    adminApi
+      .get<{ versionCode: number | null }>('/api/app/version-info')
+      .then((r) => setLatestAppVersionCode(r.versionCode))
+      .catch(() => {});
+  }, []);
+
+  const detailDevice = detail ? scopedDevices.find((d) => d.unique_id === detail.deviceId) : undefined;
+  const detailAppVersion = detailDevice
+    ? {
+        installedVersionCode: (detailDevice.attributes?.installedAppVersionCode as number | undefined) ?? null,
+        installedVersionName: (detailDevice.attributes?.installedAppVersionName as string | undefined) ?? null,
+        latestVersionCode: latestAppVersionCode,
+      }
+    : undefined;
 
   useEffect(() => {
     if (!hasMaps && mapMode !== 'streets') setMapMode('streets');
@@ -154,6 +172,7 @@ export function useDashboardMap({ scope, scopedDevices, historyMode, hasMaps }: 
     selectVehicle,
     detail,
     detailOffline,
+    detailAppVersion,
     activeSession,
   };
 }

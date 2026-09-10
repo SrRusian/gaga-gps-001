@@ -1,4 +1,5 @@
 import { createSocket } from '@gaga-gps/client';
+import { AppUpdate } from '@gaga-gps/android-bridge';
 import type {
   ActiveMap,
   Geofence,
@@ -78,11 +79,20 @@ export function useOperatorSocket(deviceId: string | null) {
         clearAlertState();
         soundsRef.current.stopSound();
       }
+      // unico dato que le permite al backend mandarle un evento a ESTA tableta en particular
+      // (ver FleetSocketServer.sendToDevice / "Actualizar esta tableta" en el panel de Sistema)
+      socket.emit('device:hello', { deviceId });
     });
     socket.on('disconnect', () => {
       setConnected(false);
       setMyOnline(false);
       disconnectedAtRef.current = Date.now();
+    });
+
+    // el admin pidio "actualizar ahora" desde el panel - solo llega si el socket esta conectado
+    // en este momento, ver la nota en FleetSocketServer.sendToDevice sobre esa limitacion real
+    socket.on('device:force_update', () => {
+      AppUpdate.checkNow().catch(() => {});
     });
 
     socket.on('maps:active_update', ({ maps }) => setActiveMaps(maps));

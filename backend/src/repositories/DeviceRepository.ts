@@ -37,6 +37,22 @@ class DeviceRepository {
     }
   }
 
+  // mezcla claves nuevas en attributes (JSONB) sin pisar el resto - a diferencia de update(), que
+  // reemplaza attributes completo. Usado por report-version (ver app-update.routes.ts) para no
+  // borrar otros datos de attributes que el dispositivo ya tuviera guardados
+  async mergeAttributes(uniqueId: string, patch: Record<string, unknown>): Promise<DeviceRow | null> {
+    try {
+      const { rows } = await query<DeviceRow>(
+        'UPDATE devices SET attributes = attributes || $2::jsonb WHERE unique_id = $1 RETURNING *',
+        [uniqueId, JSON.stringify(patch)],
+      );
+      return rows[0] || null;
+    } catch (err) {
+      console.error('DeviceRepository.mergeAttributes:', (err as Error).message);
+      throw err;
+    }
+  }
+
   async findById(id: number): Promise<DeviceRow | null> {
     try {
       const { rows } = await query<DeviceRow>('SELECT * FROM devices WHERE id = $1', [id]);

@@ -692,10 +692,11 @@ ninguna cuenta agregada en ese momento). Paso a paso completo en
 [`app/android/README.md`](app/android/README.md#modo-kiosko-tableta-bloqueada-dentro-de-la-app).
 
 **Actualización automática sin Play Store** (para tabletas fuera de
-alcance físico) - la app revisa el servidor periódicamente y se
+alcance físico) - la app revisa el servidor a diario (2 AM) y se
 actualiza sola en silencio, aprovechando el mismo Device Owner del
-Modo Kiosko. Detalle completo (cómo publicar una versión nueva,
-gotchas de firma) en
+Modo Kiosko. Publicar una versión nueva y forzar la actualización de
+una o todas las tabletas se hace desde el panel de Admin (Sistema).
+Detalle completo (gotchas de firma, límites reales) en
 [`app/android/README.md`](app/android/README.md#actualización-automática-sin-play-store).
 
 ## Configurar Traccar Client en las tabletas

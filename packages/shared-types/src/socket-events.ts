@@ -86,7 +86,18 @@ export interface ServerToClientEvents {
   'supervisor:incident': (payload: SupervisorIncidentPayload) => void;
 
   'alerts:snapshot': (entries: AlertEventEntry[]) => void;
+
+  // "actualizar ahora" pedido desde el panel de Sistema (ver app-update.routes.ts POST
+  // /force-update) - solo lo recibe la tableta si su socket esta conectado en este momento
+  'device:force_update': () => void;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- el backend es receive-only, nunca escucha eventos de los clientes
-export interface ClientToServerEvents {}
+export interface DeviceHelloPayload {
+  deviceId: string;
+}
+
+// unico evento que el backend escucha de los clientes hoy - le dice a FleetSocketServer a que
+// "cuarto" (deviceId) unirse, para poder dirigir device:force_update a una tableta en concreto
+export interface ClientToServerEvents {
+  'device:hello': (payload: DeviceHelloPayload) => void;
+}

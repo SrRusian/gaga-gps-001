@@ -390,3 +390,16 @@ CREATE TABLE IF NOT EXISTS pay_rates (
   valid_to TIMESTAMPTZ,
   created_by INTEGER REFERENCES users(id)
 );
+
+-- historial de releases del APK (actualizacion automatica sin Play Store, ver app-update.routes.ts) -
+-- el archivo real vive en el volumen releases/<version_code>.apk, esta tabla es solo el catalogo
+CREATE TABLE IF NOT EXISTS app_releases (
+  id SERIAL PRIMARY KEY,
+  version_code INTEGER UNIQUE NOT NULL,
+  version_name VARCHAR(50) NOT NULL,
+  sha256 VARCHAR(64) NOT NULL,
+  size_bytes BIGINT NOT NULL,
+  released_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  released_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_app_releases_version_code ON app_releases (version_code DESC);
