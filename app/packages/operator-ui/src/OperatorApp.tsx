@@ -5,7 +5,6 @@ import { ConnectionStatusDot, MapModeSelector } from '@gaga-gps/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './operator.css';
-import { DeviceSetupOverlay } from './DeviceSetupOverlay';
 import { MapView, type MapViewHandle } from './MapView';
 import { OperatorLoginOverlay } from './OperatorLoginOverlay';
 import { ReportIncidentOverlay } from './ReportIncidentOverlay';
@@ -38,7 +37,7 @@ function useAutoFollow(): [boolean, (next: boolean) => void] {
 export default function OperatorApp() {
   const navigate = useNavigate();
   const user = getStoredUser()!;
-  const { deviceId, saveDeviceSetup, error: deviceError, verifying } = useDeviceId();
+  const deviceId = useDeviceId();
   const { session, operatingEquipment, needsShiftStart, shiftStartError, checking, startShift, endShift } =
     useOperatorAuth(deviceId);
   const {
@@ -106,8 +105,6 @@ export default function OperatorApp() {
     return best;
   }, [myDisplay, displayFleet, deviceId]);
 
-  const [showDeviceSetup, setShowDeviceSetup] = useState(!deviceId);
-
   useEffect(() => {
     if (!myDisplay || !autoFollow || framingThreat) return;
     mapRef.current?.follow(myDisplay.latitude, myDisplay.longitude, myDisplay.course, myDisplay.speed);
@@ -169,11 +166,6 @@ export default function OperatorApp() {
               <span id="op-vehicle-count">
                 {activeCount} vehículo{activeCount !== 1 ? 's' : ''}
               </span>
-            )}
-            {!deviceId && (
-              <button className="op-btn" onClick={() => setShowDeviceSetup(true)}>
-                Registrar vehículo
-              </button>
             )}
             {session && (
               <button className="op-btn op-btn--danger" onClick={endShift}>
@@ -295,13 +287,20 @@ export default function OperatorApp() {
         {alert.message}
       </div>
 
-      {showDeviceSetup && (
-        <DeviceSetupOverlay
-          onSave={saveDeviceSetup}
-          onClose={() => setShowDeviceSetup(false)}
-          error={deviceError}
-          verifying={verifying}
-        />
+      {!deviceId && (
+        <div className="op-full-overlay active">
+          <div className="op-overlay-card">
+            <h2>Dispositivo sin configurar</h2>
+            <p>
+              Esta tableta todavía no tiene un identificador de dispositivo configurado. Cierra
+              sesión y entra a Ajustes (engranaje en la pantalla de inicio) para configurarlo en
+              "Servidor e identidad" antes de continuar.
+            </p>
+            <button className="op-btn op-btn--danger" onClick={logout}>
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
       )}
       {deviceId && needsShiftStart && (
         <OperatorLoginOverlay onStartShift={startShift} error={shiftStartError} />

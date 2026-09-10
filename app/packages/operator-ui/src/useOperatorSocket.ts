@@ -143,15 +143,21 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
 
+    // dirigido al propio vehiculo afectado ("REDUZCA VELOCIDAD" es una instruccion para quien lo
+    // esta manejando, no un aviso general de flota) - sin filtrar por deviceId, cualquier operador
+    // conectado veia el aviso de CUALQUIER otro vehiculo con senal perdida como si fuera el suyo
     socket.on('signal:lost:level1', (data) => {
+      if (data.deviceId !== deviceId) return;
       showWarning(data.message);
       soundsRef.current.playWarningSound();
     });
     socket.on('signal:lost:level2', (data) => {
+      if (data.deviceId !== deviceId) return;
       showDanger(data.message);
       soundsRef.current.playDangerSound(data.loop);
     });
-    socket.on('signal:recovered', () => {
+    socket.on('signal:recovered', (data) => {
+      if (data.deviceId !== deviceId) return;
       clearAlertState();
       soundsRef.current.stopSound();
     });

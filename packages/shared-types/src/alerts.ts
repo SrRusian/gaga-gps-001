@@ -43,7 +43,7 @@ export interface SupervisorGeofenceAlertPayload extends Partial<GeofenceAlertPay
 }
 
 export interface SignalLostPayload {
-  deviceId: number;
+  deviceId: string;
   elapsedSeconds: number;
   message: string;
   timestamp: string;
@@ -51,13 +51,13 @@ export interface SignalLostPayload {
 }
 
 export interface SignalRecoveredPayload {
-  deviceId: number;
+  deviceId: string;
   message: string;
   timestamp: string;
 }
 
 export interface SupervisorSignalLostPayload {
-  deviceId: number;
+  deviceId: string;
   level: 0 | 1 | 2;
   elapsedSeconds?: number;
   message?: string;
