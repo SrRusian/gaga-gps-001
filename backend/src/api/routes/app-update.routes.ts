@@ -6,30 +6,42 @@ import fsPromises from 'fs/promises';
 import multer from 'multer';
 import path from 'path';
 import { env } from '../../config';
+import type AppReleaseRepository from '../../repositories/AppReleaseRepository';
+import type DeviceRepository from '../../repositories/DeviceRepository';
 import { isValidSharedSecret } from '../../utils/sharedSecret';
 
-interface ReleaseManifest {
-  versionCode: number;
-  versionName: string;
-  sha256: string;
-  sizeBytes: number;
-  releasedAt: string;
+interface SocketServerLike {
+  broadcast(event: string, payload: unknown): void;
+  sendToDevice(deviceId: string, event: string, payload: unknown): void;
 }
 
 export interface AppUpdateRouterDeps {
   releasesDir: string;
+  appReleaseRepo: AppReleaseRepository;
+  deviceRepo: DeviceRepository;
+  socketServer: SocketServerLike;
   authMiddleware: RequestHandler;
   requireRole: (...roles: string[]) => RequestHandler;
 }
 
+function apkPathFor(releasesDir: string, versionCode: number): string {
+  return path.join(releasesDir, `${versionCode}.apk`);
+}
+
 // distribuye el APK de la app Android a las tabletas sin pasar por Play Store - clave compartida
 // en las rutas que consume el dispositivo (mismo criterio que /gps, no hay sesion de usuario
-// garantizada en ese momento), JWT de admin solo para subir un release nuevo
-export function buildAppUpdateRouter({ releasesDir, authMiddleware, requireRole }: AppUpdateRouterDeps) {
+// garantizada en ese momento), JWT de admin solo para publicar un release o forzar una revision
+export function buildAppUpdateRouter({
+  releasesDir,
+  appReleaseRepo,
+  deviceRepo,
+  socketServer,
+  authMiddleware,
+  requireRole,
+}: AppUpdateRouterDeps) {
   const router = express.Router();
-  const manifestPath = path.join(releasesDir, 'manifest.json');
-  const apkPath = path.join(releasesDir, 'app.apk');
   const uploadTmpDir = path.join(releasesDir, 'tmp-uploads');
+  const canManage = requireRole('admin');
 
   fs.mkdirSync(uploadTmpDir, { recursive: true });
 
@@ -47,67 +59,127 @@ export function buildAppUpdateRouter({ releasesDir, authMiddleware, requireRole 
     },
   });
 
-  function readManifest(): ReleaseManifest | null {
-    try {
-      return JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-    } catch {
-      return null;
-    }
-  }
-
-  router.get('/latest', (req, res) => {
+  router.get('/latest', async (req, res) => {
     if (!isValidSharedSecret(env.telemetrySharedSecret, req.query.key)) {
       return res.status(401).json({ error: 'Clave inválida' });
     }
-    const manifest = readManifest();
-    if (!manifest) return res.status(404).json({ error: 'Sin release publicado todavía' });
-    res.json(manifest);
+    const latest = await appReleaseRepo.findLatest();
+    if (!latest) return res.status(404).json({ error: 'Sin release publicado todavía' });
+    res.json({
+      versionCode: latest.version_code,
+      versionName: latest.version_name,
+      sha256: latest.sha256,
+      sizeBytes: latest.size_bytes,
+      releasedAt: latest.released_at,
+    });
   });
 
-  router.get('/download', (req, res) => {
+  router.get('/download', async (req, res) => {
     if (!isValidSharedSecret(env.telemetrySharedSecret, req.query.key)) {
       return res.status(401).json({ error: 'Clave inválida' });
     }
-    if (!fs.existsSync(apkPath)) return res.status(404).json({ error: 'Sin release publicado todavía' });
+    const latest = await appReleaseRepo.findLatest();
+    if (!latest) return res.status(404).json({ error: 'Sin release publicado todavía' });
+    const apkPath = apkPathFor(releasesDir, latest.version_code);
+    if (!fs.existsSync(apkPath)) return res.status(404).json({ error: 'Archivo del release no encontrado' });
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
     res.sendFile(apkPath);
   });
 
-  router.post(
-    '/release',
-    authMiddleware,
-    requireRole('admin'),
-    upload.single('apk'),
-    async (req, res) => {
-      const file = req.file;
-      try {
-        const versionCode = parseInt(String(req.body.versionCode), 10);
-        const versionName = String(req.body.versionName || '');
-        if (!file || !Number.isInteger(versionCode) || !versionName) {
-          return res.status(400).json({ error: 'apk, versionCode y versionName son requeridos' });
-        }
+  // reporte periodico de que version tiene instalada cada tableta (ver AppUpdateManager.kt) -
+  // clave compartida, mismo criterio que el resto de este router. No crea el dispositivo si no
+  // existe todavia (mismo criterio que /api/equipment-variables, no que /gps)
+  router.post('/report-version', async (req, res) => {
+    const { deviceId, versionCode, versionName, key } = req.body;
+    if (!isValidSharedSecret(env.telemetrySharedSecret, key)) {
+      return res.status(401).json({ error: 'Clave inválida' });
+    }
+    if (!deviceId || versionCode === undefined || !versionName) {
+      return res.status(400).json({ error: 'deviceId, versionCode y versionName son requeridos' });
+    }
+    try {
+      const updated = await deviceRepo.mergeAttributes(String(deviceId), {
+        installedAppVersionCode: Number(versionCode),
+        installedAppVersionName: String(versionName),
+        installedAppReportedAt: new Date().toISOString(),
+      });
+      if (!updated) return res.status(404).json({ error: 'Dispositivo no encontrado' });
+      res.json({ success: true });
+    } catch (err) {
+      console.error('app-update.routes POST /report-version:', (err as Error).message);
+      res.status(500).json({ error: 'Error guardando la version reportada' });
+    }
+  });
 
-        const buffer = await fsPromises.readFile(file.path);
-        const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+  router.get('/releases', authMiddleware, canManage, async (req, res) => {
+    try {
+      const releases = await appReleaseRepo.findAll();
+      res.json(releases);
+    } catch (err) {
+      console.error('app-update.routes GET /releases:', (err as Error).message);
+      res.status(500).json({ error: 'Error obteniendo el historial de releases' });
+    }
+  });
 
-        await fsPromises.rename(file.path, apkPath);
-        const manifest: ReleaseManifest = {
-          versionCode,
-          versionName,
-          sha256,
-          sizeBytes: buffer.length,
-          releasedAt: new Date().toISOString(),
-        };
-        await fsPromises.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+  // version publicada mas reciente - autenticado (cualquier rol), sin exponer el historial
+  // completo, solo para poder mostrar "actualizado/desactualizado" en el detalle de un vehiculo
+  router.get('/version-info', authMiddleware, async (req, res) => {
+    try {
+      const latest = await appReleaseRepo.findLatest();
+      if (!latest) return res.json({ versionCode: null, versionName: null });
+      res.json({ versionCode: latest.version_code, versionName: latest.version_name });
+    } catch (err) {
+      console.error('app-update.routes GET /version-info:', (err as Error).message);
+      res.status(500).json({ error: 'Error obteniendo la version publicada' });
+    }
+  });
 
-        res.status(201).json(manifest);
-      } catch (err) {
-        await fsPromises.rm(file?.path || '', { force: true }).catch(() => {});
-        console.error('app-update.routes POST /release:', (err as Error).message);
-        res.status(500).json({ error: 'Error publicando el release' });
+  router.post('/release', authMiddleware, canManage, upload.single('apk'), async (req, res) => {
+    const file = req.file;
+    try {
+      const versionCode = parseInt(String(req.body.versionCode), 10);
+      const versionName = String(req.body.versionName || '');
+      if (!file || !Number.isInteger(versionCode) || !versionName) {
+        return res.status(400).json({ error: 'apk, versionCode y versionName son requeridos' });
       }
-    },
-  );
+
+      const buffer = await fsPromises.readFile(file.path);
+      const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+
+      await fsPromises.rename(file.path, apkPathFor(releasesDir, versionCode));
+      const release = await appReleaseRepo.create({
+        versionCode,
+        versionName,
+        sha256,
+        sizeBytes: buffer.length,
+        releasedBy: req.user?.id ?? null,
+      });
+
+      res.status(201).json(release);
+    } catch (err) {
+      await fsPromises.rm(file?.path || '', { force: true }).catch(() => {});
+      console.error('app-update.routes POST /release:', (err as Error).message);
+      if ((err as { code?: string }).code === '23505') {
+        return res
+          .status(409)
+          .json({ error: `Ya existe un release publicado con versionCode ${req.body.versionCode}` });
+      }
+      res.status(500).json({ error: 'Error publicando el release' });
+    }
+  });
+
+  // dispara una revision inmediata en la(s) tableta(s) conectada(s) ahora mismo (socket) - sin
+  // deviceId, a todas; con deviceId, solo a esa. Una tableta apagada/sin socket conectado en este
+  // momento no lo recibe - se pone al dia en su siguiente revision programada (2 AM) o al arrancar
+  router.post('/force-update', authMiddleware, canManage, (req, res) => {
+    const { deviceId } = req.body as { deviceId?: string };
+    if (deviceId) {
+      socketServer.sendToDevice(deviceId, 'device:force_update', {});
+    } else {
+      socketServer.broadcast('device:force_update', {});
+    }
+    res.json({ success: true });
+  });
 
   return router;
 }

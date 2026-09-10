@@ -330,6 +330,7 @@ export function DashboardSection() {
           vehicle={dashboardMap.detail}
           offline={dashboardMap.detailOffline}
           operatorSession={dashboardMap.activeSession}
+          appVersion={dashboardMap.detailAppVersion}
           onClose={() => dashboardMap.setSelectedVehicle(null)}
         />
       )}

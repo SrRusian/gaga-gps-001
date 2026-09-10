@@ -22,6 +22,12 @@ export interface FleetSocketServerDeps {
   equipmentManager?: StaticEquipmentManager;
 }
 
+// cuarto de socket por tableta (deviceId), aparte de los de rol/proyecto - unico lugar donde el
+// backend puede mandarle un evento a UNA tableta en concreto (ver sendToDevice/force-update)
+export function deviceRoom(deviceId: string): string {
+  return `device:${deviceId}`;
+}
+
 function alertEventKey(row: AlertEventRow): string {
   switch (row.alert_type) {
     case 'geofence':
@@ -195,6 +201,12 @@ class FleetSocketServer {
         }
       }
 
+      // el Operador manda su propio deviceId apenas conecta (useOperatorSocket.ts) - unico dato
+      // que permite dirigir un evento a esta tableta en particular (ver sendToDevice abajo)
+      socket.on('device:hello', ({ deviceId }: { deviceId?: string }) => {
+        if (deviceId) socket.join(deviceRoom(deviceId));
+      });
+
       socket.on('disconnect', () => {
         console.log(`Cliente desconectado: ${socket.id}`);
       });
@@ -211,6 +223,13 @@ class FleetSocketServer {
       return;
     }
     this.io.to(projectRoom(projectId)).to(ADMIN_ROOM).emit(event, payload);
+  }
+
+  // solo llega si esa tableta tiene la app abierta con el socket conectado en este momento (ver
+  // "device:hello" arriba) - una tableta apagada/sin datos moviles lo recibe hasta que vuelva a
+  // conectar, no antes; para eso sigue el chequeo periodico normal (ver update/UpdateScheduler.kt)
+  sendToDevice(deviceId: string, event: string, payload: unknown): void {
+    this.io.to(deviceRoom(deviceId)).emit(event, payload);
   }
 }
 

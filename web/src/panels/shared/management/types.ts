@@ -25,6 +25,18 @@ export interface DeviceRow {
   status: string;
   project_id: number | null;
   last_update: string | null;
+  attributes?: Record<string, unknown>;
+}
+
+export interface AppReleaseRow {
+  id: number;
+  version_code: number;
+  version_name: string;
+  sha256: string;
+  size_bytes: number;
+  released_by: number | null;
+  released_by_email: string | null;
+  released_at: string;
 }
 
 export type GeofenceShapeType = 'circle' | 'polygon' | 'polyline';

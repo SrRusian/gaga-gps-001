@@ -429,6 +429,12 @@
   align-items: center;
   gap: 6px;
 }
+.gg-vehicle-detail__value--ok {
+  color: #3fb950;
+}
+.gg-vehicle-detail__value--warn {
+  color: #d29922;
+}
 @media (max-width: 860px) {
   .gg-vehicle-detail {
     width: calc(100vw - 32px);

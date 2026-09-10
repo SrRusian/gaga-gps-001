@@ -8,6 +8,7 @@ import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.os.Build
 import com.gagagps.operator.BuildConfig
+import com.gagagps.operator.traccar.TraccarPrefs
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -40,10 +41,16 @@ object AppUpdateManager {
     }
 
     private fun runCheck(context: Context) {
-        if (!UpdatePrefs.getEnabled(context)) return
         val apiBaseUrl = UpdatePrefs.getApiBaseUrl(context).trim().trimEnd('/')
         val key = UpdatePrefs.getKey(context).trim()
         if (apiBaseUrl.isEmpty() || key.isEmpty()) return
+
+        // se reporta la version instalada siempre que haya servidor configurado, sin importar el
+        // switch - es solo informativo (columna "actualizado/desactualizado" en el panel), la
+        // descarga/instalacion real de abajo si respeta el switch
+        reportInstalledVersion(context, apiBaseUrl, key)
+
+        if (!UpdatePrefs.getEnabled(context)) return
 
         try {
             val manifest = fetchLatest(apiBaseUrl, key)
@@ -69,6 +76,34 @@ object AppUpdateManager {
             installSilently(context, apkFile)
         } catch (e: Exception) {
             UpdatePrefs.setLastError(context, e.message ?: "Error revisando actualizacion")
+        }
+    }
+
+    // le dice al backend que version tiene instalada esta tableta ahora mismo - alimenta el campo
+    // "actualizado/desactualizado" del detalle de vehiculo en el panel de Admin/Supervisor. Nunca
+    // debe interrumpir la revision de actualizacion real si falla (sin conexion, servidor caido)
+    private fun reportInstalledVersion(context: Context, apiBaseUrl: String, key: String) {
+        try {
+            val deviceId = TraccarPrefs.getDeviceId(context)
+            if (deviceId.isBlank()) return
+            val url = URL("$apiBaseUrl/api/app/report-version")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 10000
+            conn.readTimeout = 10000
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json")
+            val body = JSONObject().apply {
+                put("deviceId", deviceId)
+                put("versionCode", BuildConfig.VERSION_CODE)
+                put("versionName", BuildConfig.VERSION_NAME)
+                put("key", key)
+            }
+            conn.outputStream.use { it.write(body.toString().toByteArray()) }
+            conn.responseCode
+            conn.disconnect()
+        } catch (_: Exception) {
+            // reporte informativo unicamente - un fallo aqui no debe tumbar la revision real
         }
     }
 

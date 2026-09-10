@@ -1,4 +1,4 @@
-import { clearSession, getStoredUser } from '@gaga-gps/client';
+import { clearSession, createApiClient, getStoredToken, getStoredUser } from '@gaga-gps/client';
 import { useMapMode } from '@gaga-gps/map-core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -7,6 +7,13 @@ import { useActiveOperatorSession } from '../hooks/useActiveOperatorSession';
 import { useSupervisorSocket } from './useSupervisorSocket';
 
 const OFFLINE_THRESHOLD_MS = 45000;
+
+const api = createApiClient({ getToken: getStoredToken });
+
+interface DeviceAttributesRow {
+  unique_id: string;
+  attributes?: Record<string, unknown>;
+}
 
 // Wiring compartido entre panels/supervisor/index.tsx y panels/project-manager/index.tsx - el
 // unico dueño del socket/mapa/seleccion. Lo que cada index.tsx SI decide por su cuenta (boton de
@@ -52,6 +59,29 @@ export function useSupervisorScreen(storageKey: string) {
   const detailOffline = detail ? now.getTime() - detail.lastSeen > OFFLINE_THRESHOLD_MS : false;
   const activeSession = useActiveOperatorSession(selectedVehicle);
 
+  const [deviceAttributesById, setDeviceAttributesById] = useState<Record<string, Record<string, unknown>>>({});
+  const [latestAppVersionCode, setLatestAppVersionCode] = useState<number | null>(null);
+  useEffect(() => {
+    api
+      .get<DeviceAttributesRow[]>('/api/devices')
+      .then((rows) => setDeviceAttributesById(Object.fromEntries(rows.map((d) => [d.unique_id, d.attributes ?? {}]))))
+      .catch(() => {});
+    api
+      .get<{ versionCode: number | null }>('/api/app/version-info')
+      .then((r) => setLatestAppVersionCode(r.versionCode))
+      .catch(() => {});
+  }, []);
+
+  const detailAppVersion = detail
+    ? {
+        installedVersionCode:
+          (deviceAttributesById[detail.deviceId]?.installedAppVersionCode as number | undefined) ?? null,
+        installedVersionName:
+          (deviceAttributesById[detail.deviceId]?.installedAppVersionName as string | undefined) ?? null,
+        latestVersionCode: latestAppVersionCode,
+      }
+    : undefined;
+
   return {
     user,
     ...socket,
@@ -68,6 +98,7 @@ export function useSupervisorScreen(storageKey: string) {
     closeVehicleDetail,
     detail,
     detailOffline,
+    detailAppVersion,
     activeSession,
     logout,
   };
