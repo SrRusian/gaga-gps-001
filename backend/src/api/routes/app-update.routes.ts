@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express';
+import ApkParser from 'app-info-parser/src/apk';
 import crypto from 'crypto';
 import express from 'express';
 import fs from 'fs';
@@ -9,6 +10,10 @@ import { env } from '../../config';
 import type AppReleaseRepository from '../../repositories/AppReleaseRepository';
 import type DeviceRepository from '../../repositories/DeviceRepository';
 import { isValidSharedSecret } from '../../utils/sharedSecret';
+
+// el paquete real de la app Android (applicationId en build.gradle) - rechaza publicar el apk de
+// otra app por error, no solo confiar en que quien sube el archivo se equivoco de ventana
+const EXPECTED_PACKAGE = 'com.gagagps.operator';
 
 interface SocketServerLike {
   broadcast(event: string, payload: unknown): void;
@@ -134,13 +139,34 @@ export function buildAppUpdateRouter({
     }
   });
 
+  // versionCode/versionName se leen del propio APK (AndroidManifest.xml), no de lo que quien
+  // publica escriba a mano - una sola fuente de verdad, sin riesgo de que alguien no sepa cual
+  // era la ultima version o suba un numero menor por error
   router.post('/release', authMiddleware, canManage, upload.single('apk'), async (req, res) => {
     const file = req.file;
     try {
-      const versionCode = parseInt(String(req.body.versionCode), 10);
-      const versionName = String(req.body.versionName || '');
-      if (!file || !Number.isInteger(versionCode) || !versionName) {
-        return res.status(400).json({ error: 'apk, versionCode y versionName son requeridos' });
+      if (!file) return res.status(400).json({ error: 'apk es requerido' });
+
+      const manifest = await new ApkParser(file.path).parse().catch(() => null);
+      if (!manifest || manifest.versionCode === undefined || !manifest.versionName) {
+        return res
+          .status(400)
+          .json({ error: 'No se pudo leer versionCode/versionName del APK - ¿es un .apk valido?' });
+      }
+      if (manifest.package && manifest.package !== EXPECTED_PACKAGE) {
+        return res
+          .status(400)
+          .json({ error: `El APK es del paquete "${manifest.package}", se esperaba "${EXPECTED_PACKAGE}"` });
+      }
+
+      const versionCode = Number(manifest.versionCode);
+      const versionName = String(manifest.versionName);
+
+      const latest = await appReleaseRepo.findLatest();
+      if (latest && versionCode <= latest.version_code) {
+        return res.status(409).json({
+          error: `El versionCode de este APK (${versionCode}) no es mayor al ya publicado (${latest.version_code}) - sube el build de Android Studio con el versionCode subido en build.gradle`,
+        });
       }
 
       const buffer = await fsPromises.readFile(file.path);
@@ -157,14 +183,15 @@ export function buildAppUpdateRouter({
 
       res.status(201).json(release);
     } catch (err) {
-      await fsPromises.rm(file?.path || '', { force: true }).catch(() => {});
       console.error('app-update.routes POST /release:', (err as Error).message);
       if ((err as { code?: string }).code === '23505') {
-        return res
-          .status(409)
-          .json({ error: `Ya existe un release publicado con versionCode ${req.body.versionCode}` });
+        return res.status(409).json({ error: 'Ya existe un release publicado con ese versionCode' });
       }
       res.status(500).json({ error: 'Error publicando el release' });
+    } finally {
+      // sigue existiendo si se rechazo antes del rename (apk invalido, paquete equivocado,
+      // versionCode no mayor, error a medio camino) - un rename exitoso ya lo dejo sin nada que borrar
+      if (file) await fsPromises.rm(file.path, { force: true }).catch(() => {});
     }
   });
 
