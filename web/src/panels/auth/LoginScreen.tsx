@@ -1,19 +1,9 @@
-import {
-  ApiError,
-  type AuthUser,
-  createApiClient,
-  getAutoLoginCredentials,
-  isAutoLoginSuppressed,
-  resolveRolePath,
-  saveSession,
-} from '@gaga-gps/client';
+import { ApiError, type AuthUser, createApiClient, resolveRolePath, saveSession } from '@gaga-gps/client';
 import { Button } from '@gaga-gps/ui';
 import { Capacitor } from '@capacitor/core';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DeviceSettingsPanel } from '@gaga-gps/operator-ui/DeviceSettingsPanel';
-
-const AUTO_LOGIN_RETRY_MS = 30000;
 
 interface LoginResponse {
   token: string;
@@ -48,8 +38,6 @@ export function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [autoLoginActive, setAutoLoginActive] = useState(false);
-  const autoLoginTriedRef = useRef(false);
 
   async function performLogin(emailValue: string, passwordValue: string): Promise<boolean> {
     setError('');
@@ -86,48 +74,6 @@ export function LoginScreen() {
   function handleLogin() {
     performLogin(email, password);
   }
-
-  // inicio de sesion automatico - solo para una tableta de prueba fuera de alcance fisico
-  // (montada en un vehiculo movil) configurada explicitamente desde Ajustes con credenciales
-  // fijas (ver DeviceSettingsPanel.tsx, "Inicio de sesion automatico"). Sin eso configurado, el
-  // comportamiento es el de siempre - login manual. Reintenta cada AUTO_LOGIN_RETRY_MS si falla
-  // (red caida en el momento del arranque, por ejemplo) - nunca deja de intentar solo, no hay
-  // nadie ahi para reintentar a mano.
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-    const creds = getAutoLoginCredentials();
-    if (!creds) return;
-
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    async function attempt() {
-      if (cancelled) return;
-      // alguien acaba de cerrar sesion a proposito (ver OperatorApp.tsx logout()) - se respeta esa
-      // decision unos minutos en vez de reloguear encima antes de que le de tiempo de llegar a
-      // Ajustes; pasada la ventana, vuelve solo a su comportamiento normal
-      if (isAutoLoginSuppressed()) {
-        timer = setTimeout(attempt, AUTO_LOGIN_RETRY_MS);
-        return;
-      }
-      setAutoLoginActive(true);
-      const ok = await performLogin(creds!.email, creds!.password);
-      if (!ok && !cancelled) {
-        timer = setTimeout(attempt, AUTO_LOGIN_RETRY_MS);
-      }
-    }
-
-    if (!autoLoginTriedRef.current) {
-      autoLoginTriedRef.current = true;
-      attempt();
-    }
-
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return (
     <div className="gw-screen">
@@ -210,7 +156,7 @@ export function LoginScreen() {
           onClick={handleLogin}
           disabled={loading || !email || !password}
         >
-          {loading ? (autoLoginActive ? 'Iniciando sesión automáticamente…' : 'Ingresando…') : 'Ingresar'}
+          {loading ? 'Ingresando…' : 'Ingresar'}
         </Button>
         {error && <div className="gw-error">{error}</div>}
       </div>

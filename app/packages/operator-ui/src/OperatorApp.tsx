@@ -1,4 +1,4 @@
-import { clearSession, getStoredUser, markIntentionalLogout } from '@gaga-gps/client';
+import { clearSession, getStoredUser } from '@gaga-gps/client';
 import { haversineMeters, useMapMode } from '@gaga-gps/map-core';
 import type { Position } from '@gaga-gps/shared-types';
 import { ConnectionStatusDot, MapModeSelector } from '@gaga-gps/ui';
@@ -143,10 +143,6 @@ export default function OperatorApp() {
   }
 
   function logout() {
-    // marca el cierre como intencional - sin esto, una tableta con inicio de sesion automatico
-    // configurado (ver LoginScreen.tsx) vuelve a entrar sola antes de que la persona que presiono
-    // "Cerrar sesion" alcance a hacer nada (ej. entrar a Ajustes)
-    markIntentionalLogout();
     clearSession();
     navigate('/', { replace: true });
   }

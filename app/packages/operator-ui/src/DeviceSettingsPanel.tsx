@@ -16,7 +16,6 @@ import {
   deleteServerProfile,
   enableOperatorMode,
   getActiveServerProfileId,
-  getAutoLoginCredentials,
   getDeviceId,
   getSettingsPassword,
   getStoredApiBaseUrl,
@@ -27,12 +26,10 @@ import {
   PRODUCTION_SERVER_URL,
   setActiveServerProfileId,
   setApiBaseUrl,
-  setAutoLoginCredentials,
   setDeviceId,
   setSettingsPassword,
   setTelemetryToken,
   upsertServerProfile,
-  type AutoLoginCredentials,
   type ServerProfile,
 } from '@gaga-gps/client';
 import { useEffect, useState } from 'react';
@@ -215,11 +212,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus>(EMPTY_UPDATE_STATUS);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateError, setUpdateError] = useState('');
-
-  const [autoLoginInput, setAutoLoginInput] = useState<AutoLoginCredentials>(
-    getAutoLoginCredentials() ?? { email: '', password: '' },
-  );
-  const [autoLoginSavedMessage, setAutoLoginSavedMessage] = useState('');
 
   function refreshState() {
     TraccarSender.getState().then((s) => {
@@ -771,16 +763,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     }
   }
 
-  function saveAutoLoginCredentials() {
-    setAutoLoginCredentials(
-      autoLoginInput.email.trim() && autoLoginInput.password
-        ? { email: autoLoginInput.email.trim(), password: autoLoginInput.password }
-        : null,
-    );
-    setAutoLoginSavedMessage(autoLoginInput.email.trim() ? 'Guardado' : 'Quitado');
-    setTimeout(() => setAutoLoginSavedMessage(''), 2000);
-  }
-
   function handleUnlock() {
     if (unlockInput.trim() === getSettingsPassword()) {
       setUnlocked(true);
@@ -1294,31 +1276,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
             vehiculo) - publicar una version nueva se hace subiendo el APK a
             POST /api/app/release desde una cuenta de admin.
           </p>
-        </section>
-
-        <section className="ds-section">
-          <h3>Inicio de sesion automatico</h3>
-          <p className="ds-hint">
-            Guarda un correo y contrasena para que esta tableta inicie sesion sola, sin que nadie
-            tenga que escribirlos a mano - pensado solo para una tableta de prueba fuera de
-            alcance fisico. Vacio = comportamiento normal (login manual siempre).
-          </p>
-          <input
-            type="email"
-            placeholder="Correo"
-            value={autoLoginInput.email}
-            onChange={(e) => setAutoLoginInput({ ...autoLoginInput, email: e.target.value })}
-          />
-          <input
-            type="password"
-            placeholder="Contrasena"
-            value={autoLoginInput.password}
-            onChange={(e) => setAutoLoginInput({ ...autoLoginInput, password: e.target.value })}
-          />
-          <div className="ds-actions">
-            <button onClick={saveAutoLoginCredentials}>Guardar</button>
-            {autoLoginSavedMessage && <span className="ds-saved">{autoLoginSavedMessage}</span>}
-          </div>
         </section>
 
         <section className="ds-section">
