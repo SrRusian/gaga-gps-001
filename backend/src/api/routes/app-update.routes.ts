@@ -18,14 +18,16 @@ const EXPECTED_PACKAGE = 'com.gagagps.operator';
 // propio sistema operativo durante el setup de fabrica, no por esta app) necesita el nombre de
 // clase completo, a diferencia de `adb shell dpm set-device-owner` que acepta el atajo ".kiosk...."
 const ADMIN_COMPONENT = 'com.gagagps.operator/com.gagagps.operator.kiosk.KioskAdminReceiver';
-
-function sha256HexToBase64Url(hex: string): string {
-  return Buffer.from(hex, 'hex')
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
+// SHA-256 (base64url) del certificado con el que se firma el APK release - fijo mientras se siga
+// usando el mismo keystore, no cambia entre versiones (a diferencia de PACKAGE_CHECKSUM, que hashea
+// el archivo completo y hay que recalcular en cada release). Bug real de campo que motivo el
+// cambio: el primer intento de aprovisionamiento QR fallo con el APK debug-signed (keystore de
+// Android Studio, se regenera solo si se reinstala el IDE) - con PACKAGE_CHECKSUM cualquier
+// diferencia de bytes en la descarga real tambien pudo haber sido la causa, nunca se aislo cual de
+// las dos. SIGNATURE_CHECKSUM es la via que Google documenta como mas confiable para QR/NFC.
+// Recalcular este valor (ver README) SOLO si algun dia se pierde o se rota el keystore de release -
+// mientras tanto, publicar una version nueva no requiere tocar esto.
+const RELEASE_SIGNATURE_CHECKSUM = 'h7bbahhRQK8yLPje8L0JjLOUhhglrt-D9-Ag6tnUG4w';
 
 interface SocketServerLike {
   broadcast(event: string, payload: unknown): void;
@@ -156,7 +158,7 @@ export function buildAppUpdateRouter({
         provisioningPayload: {
           'android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME': ADMIN_COMPONENT,
           'android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION': downloadUrl,
-          'android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM': sha256HexToBase64Url(latest.sha256),
+          'android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM': RELEASE_SIGNATURE_CHECKSUM,
           'android.app.extra.PROVISIONING_SKIP_ENCRYPTION': true,
           'android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED': true,
         },
