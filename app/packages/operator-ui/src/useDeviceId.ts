@@ -1,71 +1,11 @@
-import { createApiClient } from '@gaga-gps/client';
-import { useCallback, useState } from 'react';
+import { getDeviceId } from '@gaga-gps/client';
+import { useState } from 'react';
 
-const api = createApiClient();
-
-interface DeviceLookupResponse {
-  exists: boolean;
-  name?: string;
-  activeSession?: { userName: string; startedAt: string } | null;
-}
-
-function resolveDeviceId(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const fromUrl = params.get('device');
-  if (fromUrl) {
-    localStorage.setItem('gaga_operator_device_id', fromUrl);
-    return fromUrl;
-  }
-  return localStorage.getItem('gaga_operator_device_id');
-}
-
-export function useDeviceId() {
-  const [deviceId] = useState<string | null>(resolveDeviceId);
-  const [error, setError] = useState('');
-  const [verifying, setVerifying] = useState(false);
-
-  const saveDeviceSetup = useCallback(async (value: string) => {
-    const trimmed = value.trim();
-    setError('');
-
-    if (!trimmed) {
-      setError('Ingresa el identificador del dispositivo');
-      return;
-    }
-
-    setVerifying(true);
-    try {
-      const data = await api.get<DeviceLookupResponse>(
-        `/api/devices/lookup/${encodeURIComponent(trimmed)}`,
-      );
-
-      if (!data.exists) {
-        setError(
-          `"${trimmed}" no existe en el sistema - verifica que coincida exactamente con el Device Identifier configurado en Traccar Client, y que la tableta ya haya enviado al menos una posición GPS.`,
-        );
-        return;
-      }
-
-      if (data.activeSession) {
-        const proceed = confirm(
-          `"${trimmed}" (${data.name}) ya tiene un turno activo con ${data.activeSession.userName} desde ${new Date(data.activeSession.startedAt).toLocaleString()}.\n\n` +
-            `Si esta es una tableta DISTINTA a la que normalmente usa ese vehículo, probablemente hay un identificador duplicado - verifica con el administrador antes de continuar.\n\n` +
-            `¿Continuar de todos modos?`,
-        );
-        if (!proceed) return;
-      }
-    } catch {
-      setError('No se pudo verificar el dispositivo - revisa la conexión con el servidor');
-      return;
-    } finally {
-      setVerifying(false);
-    }
-
-    localStorage.setItem('gaga_operator_device_id', trimmed);
-    const url = new URL(window.location.href);
-    url.searchParams.set('device', trimmed);
-    window.location.href = url.toString();
-  }, []);
-
-  return { deviceId, saveDeviceSetup, error, verifying };
+// el identificador del vehiculo ya vive en Ajustes ("Servidor e identidad", el mismo que usa
+// Traccar para mandar posicion) - antes de la app unificada de 3-en-1, Operador no tenia forma de
+// saber que tableta/vehiculo era y pedia escribirlo a mano aparte; ahora es un solo dato, una sola
+// fuente de verdad. Si esta vacio, Ajustes es donde se configura, no aqui.
+export function useDeviceId(): string | null {
+  const [deviceId] = useState<string | null>(() => getDeviceId() || null);
+  return deviceId;
 }

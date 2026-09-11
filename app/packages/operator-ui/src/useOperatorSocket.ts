@@ -143,6 +143,10 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
 
+    // el backend ya decide el mensaje segun la audiencia (SignalLostService.ts): al propio
+    // vehiculo afectado le llega en primera persona via un evento dirigido solo a el, al resto del
+    // proyecto en tercera persona ("VEHICULO X SIN SEÑAL") por seguridad - aqui solo se muestra
+    // el que de verdad llego, sin filtrar de nuevo
     socket.on('signal:lost:level1', (data) => {
       showWarning(data.message);
       soundsRef.current.playWarningSound();

@@ -1,7 +1,14 @@
 import type { PreventiveStopTriggeredBy } from './PreventiveStopService';
 
-interface SocketIoLike {
-  emit(event: string, payload: unknown): void;
+interface SocketServerLike {
+  sendToDevice(deviceId: string, event: string, payload: unknown): void;
+  broadcastToProject(projectId: number | null, event: string, payload: unknown): void;
+  broadcastToProjectExceptDevice(
+    projectId: number | null,
+    excludeDeviceId: string,
+    event: string,
+    payload: unknown,
+  ): void;
 }
 
 interface PreventiveStopServiceLike {
@@ -26,46 +33,55 @@ interface AlertEventRepoLike {
 
 type AlertLevel = 'none' | 'level1' | 'level2';
 
+// deviceId es texto (ej. "T1"), nunca numerico - el codigo viejo hacia parseInt(deviceId) antes de
+// emitir, que da NaN para cualquier id no puramente numerico (bug real, silencioso: rompia
+// cualquier intento de comparar el deviceId recibido contra el propio). Nunca parsear a numero aqui.
 class SignalLostService {
-  io: SocketIoLike;
+  // se asigna despues de construir (ver app.ts) - evita ciclo con FleetSocketServer, mismo patron
+  // ya usado por GeofenceAlertService/SpeedAlertService
+  socketServer: SocketServerLike | null;
   preventiveStopService: PreventiveStopServiceLike;
   deviceManager?: DeviceManagerLike;
   alertEventRepo?: AlertEventRepoLike;
   lastSeen: Record<string, number>;
   alertLevel: Record<string, AlertLevel>;
+  projectByDevice: Record<string, number | null>;
   checkInterval: ReturnType<typeof setInterval> | null;
   readonly LEVEL1_MS = 10000;
   readonly LEVEL2_MS = 20000;
 
   constructor({
-    io,
+    socketServer,
     preventiveStopService,
     deviceManager,
     alertEventRepo,
   }: {
-    io: SocketIoLike;
+    socketServer?: SocketServerLike;
     preventiveStopService: PreventiveStopServiceLike;
     deviceManager?: DeviceManagerLike;
     alertEventRepo?: AlertEventRepoLike;
   }) {
-    this.io = io;
+    this.socketServer = socketServer || null;
     this.preventiveStopService = preventiveStopService;
     this.deviceManager = deviceManager;
     this.alertEventRepo = alertEventRepo;
     this.lastSeen = {};
     this.alertLevel = {};
+    this.projectByDevice = {};
     this.checkInterval = null;
   }
 
-  hydrate(records: { deviceId: string; lastSeenAt: Date }[]): void {
-    records.forEach(({ deviceId, lastSeenAt }) => {
+  hydrate(records: { deviceId: string; lastSeenAt: Date; projectId: number | null }[]): void {
+    records.forEach(({ deviceId, lastSeenAt, projectId }) => {
       this.lastSeen[deviceId] = lastSeenAt.getTime();
+      this.projectByDevice[deviceId] = projectId;
     });
   }
 
-  recordPosition(deviceId: string): void {
+  recordPosition(deviceId: string, projectId: number | null = null): void {
     const wasLost = this.alertLevel[deviceId];
     this.lastSeen[deviceId] = Date.now();
+    this.projectByDevice[deviceId] = projectId;
 
     if (wasLost && wasLost !== 'none') {
       this.handleRecovery(deviceId);
@@ -113,45 +129,60 @@ class SignalLostService {
       .catch((err: Error) => console.error('SignalLostService.markOffline:', err.message));
   }
 
+  // dos audiencias con el mismo evento, mensaje distinto: al propio vehiculo se le avisa en
+  // primera persona (via sendToDevice - solo le llega si tiene la app abierta y conectada en este
+  // momento), al resto del proyecto en tercera persona ("por seguridad, todos deben saber") - ver
+  // FleetSocketServer.broadcastToProjectExceptDevice
   triggerLevel1(deviceId: string, elapsed: number): void {
     const seconds = Math.round(elapsed / 1000);
+    const projectId = this.projectByDevice[deviceId] ?? null;
     console.log(` NIVEL 1 - Device ${deviceId} sin señal por ${seconds}s`);
 
-    this.io.emit('signal:lost:level1', {
-      deviceId: parseInt(deviceId),
-      elapsedSeconds: seconds,
-      message: `PRECAUCIÓN - VEHÍCULO ${deviceId} SIN SEÑAL - REDUZCA VELOCIDAD`,
-      timestamp: new Date().toISOString(),
-    });
+    if (this.socketServer) {
+      const base = { deviceId, elapsedSeconds: seconds, timestamp: new Date().toISOString() };
+      this.socketServer.sendToDevice(deviceId, 'signal:lost:level1', {
+        ...base,
+        message: 'PRECAUCIÓN - PERDISTE LA CONEXIÓN - REDUZCA VELOCIDAD',
+      });
+      this.socketServer.broadcastToProjectExceptDevice(projectId, deviceId, 'signal:lost:level1', {
+        ...base,
+        message: `PRECAUCIÓN - VEHÍCULO ${deviceId} SIN SEÑAL - REDUZCA VELOCIDAD`,
+      });
 
-    this.io.emit('supervisor:signal_lost', {
-      deviceId: parseInt(deviceId),
-      level: 1,
-      elapsedSeconds: seconds,
-      timestamp: new Date().toISOString(),
-    });
+      this.socketServer.broadcastToProject(projectId, 'supervisor:signal_lost', {
+        deviceId,
+        level: 1,
+        elapsedSeconds: seconds,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     this._recordAlertEvent(deviceId, 'warning', `Sin señal por ${seconds}s`, { elapsedSeconds: seconds });
   }
 
   triggerLevel2(deviceId: string, elapsed: number): void {
     const seconds = Math.round(elapsed / 1000);
+    const projectId = this.projectByDevice[deviceId] ?? null;
     console.log(`NIVEL 2 EMERGENCIA - Device ${deviceId} sin señal por ${seconds}s`);
 
-    this.io.emit('signal:lost:level2', {
-      deviceId: parseInt(deviceId),
-      elapsedSeconds: seconds,
-      message: `EMERGENCIA - VEHÍCULO ${deviceId} DESCONECTADO - DETÉNGASE Y REPORTE A CENTRAL`,
-      loop: true,
-      timestamp: new Date().toISOString(),
-    });
+    if (this.socketServer) {
+      const base = { deviceId, elapsedSeconds: seconds, loop: true, timestamp: new Date().toISOString() };
+      this.socketServer.sendToDevice(deviceId, 'signal:lost:level2', {
+        ...base,
+        message: 'EMERGENCIA - PERDISTE LA CONEXIÓN - DETENTE Y REPORTA A CENTRAL',
+      });
+      this.socketServer.broadcastToProjectExceptDevice(projectId, deviceId, 'signal:lost:level2', {
+        ...base,
+        message: `EMERGENCIA - VEHÍCULO ${deviceId} DESCONECTADO - DETÉNGASE Y REPORTE A CENTRAL`,
+      });
 
-    this.io.emit('supervisor:signal_lost', {
-      deviceId: parseInt(deviceId),
-      level: 2,
-      elapsedSeconds: seconds,
-      timestamp: new Date().toISOString(),
-    });
+      this.socketServer.broadcastToProject(projectId, 'supervisor:signal_lost', {
+        deviceId,
+        level: 2,
+        elapsedSeconds: seconds,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     this._recordAlertEvent(deviceId, 'danger', `Sin señal por ${seconds}s - emergencia`, {
       elapsedSeconds: seconds,
@@ -166,20 +197,27 @@ class SignalLostService {
   }
 
   handleRecovery(deviceId: string): void {
+    const projectId = this.projectByDevice[deviceId] ?? null;
     console.log(`Device ${deviceId} reconectado - cancelando emergencia`);
 
-    this.io.emit('signal:recovered', {
-      deviceId: parseInt(deviceId),
-      message: `VEHÍCULO ${deviceId} RECONECTADO - OPERACIÓN NORMAL`,
-      timestamp: new Date().toISOString(),
-    });
+    if (this.socketServer) {
+      const base = { deviceId, timestamp: new Date().toISOString() };
+      this.socketServer.sendToDevice(deviceId, 'signal:recovered', {
+        ...base,
+        message: 'RECUPERASTE LA CONEXIÓN - OPERACIÓN NORMAL',
+      });
+      this.socketServer.broadcastToProjectExceptDevice(projectId, deviceId, 'signal:recovered', {
+        ...base,
+        message: `VEHÍCULO ${deviceId} RECONECTADO - OPERACIÓN NORMAL`,
+      });
 
-    this.io.emit('supervisor:signal_lost', {
-      deviceId: parseInt(deviceId),
-      level: 0,
-      message: 'Reconectado',
-      timestamp: new Date().toISOString(),
-    });
+      this.socketServer.broadcastToProject(projectId, 'supervisor:signal_lost', {
+        deviceId,
+        level: 0,
+        message: 'Reconectado',
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     this._resolveAlertEvent(deviceId);
   }
@@ -210,6 +248,7 @@ class SignalLostService {
     }
     delete this.lastSeen[deviceId];
     delete this.alertLevel[deviceId];
+    delete this.projectByDevice[deviceId];
   }
 }
 

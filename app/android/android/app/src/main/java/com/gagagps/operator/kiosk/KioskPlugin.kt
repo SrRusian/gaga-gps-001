@@ -18,7 +18,17 @@ class KioskPlugin : Plugin() {
         ret.put("isDeviceOwner", KioskManager.isDeviceOwner(context))
         ret.put("enabled", KioskPrefs.getEnabled(context))
         ret.put("active", activity?.let { KioskManager.isLockTaskActive(it) } ?: false)
+        ret.put("developerOptionsEnabled", KioskManager.isDeveloperOptionsEnabled(context))
+        ret.put("wasQrProvisioned", KioskPrefs.getWasQrProvisioned(context))
         call.resolve(ret)
+    }
+
+    // atajo a la pantalla de Opciones de desarrollador (o Acerca de la tableta si esa todavia no
+    // esta disponible) - usado por el checklist de aprovisionamiento en Ajustes (RTK/NTRIP)
+    @PluginMethod
+    fun openDeveloperOptions(call: PluginCall) {
+        KioskManager.openDeveloperOptionsOrAbout(context)
+        call.resolve()
     }
 
     @PluginMethod

@@ -79,6 +79,19 @@ export interface RtkFix {
 // se tenga que rehacer despues, pero se muestran bloqueados "proximamente" en el front
 export type CorrectionMode = 'ntrip' | 'pointperfect' | 'usb_serial';
 
+// fix real del receptor, emitido al ritmo que el propio receptor lo entrega (5-10Hz tipico) - a
+// diferencia de rtkStatus (solo cambia de vez en cuando), esto llega en cada fix, para que la
+// posicion local pueda refrescarse mas rapido que navigator.geolocation.watchPosition (que en la
+// practica el navegador entrega ~1/seg sin importar que tan rapido produzca fixes el hardware)
+export interface RtkFixEvent {
+  latitude: number;
+  longitude: number;
+  speedMps?: number;
+  courseDeg?: number;
+  accuracyMeters: number;
+  timestamp: number;
+}
+
 export interface RtkStatus {
   usbConnected: boolean;
   connectedUsbDeviceName: string | null;
@@ -137,6 +150,10 @@ export interface RtkNtripPlugin {
   addListener(
     eventName: 'usbDevicesChanged',
     listenerFunc: (data: { devices: UsbDeviceInfo[] }) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'rtkFix',
+    listenerFunc: (fix: RtkFixEvent) => void,
   ): Promise<PluginListenerHandle>;
 }
 
@@ -201,23 +218,39 @@ const webRtkFallback: RtkNtripPlugin = {
 };
 
 export interface KioskStatus {
-  // true solo si la app ya se aprovisiono como Device Owner (comando adb, una sola vez por
-  // tableta) - sin esto, enable() rechaza y el modo kiosko no puede activarse desde la UI
+  // true solo si la app ya se aprovisiono como Device Owner (comando adb, o el QR de
+  // aprovisionamiento - ver SystemSection.tsx/KioskAdminReceiver.kt) - sin esto, enable() rechaza
+  // y el modo kiosko no puede activarse desde la UI
   isDeviceOwner: boolean;
   enabled: boolean; // preferencia guardada - "debe reentrar al kiosko en cada arranque"
   active: boolean; // Lock Task Mode realmente activo en este momento
+  // "Opciones de desarrollador" del sistema - prerequisito real para elegir esta app como
+  // ubicacion simulada (RTK), sin relacion directa con Device Owner. Ninguna app puede activarlo
+  // solo, ver openDeveloperOptions()/checklist en DeviceSettingsPanel.tsx
+  developerOptionsEnabled: boolean;
+  // true si esta tableta se convirtio en Device Owner via el QR de aprovisionamiento (no via adb) -
+  // la web lo usa para aprovisionarse sola al primer arranque, sin pedir el codigo de "Modo Operador"
+  wasQrProvisioned: boolean;
 }
 
 export interface KioskPlugin {
   getStatus(): Promise<KioskStatus>;
   enable(): Promise<void>;
   disable(): Promise<void>;
+  openDeveloperOptions(): Promise<void>;
 }
 
 const webKioskFallback: KioskPlugin = {
-  getStatus: async () => ({ isDeviceOwner: false, enabled: false, active: false }),
+  getStatus: async () => ({
+    isDeviceOwner: false,
+    enabled: false,
+    active: false,
+    developerOptionsEnabled: false,
+    wasQrProvisioned: false,
+  }),
   enable: async () => unavailable('Kiosk'),
   disable: async () => unavailable('Kiosk'),
+  openDeveloperOptions: async () => unavailable('Kiosk'),
 };
 
 export interface AppUpdateStatus {

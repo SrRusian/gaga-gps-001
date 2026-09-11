@@ -1,7 +1,15 @@
 import { getStoredToken } from '@gaga-gps/client';
+import { Modal } from '@gaga-gps/ui';
+import QRCode from 'qrcode';
 import { useEffect, useRef, useState } from 'react';
 import { adminApi } from '../api';
 import type { AppReleaseRow, DeviceRow, HealthResponse } from '../types';
+
+interface QrProvisioningResponse {
+  versionCode: number;
+  versionName: string;
+  provisioningPayload: Record<string, string | boolean>;
+}
 
 function uploadApk(
   formData: FormData,
@@ -52,6 +60,12 @@ export function SystemSection() {
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [forceUpdateBusy, setForceUpdateBusy] = useState(false);
   const [forceUpdateMessage, setForceUpdateMessage] = useState('');
+
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [qrBusy, setQrBusy] = useState(false);
+  const [qrError, setQrError] = useState('');
+  const [qrImage, setQrImage] = useState('');
+  const [qrInfo, setQrInfo] = useState<QrProvisioningResponse | null>(null);
 
   async function loadHealth() {
     try {
@@ -123,6 +137,27 @@ export function SystemSection() {
       setUploadError(err instanceof Error ? err.message : 'Error publicando el release');
     } finally {
       setUploadProgress(null);
+    }
+  }
+
+  async function openQrModal() {
+    setShowQrModal(true);
+    setQrBusy(true);
+    setQrError('');
+    setQrImage('');
+    setQrInfo(null);
+    try {
+      const info = await adminApi.get<QrProvisioningResponse>('/api/app/qr-provisioning');
+      setQrInfo(info);
+      const dataUrl = await QRCode.toDataURL(JSON.stringify(info.provisioningPayload), {
+        width: 320,
+        margin: 2,
+      });
+      setQrImage(dataUrl);
+    } catch (err) {
+      setQrError(err instanceof Error ? err.message : 'Error generando el QR');
+    } finally {
+      setQrBusy(false);
     }
   }
 
@@ -264,7 +299,46 @@ export function SystemSection() {
             </tbody>
           </table>
         )}
+
+        <div style={{ marginTop: 16 }}>
+          <button className="btn btn-sm" style={{ width: 'auto' }} onClick={openQrModal} disabled={!latestRelease}>
+            Generar QR de aprovisionamiento
+          </button>
+          <p style={{ fontSize: 12, color: '#8b949e', marginTop: 8 }}>
+            Para una tableta NUEVA o recién reseteada de fábrica - deja la app instalada como dueña
+            del dispositivo (Device Owner) sin computadora ni cable, escaneando este código durante
+            la configuración inicial. Al abrir después, la app se aprovisiona sola (servidor,
+            envío, NTRIP) sin pedir el código de "Modo Operador". No reemplaza activar Kiosko ni
+            configurar el identificador/token de esa tableta en particular, eso sigue siendo manual.
+          </p>
+        </div>
       </div>
+
+      <Modal open={showQrModal} title="QR de aprovisionamiento" onClose={() => setShowQrModal(false)}>
+        {qrBusy && <p>Generando…</p>}
+        {qrError && <div style={{ color: '#f85149' }}>{qrError}</div>}
+        {qrImage && qrInfo && (
+          <div style={{ textAlign: 'center' }}>
+            <img src={qrImage} alt="QR de aprovisionamiento" style={{ maxWidth: '100%' }} />
+            <p style={{ fontSize: 13, color: '#8b949e', marginTop: 8 }}>
+              Versión {qrInfo.versionName} (build {qrInfo.versionCode})
+            </p>
+            <ol style={{ textAlign: 'left', fontSize: 13, color: '#c9d1d9' }}>
+              <li>Resetea de fábrica la tableta (o usa una nueva sin configurar).</li>
+              <li>
+                En la primera pantalla de bienvenida, toca 6 veces en cualquier parte de la
+                pantalla - abre un lector de código QR.
+              </li>
+              <li>Conecta WiFi cuando lo pida (necesita internet para descargar la app).</li>
+              <li>Escanea este código y sigue las instrucciones en pantalla.</li>
+            </ol>
+            <p style={{ fontSize: 12, color: '#8b949e' }}>
+              Sin verificar en hardware real todavía - probar con una tableta reseteada antes de
+              confiar en esto para una instalación real.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       <div className="card">
         <h3>Estado del sistema</h3>

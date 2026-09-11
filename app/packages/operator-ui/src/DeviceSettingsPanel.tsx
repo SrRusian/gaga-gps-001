@@ -16,7 +16,6 @@ import {
   deleteServerProfile,
   enableOperatorMode,
   getActiveServerProfileId,
-  getAutoLoginCredentials,
   getDeviceId,
   getSettingsPassword,
   getStoredApiBaseUrl,
@@ -27,12 +26,10 @@ import {
   PRODUCTION_SERVER_URL,
   setActiveServerProfileId,
   setApiBaseUrl,
-  setAutoLoginCredentials,
   setDeviceId,
   setSettingsPassword,
   setTelemetryToken,
   upsertServerProfile,
-  type AutoLoginCredentials,
   type ServerProfile,
 } from '@gaga-gps/client';
 import { useEffect, useState } from 'react';
@@ -208,18 +205,41 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     isDeviceOwner: false,
     enabled: false,
     active: false,
+    developerOptionsEnabled: false,
+    wasQrProvisioned: false,
   });
   const [kioskBusy, setKioskBusy] = useState(false);
   const [kioskError, setKioskError] = useState('');
+  const [mockLocationBusy, setMockLocationBusy] = useState(false);
+
+  // true mientras la tableta se aprovisiona sola tras escanear el QR de fabrica (ver
+  // SystemSection.tsx/KioskAdminReceiver.kt) - se salta el codigo de "Modo Operador" porque
+  // escanear el QR ya fue la decision humana de dejar esta tableta como operador/kiosko. Corre UNA
+  // sola vez al montar, independiente de operatorMode (Kiosk.getStatus() no pide ningun permiso,
+  // a diferencia de TraccarSender/RtkNtrip - por eso puede llamarse antes de saber si esta tableta
+  // ya es "modo operador").
+  const [autoProvisioning, setAutoProvisioning] = useState(false);
+  useEffect(() => {
+    Kiosk.getStatus().then(async (status) => {
+      setKioskStatus(status);
+      if (!status.wasQrProvisioned || isOperatorModeEnabled()) return;
+      setAutoProvisioning(true);
+      try {
+        enableOperatorMode();
+        setOperatorMode(true);
+        await applyDefaultProvisioning();
+        await Kiosk.enable().catch(() => {});
+        setKioskStatus(await Kiosk.getStatus());
+      } finally {
+        setAutoProvisioning(false);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus>(EMPTY_UPDATE_STATUS);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [updateError, setUpdateError] = useState('');
-
-  const [autoLoginInput, setAutoLoginInput] = useState<AutoLoginCredentials>(
-    getAutoLoginCredentials() ?? { email: '', password: '' },
-  );
-  const [autoLoginSavedMessage, setAutoLoginSavedMessage] = useState('');
 
   function refreshState() {
     TraccarSender.getState().then((s) => {
@@ -232,6 +252,9 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     // podia quedar pegado en el ultimo valor visto en vez de bajar a 0 cuando el flujo se detiene
     RtkNtrip.getStatus().then(setRtkStatus);
     AppUpdate.getStatus().then(setUpdateStatus);
+    // solo lee Settings.Global (sin permisos, sin efectos secundarios) - se puede pollear libremente
+    // para que "Opciones de desarrollador" se detecte sola al volver de Ajustes de Android
+    Kiosk.getStatus().then(setKioskStatus);
   }
 
   useEffect(() => {
@@ -732,6 +755,25 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     }
   }
 
+  // checklist de aprovisionamiento para RTK - "Opciones de desarrollador" y "ubicacion simulada"
+  // son requisitos reales de Android que ninguna app puede activar sola (ver README). Solo se
+  // reintenta mockLocation.start() cuando el usuario lo pide a proposito (este boton) - hacerlo
+  // solo/automatico en un poll de fondo registraria un GPS_PROVIDER de prueba sin datos en
+  // cualquier tableta (use RTK o no), rompiendole el GPS real sin que nadie lo pidiera.
+  async function openDeveloperOptionsSettings() {
+    await Kiosk.openDeveloperOptions().catch(() => {});
+  }
+
+  async function retryMockLocationCheck() {
+    setMockLocationBusy(true);
+    try {
+      await RtkNtrip.startMockLocation().catch(() => {});
+      setRtkStatus(await RtkNtrip.getStatus());
+    } finally {
+      setMockLocationBusy(false);
+    }
+  }
+
   async function toggleAppUpdate() {
     setUpdateError('');
     const nextEnabled = !updateStatus.enabled;
@@ -771,16 +813,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     }
   }
 
-  function saveAutoLoginCredentials() {
-    setAutoLoginCredentials(
-      autoLoginInput.email.trim() && autoLoginInput.password
-        ? { email: autoLoginInput.email.trim(), password: autoLoginInput.password }
-        : null,
-    );
-    setAutoLoginSavedMessage(autoLoginInput.email.trim() ? 'Guardado' : 'Quitado');
-    setTimeout(() => setAutoLoginSavedMessage(''), 2000);
-  }
-
   function handleUnlock() {
     if (unlockInput.trim() === getSettingsPassword()) {
       setUnlocked(true);
@@ -818,6 +850,20 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
             <button onClick={handleUnlock}>Desbloquear</button>
           </div>
           {unlockError && <div className="ds-error-block">{unlockError}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  if (autoProvisioning) {
+    return (
+      <div className="ds-overlay">
+        <div className="ds-card">
+          <h2>Configurando tableta…</h2>
+          <p className="ds-hint">
+            Esta tableta se aprovisionó por código QR - configurando servidor, envío de posición y
+            NTRIP de fábrica sola. Esto tarda unos segundos, no cierres la app.
+          </p>
         </div>
       </div>
     );
@@ -968,6 +1014,36 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
           <p className="ds-hint">
             Modo de correccion: NTRIP Client (unico disponible - PointPerfect y USB Serial vendran despues).
           </p>
+
+          {!rtkStatus.mockLocationActive && (
+            <div className="ds-hint" style={{ border: '1px solid #d29922', borderRadius: 6, padding: 10 }}>
+              <p>
+                <strong>Pendiente:</strong> esta tableta todavia no esta configurada como app de
+                ubicacion simulada - necesario para que el receptor RTK reemplace el GPS interno.
+              </p>
+              {!kioskStatus.developerOptionsEnabled && (
+                <p>
+                  1. Activa Opciones de desarrollador: Ajustes de Android {'>'} Acerca de la tableta
+                  {' > '}toca 7 veces "Numero de compilacion".
+                </p>
+              )}
+              <p>
+                {kioskStatus.developerOptionsEnabled ? '' : '2. '}En Opciones de desarrollador, en
+                "Seleccionar app de ubicacion falsa", elige <strong>GAGA Operador</strong>.
+              </p>
+              <div className="ds-actions">
+                <button onClick={openDeveloperOptionsSettings}>Abrir Ajustes de Android</button>
+                <button onClick={retryMockLocationCheck} disabled={mockLocationBusy}>
+                  {mockLocationBusy ? 'Verificando…' : 'Ya lo hice, verificar'}
+                </button>
+              </div>
+            </div>
+          )}
+          {rtkStatus.mockLocationActive && (
+            <p className="ds-hint" style={{ color: '#3fb950' }}>
+              ✓ Ubicacion simulada configurada - lista para el receptor RTK.
+            </p>
+          )}
 
           <div className="ds-actions">
             <button onClick={openCreateNtripProfileModal}>+ Nueva configuracion NTRIP</button>
@@ -1219,7 +1295,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
           <p className="ds-hint">
             {kioskStatus.isDeviceOwner
               ? 'Esta tableta ya esta aprovisionada (Device Owner) - el Modo Kiosko esta disponible.'
-              : 'Esta tableta todavia NO esta aprovisionada - hace falta el comando adb de una sola vez (ver app/android/README.md) antes de poder activar el Modo Kiosko.'}
+              : 'Esta tableta todavia NO esta aprovisionada - hace falta el comando adb de una sola vez, o resetear de fabrica y escanear el QR de aprovisionamiento del panel de Admin (Sistema > Actualizacion de la app), antes de poder activar el Modo Kiosko. Esto no se puede arreglar desde aqui mismo, hay que reiniciar el proceso de instalacion.'}
           </p>
           {!hasSettingsPassword() && (
             <p className="ds-hint">
@@ -1294,31 +1370,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
             vehiculo) - publicar una version nueva se hace subiendo el APK a
             POST /api/app/release desde una cuenta de admin.
           </p>
-        </section>
-
-        <section className="ds-section">
-          <h3>Inicio de sesion automatico</h3>
-          <p className="ds-hint">
-            Guarda un correo y contrasena para que esta tableta inicie sesion sola, sin que nadie
-            tenga que escribirlos a mano - pensado solo para una tableta de prueba fuera de
-            alcance fisico. Vacio = comportamiento normal (login manual siempre).
-          </p>
-          <input
-            type="email"
-            placeholder="Correo"
-            value={autoLoginInput.email}
-            onChange={(e) => setAutoLoginInput({ ...autoLoginInput, email: e.target.value })}
-          />
-          <input
-            type="password"
-            placeholder="Contrasena"
-            value={autoLoginInput.password}
-            onChange={(e) => setAutoLoginInput({ ...autoLoginInput, password: e.target.value })}
-          />
-          <div className="ds-actions">
-            <button onClick={saveAutoLoginCredentials}>Guardar</button>
-            {autoLoginSavedMessage && <span className="ds-saved">{autoLoginSavedMessage}</span>}
-          </div>
         </section>
 
         <section className="ds-section">

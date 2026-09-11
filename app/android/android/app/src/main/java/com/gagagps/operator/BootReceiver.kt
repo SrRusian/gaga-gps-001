@@ -29,10 +29,17 @@ class BootReceiver : BroadcastReceiver() {
             }
         }
 
-        // con Modo Kiosko activo, la app queda registrada como actividad de inicio (HOME)
-        // persistente (ver KioskManager.enterKiosk) - esto es un respaldo explicito para el primer
-        // arranque despues de activarlo, por si ese registro todavia no "pego" a tiempo
-        if (KioskPrefs.getEnabled(context)) {
+        // Bug real reportado: una tableta SIN Modo Kiosko recibio una auto-actualizacion, la app se
+        // cerro (Android mata el proceso al reemplazar el APK) y nunca se volvio a abrir sola - el
+        // relanzamiento de aqui abajo dependia por completo de KioskPrefs.getEnabled(), que en esa
+        // tableta era false. Una auto-actualizacion debe reabrir la app siempre, tenga o no kiosko
+        // activo - no hay nadie cerca de la tableta para abrirla a mano. En un reinicio normal de
+        // la tableta completa, se mantiene el criterio anterior (solo si el kiosko esta activo,
+        // como respaldo de que la app quede registrada como HOME persistente - ver
+        // KioskManager.enterKiosk) para no abrir la app sola en una tableta que un tecnico
+        // reinicio a proposito para otra cosa.
+        val shouldRelaunch = intent.action == Intent.ACTION_MY_PACKAGE_REPLACED || KioskPrefs.getEnabled(context)
+        if (shouldRelaunch) {
             val launchIntent = Intent(context, MainActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }

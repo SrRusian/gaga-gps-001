@@ -2,7 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SignalLostService from '../../../../../../backend/src/services/alerts/SignalLostService';
 
 describe('SignalLostService', () => {
-  let io: { emit: ReturnType<typeof vi.fn<(event: string, payload: unknown) => void>> };
+  let socketServer: {
+    sendToDevice: ReturnType<typeof vi.fn<(deviceId: string, event: string, payload: unknown) => void>>;
+    broadcastToProject: ReturnType<
+      typeof vi.fn<(projectId: number | null, event: string, payload: unknown) => void>
+    >;
+    broadcastToProjectExceptDevice: ReturnType<
+      typeof vi.fn<
+        (projectId: number | null, excludeDeviceId: string, event: string, payload: unknown) => void
+      >
+    >;
+  };
   let preventiveStopService: {
     isActive: boolean;
     activate: ReturnType<typeof vi.fn<(reason: string, triggeredBy?: string) => void>>;
@@ -12,12 +22,16 @@ describe('SignalLostService', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
-    io = { emit: vi.fn<(event: string, payload: unknown) => void>() };
+    socketServer = {
+      sendToDevice: vi.fn(),
+      broadcastToProject: vi.fn(),
+      broadcastToProjectExceptDevice: vi.fn(),
+    };
     preventiveStopService = {
       isActive: false,
       activate: vi.fn<(reason: string, triggeredBy?: string) => void>(),
     };
-    service = new SignalLostService({ io, preventiveStopService });
+    service = new SignalLostService({ socketServer, preventiveStopService });
   });
 
   afterEach(() => {
@@ -25,98 +39,132 @@ describe('SignalLostService', () => {
   });
 
   it('no dispara nada mientras el dispositivo reporta a tiempo', () => {
-    service.recordPosition('1');
+    service.recordPosition('T1');
     service.checkAllDevices();
-    expect(io.emit).not.toHaveBeenCalled();
+    expect(socketServer.sendToDevice).not.toHaveBeenCalled();
+    expect(socketServer.broadcastToProjectExceptDevice).not.toHaveBeenCalled();
   });
 
-  it('dispara nivel 1 a partir de 10s sin señal', () => {
-    service.recordPosition('1');
+  it('dispara nivel 1 a partir de 10s sin señal - deviceId real (texto), nunca parseInt/NaN', () => {
+    service.recordPosition('T1');
     vi.advanceTimersByTime(10000);
     service.checkAllDevices();
 
-    expect(io.emit).toHaveBeenCalledWith(
+    // al propio vehiculo, mensaje en primera persona
+    expect(socketServer.sendToDevice).toHaveBeenCalledWith(
+      'T1',
       'signal:lost:level1',
-      expect.objectContaining({ deviceId: 1, elapsedSeconds: 10 }),
+      expect.objectContaining({ deviceId: 'T1', elapsedSeconds: 10, message: expect.stringContaining('PERDISTE') }),
     );
-    expect(io.emit).toHaveBeenCalledWith(
+    // al resto del proyecto, mensaje en tercera persona nombrando el vehiculo
+    expect(socketServer.broadcastToProjectExceptDevice).toHaveBeenCalledWith(
+      null,
+      'T1',
+      'signal:lost:level1',
+      expect.objectContaining({ deviceId: 'T1', message: expect.stringContaining('VEHÍCULO T1') }),
+    );
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+      null,
       'supervisor:signal_lost',
-      expect.objectContaining({ deviceId: 1, level: 1 }),
+      expect.objectContaining({ deviceId: 'T1', level: 1 }),
+    );
+  });
+
+  it('usa el projectId reportado en recordPosition para dirigir el broadcast', () => {
+    service.recordPosition('T1', 7);
+    vi.advanceTimersByTime(10000);
+    service.checkAllDevices();
+
+    expect(socketServer.broadcastToProjectExceptDevice).toHaveBeenCalledWith(
+      7,
+      'T1',
+      'signal:lost:level1',
+      expect.anything(),
     );
   });
 
   it('no repite nivel 1 en cada chequeo mientras siga en el mismo nivel', () => {
-    service.recordPosition('1');
+    service.recordPosition('T1');
     vi.advanceTimersByTime(10000);
     service.checkAllDevices();
-    io.emit.mockClear();
+    socketServer.sendToDevice.mockClear();
+    socketServer.broadcastToProjectExceptDevice.mockClear();
     vi.advanceTimersByTime(5000);
     service.checkAllDevices();
-    expect(io.emit).not.toHaveBeenCalled();
+    expect(socketServer.sendToDevice).not.toHaveBeenCalled();
+    expect(socketServer.broadcastToProjectExceptDevice).not.toHaveBeenCalled();
   });
 
   it('escala a nivel 2 a partir de 20s y activa la parada preventiva automáticamente', () => {
-    service.recordPosition('1');
+    service.recordPosition('T1');
     vi.advanceTimersByTime(20000);
     service.checkAllDevices();
 
-    expect(io.emit).toHaveBeenCalledWith(
+    expect(socketServer.sendToDevice).toHaveBeenCalledWith(
+      'T1',
       'signal:lost:level2',
-      expect.objectContaining({ deviceId: 1, elapsedSeconds: 20, loop: true }),
+      expect.objectContaining({ deviceId: 'T1', elapsedSeconds: 20, loop: true }),
     );
     expect(preventiveStopService.activate).toHaveBeenCalledWith(
-      expect.stringContaining('1'),
+      expect.stringContaining('T1'),
       'auto',
     );
   });
 
   it('NO activa la parada preventiva si ya está activa', () => {
     preventiveStopService.isActive = true;
-    service.recordPosition('1');
+    service.recordPosition('T1');
     vi.advanceTimersByTime(20000);
     service.checkAllDevices();
     expect(preventiveStopService.activate).not.toHaveBeenCalled();
   });
 
-  it('recordPosition emite signal:recovered si el dispositivo estaba en alerta', () => {
-    service.recordPosition('1');
+  it('recordPosition emite signal:recovered (a ambas audiencias) si el dispositivo estaba en alerta', () => {
+    service.recordPosition('T1');
     vi.advanceTimersByTime(10000);
-    service.checkAllDevices(); 
-    io.emit.mockClear();
+    service.checkAllDevices();
+    socketServer.sendToDevice.mockClear();
+    socketServer.broadcastToProjectExceptDevice.mockClear();
+    socketServer.broadcastToProject.mockClear();
 
-    service.recordPosition('1');
-    expect(io.emit).toHaveBeenCalledWith(
+    service.recordPosition('T1');
+    expect(socketServer.sendToDevice).toHaveBeenCalledWith(
+      'T1',
       'signal:recovered',
-      expect.objectContaining({ deviceId: 1 }),
+      expect.objectContaining({ deviceId: 'T1', message: expect.stringContaining('RECUPERASTE') }),
     );
-    expect(io.emit).toHaveBeenCalledWith(
+    expect(socketServer.broadcastToProjectExceptDevice).toHaveBeenCalledWith(
+      null,
+      'T1',
+      'signal:recovered',
+      expect.objectContaining({ deviceId: 'T1', message: expect.stringContaining('VEHÍCULO T1') }),
+    );
+    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+      null,
       'supervisor:signal_lost',
-      expect.objectContaining({ deviceId: 1, level: 0 }),
+      expect.objectContaining({ deviceId: 'T1', level: 0 }),
     );
   });
 
   it('recordPosition en un dispositivo que nunca estuvo perdido no emite signal:recovered', () => {
-    service.recordPosition('1');
-    expect(io.emit).not.toHaveBeenCalled();
-  });
-
-  it('deviceId se convierte con parseInt en los payloads emitidos - con un id no-numérico da NaN', () => {
-    service.recordPosition('V1');
-    vi.advanceTimersByTime(10000);
-    service.checkAllDevices();
-    expect(io.emit).toHaveBeenCalledWith(
-      'signal:lost:level1',
-      expect.objectContaining({ deviceId: Number.NaN }),
-    );
+    service.recordPosition('T1');
+    expect(socketServer.sendToDevice).not.toHaveBeenCalled();
   });
 
   it('stopMonitoring limpia el intervalo sin lanzar si nunca se inició', () => {
     expect(() => service.stopMonitoring()).not.toThrow();
   });
 
+  it('funciona sin socketServer (se asigna despues, ver app.ts) - no lanza al llegar a nivel 1', () => {
+    const withoutSocket = new SignalLostService({ preventiveStopService });
+    withoutSocket.recordPosition('T1');
+    vi.advanceTimersByTime(10000);
+    expect(() => withoutSocket.checkAllDevices()).not.toThrow();
+  });
+
   it('marca el dispositivo offline en PostgreSQL (vía deviceManager) al llegar a nivel 1 - sin esto el panel admin lo muestra "online" para siempre', () => {
     const deviceManager = { markOffline: vi.fn().mockResolvedValue(undefined) };
-    const withDeviceManager = new SignalLostService({ io, preventiveStopService, deviceManager });
+    const withDeviceManager = new SignalLostService({ socketServer, preventiveStopService, deviceManager });
 
     withDeviceManager.recordPosition('CAMION-01');
     vi.advanceTimersByTime(10000);
@@ -131,27 +179,33 @@ describe('SignalLostService', () => {
     expect(() => service.checkAllDevices()).not.toThrow();
   });
 
-  it('hydrate siembra lastSeen para que un dispositivo ya viejo desde antes del reinicio se re-evalúe de inmediato', () => {
-    service.hydrate([{ deviceId: 'CAMION-VIEJO', lastSeenAt: new Date(Date.now() - 30000) }]);
+  it('hydrate siembra lastSeen y projectId para que un dispositivo ya viejo desde antes del reinicio se re-evalúe de inmediato', () => {
+    service.hydrate([{ deviceId: 'CAMION-VIEJO', lastSeenAt: new Date(Date.now() - 30000), projectId: 3 }]);
     service.checkAllDevices();
 
-    expect(io.emit).toHaveBeenCalledWith(
+    expect(socketServer.broadcastToProjectExceptDevice).toHaveBeenCalledWith(
+      3,
+      'CAMION-VIEJO',
       'signal:lost:level2',
-      expect.objectContaining({ deviceId: Number.NaN, elapsedSeconds: 30 }),
+      expect.objectContaining({ deviceId: 'CAMION-VIEJO', elapsedSeconds: 30 }),
     );
   });
 
   it('marca offline también cuando un dispositivo salta directo a nivel 2 (sin pasar por nivel 1) - caso real: hydrate() de un dispositivo silencioso desde horas antes del reinicio', () => {
     const deviceManager = { markOffline: vi.fn().mockResolvedValue(undefined) };
-    const withDeviceManager = new SignalLostService({ io, preventiveStopService, deviceManager });
+    const withDeviceManager = new SignalLostService({ socketServer, preventiveStopService, deviceManager });
 
     withDeviceManager.hydrate([
-      { deviceId: 'TABLETA-VIEJA', lastSeenAt: new Date(Date.now() - 46739000) },
+      { deviceId: 'TABLETA-VIEJA', lastSeenAt: new Date(Date.now() - 46739000), projectId: null },
     ]);
     withDeviceManager.checkAllDevices();
 
-    expect(io.emit).toHaveBeenCalledWith('signal:lost:level2', expect.anything());
-    expect(io.emit).not.toHaveBeenCalledWith('signal:lost:level1', expect.anything());
+    expect(socketServer.sendToDevice).toHaveBeenCalledWith('TABLETA-VIEJA', 'signal:lost:level2', expect.anything());
+    expect(socketServer.sendToDevice).not.toHaveBeenCalledWith(
+      'TABLETA-VIEJA',
+      'signal:lost:level1',
+      expect.anything(),
+    );
     expect(deviceManager.markOffline).toHaveBeenCalledWith('TABLETA-VIEJA');
   });
 });
