@@ -14,6 +14,18 @@ import { isValidSharedSecret } from '../../utils/sharedSecret';
 // el paquete real de la app Android (applicationId en build.gradle) - rechaza publicar el apk de
 // otra app por error, no solo confiar en que quien sube el archivo se equivoco de ventana
 const EXPECTED_PACKAGE = 'com.gagagps.operator';
+// ComponentName#flattenToString() completo - el aprovisionamiento QR de Android (leido por el
+// propio sistema operativo durante el setup de fabrica, no por esta app) necesita el nombre de
+// clase completo, a diferencia de `adb shell dpm set-device-owner` que acepta el atajo ".kiosk...."
+const ADMIN_COMPONENT = 'com.gagagps.operator/com.gagagps.operator.kiosk.KioskAdminReceiver';
+
+function sha256HexToBase64Url(hex: string): string {
+  return Buffer.from(hex, 'hex')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
 
 interface SocketServerLike {
   broadcast(event: string, payload: unknown): void;
@@ -113,6 +125,45 @@ export function buildAppUpdateRouter({
     } catch (err) {
       console.error('app-update.routes POST /report-version:', (err as Error).message);
       res.status(500).json({ error: 'Error guardando la version reportada' });
+    }
+  });
+
+  // payload para el QR de aprovisionamiento de fabrica (Device Owner sin adb, ver README) - lo
+  // arma el backend porque necesita el sha256 del ultimo release (ya calculado al publicar) y el
+  // telemetrySharedSecret (el mismo "token" que ya usan las tabletas, admin ya puede verlo tal
+  // cual en GET /api/settings - esto no expone nada que un admin no viera ya). El sistema
+  // operativo de la tableta lee este JSON directo del QR durante el setup de fabrica - nunca pasa
+  // por nuestra app ni por este backend en ese momento, solo descarga el APK de `downloadUrl`.
+  router.get('/qr-provisioning', authMiddleware, canManage, async (req, res) => {
+    try {
+      const latest = await appReleaseRepo.findLatest();
+      if (!latest) return res.status(404).json({ error: 'Sin release publicado todavía' });
+      if (!env.telemetrySharedSecret) {
+        return res.status(400).json({ error: 'Configura el telemetry shared secret antes de generar el QR' });
+      }
+
+      // req.protocol siempre reporta 'http' detras de Caddy (el backend nunca ve TLS directo, ver
+      // docker-compose.yml) - sin esto el QR traería una URL http:// real que el aprovisionamiento
+      // de Android probablemente rechace. No se toca `app.set('trust proxy', ...)` globalmente
+      // (afectaría req.ip del rate limiter) - solo se lee el header aquí, con fallback seguro.
+      const forwardedProto = req.get('x-forwarded-proto');
+      const protocol = forwardedProto ? forwardedProto.split(',')[0].trim() : req.protocol;
+      const downloadUrl = `${protocol}://${req.get('host')}/api/app/download?key=${encodeURIComponent(env.telemetrySharedSecret)}`;
+
+      res.json({
+        versionCode: latest.version_code,
+        versionName: latest.version_name,
+        provisioningPayload: {
+          'android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME': ADMIN_COMPONENT,
+          'android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION': downloadUrl,
+          'android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_CHECKSUM': sha256HexToBase64Url(latest.sha256),
+          'android.app.extra.PROVISIONING_SKIP_ENCRYPTION': true,
+          'android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED': true,
+        },
+      });
+    } catch (err) {
+      console.error('app-update.routes GET /qr-provisioning:', (err as Error).message);
+      res.status(500).json({ error: 'Error generando el aprovisionamiento QR' });
     }
   });
 

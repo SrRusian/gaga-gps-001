@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.provider.Settings
 
 // Envuelve las llamadas reales a DevicePolicyManager - todo aqui requiere que la app ya sea
 // "Device Owner" (dpm set-device-owner desde una PC con ADB, solo posible en una tableta recien
@@ -51,5 +52,28 @@ object KioskManager {
         val admin = adminComponent(activity)
         dpm.setStatusBarDisabled(admin, false)
         dpm.clearPackagePersistentPreferredActivities(admin, activity.packageName)
+    }
+
+    // "Opciones de desarrollador" activo - prerequisito real para poder elegir esta app como
+    // "ubicacion simulada" (RTK), aunque no tiene relacion directa con Device Owner. Ningun app
+    // puede activar esto por su cuenta (proteccion real de Android contra malware) - solo se
+    // puede leer el estado y, si ya esta activo, abrir el atajo directo a la pantalla.
+    fun isDeveloperOptionsEnabled(context: Context): Boolean =
+        Settings.Global.getInt(context.contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 0
+
+    // intenta abrir directo la pantalla de Opciones de desarrollador (ahi mismo esta "Seleccionar
+    // app de ubicacion falsa") - en algunos fabricantes este intent no hace nada si developer
+    // options todavia no se activo manualmente (7 toques en "Numero de compilacion"), por eso cae
+    // a la pantalla de "Acerca de la tableta" como respaldo, nunca deja al usuario sin ningun lugar
+    // donde ir. Sin verificar en hardware real de que fabricante se comporta de que forma.
+    fun openDeveloperOptionsOrAbout(context: Context) {
+        val devOptionsIntent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(devOptionsIntent)
+        } catch (_: Exception) {
+            val aboutIntent = Intent(Settings.ACTION_DEVICE_INFO_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(aboutIntent)
+        }
     }
 }

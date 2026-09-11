@@ -18,12 +18,14 @@
     "@gaga-gps/ui": "*",
     "@mapbox/mapbox-gl-draw": "^1.4.3",
     "maplibre-gl": "^5.24.0",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
     "@types/mapbox__mapbox-gl-draw": "^1.4.8",
+    "@types/qrcode": "^1.5.5",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.0.5",

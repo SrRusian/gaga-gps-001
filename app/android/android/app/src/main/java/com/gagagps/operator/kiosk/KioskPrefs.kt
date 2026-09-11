@@ -12,4 +12,14 @@ object KioskPrefs {
 
     fun getEnabled(context: Context): Boolean = prefs(context).getBoolean("enabled", false)
     fun setEnabled(context: Context, enabled: Boolean) = prefs(context).edit().putBoolean("enabled", enabled).apply()
+
+    // true solo si esta tableta se convirtio en Device Owner via el QR de aprovisionamiento
+    // (KioskAdminReceiver.onProfileProvisioningComplete) en vez del comando adb manual - la web lo
+    // usa para saltarse el codigo de "Modo Operador" y aprovisionar sola al primer arranque, ya
+    // que escanear el QR fue en si mismo la decision humana de configurar esta tableta como
+    // operador/kiosko. Nunca se limpia solo - una vez consumido, enableOperatorMode() en la web ya
+    // queda en true y no se vuelve a leer.
+    fun getWasQrProvisioned(context: Context): Boolean = prefs(context).getBoolean("was_qr_provisioned", false)
+    fun setWasQrProvisioned(context: Context, value: Boolean) =
+        prefs(context).edit().putBoolean("was_qr_provisioned", value).apply()
 }

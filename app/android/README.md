@@ -33,10 +33,10 @@ A pedido explícito del usuario: si una opción (precisión baja, sin buffer, si
   - **Modo de correccion**: selector NTRIP Client / PointPerfect / USB Serial - solo NTRIP Client funciona hoy, los otros dos se guardan y se muestran bloqueados "proximamente" en el front (contemplados a proposito, sin rehacer el selector despues).
   - **Ubicacion simulada** y **Output to SW Maps** ahora son toggles reales que reflejan el estado actual (antes "Output to SW Maps" no existia) - SW Maps se implementa como un servidor TCP local en `SwMapsOutputServer.kt` (puerto configurable, default 11123, solo localhost) que retransmite el NMEA crudo del receptor a cualquier app que se conecte (SW Maps: External GNSS > TCP > 127.0.0.1:puerto).
   - **Servicio GNSS: Activar/Desactivar/Reiniciar** - un control en el front (`DeviceSettingsPanel.tsx`) que orquesta USB+NTRIP+mock location+SW Maps juntos en el orden correcto, sin logica nueva del lado nativo (cada pieza sigue siendo un plugin independiente).
-- **Automatización / provisión rápida** - pensado para instalar la app en una tableta nueva y que quede operando sola:
-  - **Botón "Configuración rápida" + código de 4 dígitos** (`DeviceSettingsPanel.tsx`, código en una constante al inicio del archivo, cambiar ahí si hace falta) - rellena de un golpe servidor/token/credenciales NTRIP conocidas y activa el "modo automático". El identificador del dispositivo y el mount point NUNCA se rellenan solos - varían por tableta/ubicación, se quedan manuales a propósito.
+- **Automatización / provisión rápida** - pensado para instalar la app en una tableta nueva y que quede operando sola (ver también "QR de aprovisionamiento" más abajo, que además evita adb):
+  - **Código de 4 dígitos "Modo Operador"** (`OPERATOR_MODE_CODE` en `DeviceSettingsPanel.tsx`, cambiar ahí si hace falta) - al activarlo (`applyDefaultProvisioning()`) deja de un golpe: servidor de producción, envío continuo a 1s, NTRIP con valores base, baud rate 460800, salida SW Maps. El identificador de dispositivo, el token y el mount point NUNCA se rellenan solos - varían por tableta/ubicación, se quedan manuales a propósito. El mismo botón "Restaurar valores por defecto" (Ajustes > Servicio GNSS) repite esto sin duplicar perfiles.
   - **Envío de posición persiste solo** (`TraccarPrefs.autoStart`, Kotlin) - una vez que se le da "Iniciar envío continuo" una vez, se retoma solo si se cierra/reabre la app (`MainActivity.resumeTraccarIfNeeded()`) y hasta si se reinicia la tableta completa (`BootReceiver.kt`, escucha `BOOT_COMPLETED`).
-  - **Modo automático del RTK/NTRIP** (`RtkPrefs.autoModeEnabled`, activado por el código de arriba) - al conectar el USB del receptor (se detecta por vendor id de u-blox, `0x1546`, con `baudRate` guardado) se conecta solo y arranca NTRIP solo (si ya hay un mount point guardado) + ubicación simulada; al desconectar el USB, todo eso se apaga solo y el sistema vuelve al GPS normal de la tableta - sin tocar nada a mano, ni una vez.
+  - **Auto-conectar USB/NTRIP incondicional** - al conectar el receptor (se detecta por vendor id conocido, ver `res/xml/device_filter.xml`) se conecta solo y arranca NTRIP solo (si ya hay un mount point guardado) + ubicación simulada; al desconectar, todo eso se apaga solo y el sistema vuelve al GPS normal de la tableta - sin ningún switch que alguien pueda dejar apagado sin querer.
   - **Bloqueo de ajustes con contraseña** (`web/packages/client/deviceConfig.ts`, `localStorage`) - opcional, vacío por defecto. Una vez puesta, la pantalla de ajustes pide la contraseña antes de mostrar nada, para que un operador no pueda entrar a cambiar la configuración por accidente o a propósito.
 - `app/packages/android-bridge` - la interfaz TypeScript hacia esos dos plugins, consumida por `web`.
 - `DeviceSettingsPanel.tsx` (`web/src/features/device-settings/`) - la pantalla de configuración completa (servidor/token/id, intervalo/contraseña, bitácora, USB, NTRIP, estado del fix en vivo), accesible desde el engranaje del login.
@@ -89,9 +89,16 @@ Para una tableta montada en un vehículo (ej. Samsung Tab Active 5 con modo sin 
 - `MainActivity.dismissKeyguard()` - hace que la app se muestre encima de la pantalla de bloqueo al arrancar.
 - `BootReceiver.kt` - relanza la app en cada arranque completo de la tableta si el Modo Kiosko está activado.
 
-### Paso manual obligatorio - una vez por CADA tableta física, esto NO se puede hacer desde aquí
+### Dos formas de convertir una tableta en Device Owner
 
-"Device Owner" es un estado que vive dentro de esa tableta en concreto - no viaja con la app ni se copia al instalar el mismo APK en otra tableta. Cualquier tableta nueva que se vaya a usar en Modo Kiosko necesita este mismo procedimiento, una vez, como parte de su preparación inicial. (Para preparar muchas tabletas seguido sin hacerlo una por una a mano, existen "Android zero-touch enrollment"/"Knox Mobile Enrollment" - no implementado aquí, avisar si hace falta escalar a eso.)
+"Device Owner" es un estado que vive dentro de esa tableta en concreto - no viaja con la app ni se copia al instalar el mismo APK en otra tableta. Cualquier tableta nueva que se vaya a usar en Modo Kiosko o con actualización automática necesita pasar por una de estas dos, una vez, como parte de su preparación inicial:
+
+1. **Comando `adb` desde una PC** (abajo) - requiere Android Studio/SDK y cable USB, pero se puede hacer sobre una tableta que ya tuvo algo de uso (mientras no tenga cuenta agregada en el momento del comando).
+2. **Código QR de aprovisionamiento** (ver sección "Actualización automática" más abajo, "Generar QR de aprovisionamiento" en el panel de Admin > Sistema) - **sin computadora, sin adb, sin Android Studio** - solo funciona en una tableta recién reseteada de fábrica (parte del propio asistente de configuración inicial de Android). Es la opción real para que una persona externa sin conocimientos técnicos deje una tableta lista, con solo un factory reset + escanear un código.
+
+No existe una forma de activar Device Owner desde los Ajustes normales de una tableta ya en uso (ni con cuenta, ni sin ella) - siempre es una de estas dos rutas.
+
+### Comando adb - una vez por CADA tableta física
 
 Requiere una PC con el SDK de Android (trae `adb`, ya viene con Android Studio) conectada por USB a la tableta, y **que la tableta no tenga ninguna cuenta agregada en el momento de correr el comando** (Device Owner solo se puede activar sin cuentas - restricción de seguridad de Android, no de esta app). Esto es sobre el momento del comando, no algo permanente: **sí se puede agregar una cuenta de Google después**, para entrar a Play Store y descargar/actualizar apps normalmente.
 
@@ -159,6 +166,36 @@ A diferencia del resto del Modo Kiosko (ya confirmado en campo), este mecanismo 
 - Que el evento de "actualizar ahora" (socket) de verdad llegue y dispare `AppUpdate.checkNow()` con la app en primer plano real (Modo Kiosko activo) - la lógica está escrita y verificada a mano, sin poder abrir un socket real desde este entorno.
 
 Recomendado: la primera vez, publica una versión de prueba (`versionCode` +1 sin cambios reales) y confirma en Ajustes (o con "Actualizar esta tableta" desde el panel) que la tableta la detecta, descarga, instala y vuelve a abrirse sola antes de confiar en esto para una actualización real.
+
+## QR de aprovisionamiento (Device Owner sin computadora)
+
+Junto a los botones de forzar actualización (Admin > Sistema > "Actualización de la app") hay un botón **"Generar QR de aprovisionamiento"** - genera un código QR que deja una tableta **recién reseteada de fábrica** lista como Device Owner, sin adb, sin cable, sin Android Studio. Es el mecanismo estándar de Android para aprovisionar dispositivos dedicados a distancia (lo mismo que usan los MDM reales).
+
+### Cómo se usa
+
+1. Publica al menos una versión (arriba) - el QR siempre apunta a la última publicada.
+2. Admin > Sistema > "Generar QR de aprovisionamiento".
+3. En la tableta (reseteada de fábrica, sin ninguna cuenta agregada): en la primera pantalla de bienvenida, toca **6 veces** en cualquier parte de la pantalla - abre un lector de QR integrado de Android.
+4. Conecta WiFi cuando lo pida (necesita internet para descargar el APK).
+5. Escanea el código y sigue las instrucciones en pantalla. Android descarga el APK, verifica su SHA-256 contra el que trae el QR, lo instala y lo deja como Device Owner automáticamente.
+6. Al abrir la app por primera vez, se aprovisiona sola (servidor de producción, envío continuo, NTRIP de fábrica) **sin pedir el código de "Modo Operador"** - escanear el QR ya fue la decisión de dejar esa tableta como operador/kiosko (`KioskAdminReceiver.onProfileProvisioningComplete`, `KioskPrefs.wasQrProvisioned`). Sigue siendo manual: el identificador/token de esa tableta en particular (varían por tableta) y activar el switch de Modo Kiosko.
+
+### Qué NO resuelve el QR
+
+- **Ubicación simulada para RTK** - sigue siendo un toggle manual de Android (`Ajustes > Opciones de desarrollador > Seleccionar app de ubicación falsa`), sin API pública para que ninguna app (ni Device Owner) lo conceda sola. Ver el checklist de abajo.
+- El QR solo cubre tabletas **nuevas o reseteadas de fábrica** - una tableta ya configurada necesita `adb` (arriba) o un reset primero.
+
+### Checklist de aprovisionamiento dentro de la app
+
+`DeviceSettingsPanel.tsx`, sección "Receptor RTK y corrección NTRIP", detecta en vivo (sin permisos, solo lectura de `Settings.Global`) si faltan los 2 requisitos reales de Android para RTK - "Opciones de desarrollador" y "ubicación simulada" - y muestra un aviso con botón **"Abrir Ajustes de Android"** (deep-link directo, con `Ajustes > Acerca de la tableta` como respaldo si el atajo no funciona en ese fabricante) + **"Ya lo hice, verificar"** (reintenta `RtkNtrip.startMockLocation()` a propósito, solo cuando el usuario lo pide). El aviso desaparece solo en cuanto detecta que ya quedó configurado, sin que nadie tenga que cerrar nada a mano.
+
+**Por qué el chequeo de ubicación simulada NO es un poll automático de fondo** (a diferencia de "Opciones de desarrollador", que sí se revisa solo cada pocos segundos): llamar `addTestProvider(GPS_PROVIDER)` registra un proveedor de prueba que **reemplaza el GPS real para toda la tableta** hasta que se le alimente una posición real - si esto corriera solo, en segundo plano, en CUALQUIER tableta (use RTK o no), le rompería el GPS real sin que nadie lo pidiera. Por eso solo se reintenta cuando el usuario presiona el botón a propósito, ya sabiendo que está configurando RTK en ese momento.
+
+Device Owner (para Kiosko/actualización automática) **no tiene chequeo con botón de arreglo** - a diferencia de los dos anteriores, no hay forma de concedérselo a una app ya instalada y corriendo normal; solo se puede informar que falta (Ajustes > Modo Kiosko ya muestra este mensaje) y señalar que hace falta reiniciar el proceso de instalación (adb o QR).
+
+### Sin verificar en hardware real todavía
+
+Ni el QR de aprovisionamiento ni `onProfileProvisioningComplete` se han probado con una tableta reseteada de fábrica de verdad - el flujo del lado del servidor (generar el payload, el hash, la URL de descarga con el protocolo correcto detrás de un proxy) sí se verificó con Docker real. Antes de confiar en esto para una instalación real: resetea una tableta de prueba, genera el QR, y confirma que el flujo completo (Device Owner, apertura automática, aprovisionamiento sin pedir el código) funciona de punta a punta.
 
 ## Limitaciones conocidas (honestas)
 
