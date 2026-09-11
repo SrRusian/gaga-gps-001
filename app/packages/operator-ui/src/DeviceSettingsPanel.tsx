@@ -755,6 +755,29 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     }
   }
 
+  // ver KioskManager.releaseDeviceOwner (Kotlin) - unica forma confiable de desbloquear la
+  // desinstalacion normal sin un reseteo de fabrica completo (adb dpm remove-active-admin y pm
+  // clear confirmados bloqueados por el shell en builds de produccion, ver README)
+  async function releaseDeviceOwner() {
+    setKioskError('');
+    const confirmed = confirm(
+      'Esto libera a esta app como Device Owner. Deja de funcionar el Modo Kiosko y las ' +
+        'actualizaciones automaticas silenciosas, y la app se vuelve desinstalable normal desde ' +
+        'Ajustes de Android. Hay que volver a correr el comando adb de aprovisionamiento si se ' +
+        'quiere recuperar esto despues.\n\n¿Continuar?',
+    );
+    if (!confirmed) return;
+    setKioskBusy(true);
+    try {
+      await Kiosk.releaseDeviceOwner();
+      setKioskStatus(await Kiosk.getStatus());
+    } catch (e) {
+      setKioskError(e instanceof Error ? e.message : 'No se pudo liberar Device Owner');
+    } finally {
+      setKioskBusy(false);
+    }
+  }
+
   // checklist de aprovisionamiento para RTK - "Opciones de desarrollador" y "ubicacion simulada"
   // son requisitos reales de Android que ninguna app puede activar sola (ver README). Solo se
   // reintenta mockLocation.start() cuando el usuario lo pide a proposito (este boton) - hacerlo
@@ -1324,6 +1347,20 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
             salir (mantenimiento, actualizar la app, etc.) hay que volver a este mismo panel de
             Ajustes y apagar el switch - por eso necesita contrasena de ajustes puesta.
           </p>
+          {kioskStatus.isDeviceOwner && (
+            <div className="ds-actions" style={{ marginTop: 10 }}>
+              <button onClick={releaseDeviceOwner} disabled={kioskBusy}>
+                Liberar Device Owner (para desinstalar)
+              </button>
+              <p className="ds-hint">
+                Solo hace falta si necesitas desinstalar esta app por completo desde Ajustes de
+                Android - normalmente bloqueado mientras es Device Owner, y "adb shell dpm
+                remove-active-admin"/"pm clear" estan bloqueados por el shell en builds de
+                produccion. Apaga el Modo Kiosko y las actualizaciones automaticas silenciosas -
+                hay que reaprovisionar (comando adb) para recuperarlos despues.
+              </p>
+            </div>
+          )}
         </section>
 
         <section className="ds-section">

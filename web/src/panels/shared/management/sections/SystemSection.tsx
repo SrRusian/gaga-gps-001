@@ -11,6 +11,12 @@ interface QrProvisioningResponse {
   provisioningPayload: Record<string, string | boolean>;
 }
 
+interface DownloadQrResponse {
+  versionCode: number;
+  versionName: string;
+  downloadUrl: string;
+}
+
 function uploadApk(
   formData: FormData,
   onProgress: (percent: number) => void,
@@ -66,6 +72,12 @@ export function SystemSection() {
   const [qrError, setQrError] = useState('');
   const [qrImage, setQrImage] = useState('');
   const [qrInfo, setQrInfo] = useState<QrProvisioningResponse | null>(null);
+
+  const [showDownloadQrModal, setShowDownloadQrModal] = useState(false);
+  const [downloadQrBusy, setDownloadQrBusy] = useState(false);
+  const [downloadQrError, setDownloadQrError] = useState('');
+  const [downloadQrImage, setDownloadQrImage] = useState('');
+  const [downloadQrInfo, setDownloadQrInfo] = useState<DownloadQrResponse | null>(null);
 
   async function loadHealth() {
     try {
@@ -158,6 +170,24 @@ export function SystemSection() {
       setQrError(err instanceof Error ? err.message : 'Error generando el QR');
     } finally {
       setQrBusy(false);
+    }
+  }
+
+  async function openDownloadQrModal() {
+    setShowDownloadQrModal(true);
+    setDownloadQrBusy(true);
+    setDownloadQrError('');
+    setDownloadQrImage('');
+    setDownloadQrInfo(null);
+    try {
+      const info = await adminApi.get<DownloadQrResponse>('/api/app/download-qr');
+      setDownloadQrInfo(info);
+      const dataUrl = await QRCode.toDataURL(info.downloadUrl, { width: 320, margin: 2 });
+      setDownloadQrImage(dataUrl);
+    } catch (err) {
+      setDownloadQrError(err instanceof Error ? err.message : 'Error generando el QR');
+    } finally {
+      setDownloadQrBusy(false);
     }
   }
 
@@ -300,18 +330,29 @@ export function SystemSection() {
           </table>
         )}
 
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn btn-sm" style={{ width: 'auto' }} onClick={openQrModal} disabled={!latestRelease}>
             Generar QR de aprovisionamiento
           </button>
-          <p style={{ fontSize: 12, color: '#8b949e', marginTop: 8 }}>
-            Para una tableta NUEVA o recién reseteada de fábrica - deja la app instalada como dueña
-            del dispositivo (Device Owner) sin computadora ni cable, escaneando este código durante
-            la configuración inicial. Al abrir después, la app se aprovisiona sola (servidor,
-            envío, NTRIP) sin pedir el código de "Modo Operador". No reemplaza activar Kiosko ni
-            configurar el identificador/token de esa tableta en particular, eso sigue siendo manual.
-          </p>
+          <button
+            className="btn btn-sm"
+            style={{ width: 'auto' }}
+            onClick={openDownloadQrModal}
+            disabled={!latestRelease}
+          >
+            Generar QR de descarga
+          </button>
         </div>
+        <p style={{ fontSize: 12, color: '#8b949e', marginTop: 8 }}>
+          <strong>Aprovisionamiento</strong>: para una tableta NUEVA o recién reseteada de fábrica -
+          en teoría deja la app instalada como dueña del dispositivo (Device Owner) sin computadora
+          ni cable, escaneando este código durante la configuración inicial. Bloqueado en la
+          práctica en hardware real por la política de Google de 2025 (allowlist de Play Protect
+          para DPCs no registrados) - usar `adb shell dpm set-device-owner` en su lugar mientras
+          tanto. <strong>Descarga</strong>: no aprovisiona nada, solo abre la última APK publicada en
+          el navegador al escanearlo - útil para instalar/actualizar a mano sin teclear la URL en la
+          tableta.
+        </p>
       </div>
 
       <Modal open={showQrModal} title="QR de aprovisionamiento" onClose={() => setShowQrModal(false)}>
@@ -335,6 +376,25 @@ export function SystemSection() {
             <p style={{ fontSize: 12, color: '#8b949e' }}>
               Sin verificar en hardware real todavía - probar con una tableta reseteada antes de
               confiar en esto para una instalación real.
+            </p>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={showDownloadQrModal} title="QR de descarga" onClose={() => setShowDownloadQrModal(false)}>
+        {downloadQrBusy && <p>Generando…</p>}
+        {downloadQrError && <div style={{ color: '#f85149' }}>{downloadQrError}</div>}
+        {downloadQrImage && downloadQrInfo && (
+          <div style={{ textAlign: 'center' }}>
+            <img src={downloadQrImage} alt="QR de descarga" style={{ maxWidth: '100%' }} />
+            <p style={{ fontSize: 13, color: '#8b949e', marginTop: 8 }}>
+              Versión {downloadQrInfo.versionName} (build {downloadQrInfo.versionCode})
+            </p>
+            <p style={{ fontSize: 13, color: '#c9d1d9', textAlign: 'left' }}>
+              Escanéalo con cualquier lector de QR (o la cámara) en la tableta - abre la descarga
+              del APK directo en el navegador. Usa siempre la clave configurada arriba
+              ("Telemetry shared secret") en este momento, así que si la cambias hay que generar
+              este QR de nuevo.
             </p>
           </div>
         )}

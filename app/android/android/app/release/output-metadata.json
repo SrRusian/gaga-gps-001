@@ -4,15 +4,15 @@
     "type": "APK",
     "kind": "Directory"
   },
-  "applicationId": "com.gagagps.operator",
+  "applicationId": "com.gaga.app",
   "variantName": "release",
   "elements": [
     {
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 10,
-      "versionName": "1.0.7-qr-provisioning",
+      "versionCode": 14,
+      "versionName": "1.0.11-package-rename",
       "outputFile": "app-release.apk"
     }
   ],
