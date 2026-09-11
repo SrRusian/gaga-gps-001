@@ -238,6 +238,10 @@ export interface KioskPlugin {
   enable(): Promise<void>;
   disable(): Promise<void>;
   openDeveloperOptions(): Promise<void>;
+  // renuncia a Device Owner desde dentro de la app - unica forma confiable de desbloquear la
+  // desinstalacion normal sin un reseteo de fabrica completo (adb shell dpm remove-active-admin y
+  // pm clear estan bloqueados por el shell en builds de produccion, confirmado en hardware real)
+  releaseDeviceOwner(): Promise<void>;
 }
 
 const webKioskFallback: KioskPlugin = {
@@ -251,6 +255,7 @@ const webKioskFallback: KioskPlugin = {
   enable: async () => unavailable('Kiosk'),
   disable: async () => unavailable('Kiosk'),
   openDeveloperOptions: async () => unavailable('Kiosk'),
+  releaseDeviceOwner: async () => unavailable('Kiosk'),
 };
 
 export interface AppUpdateStatus {

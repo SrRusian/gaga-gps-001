@@ -1,4 +1,4 @@
-# GAGA Operador (Android)
+# GAGA App (Android)
 
 Este APK sirve para **cualquier rol** (Admin, Encargado de Proyecto, Supervisor, Operador) - es el mismo `web` de siempre empacado con Capacitor, con un solo login que decide la vista según el rol, igual que en el navegador. Un dispositivo recién instalado queda en **modo básico**: solo login, sin pedir ningún permiso extra. Las 3 piezas de abajo (Traccar/GNSS Master) solo son relevantes para Operador, y quedan ocultas hasta que alguien del equipo activa el **"Modo Operador"** desde Ajustes con un código interno de 4 dígitos (ver `DeviceSettingsPanel.tsx`, constante `OPERATOR_MODE_CODE`) - una vez activado no se puede desactivar sin reinstalar la app. Esto evita que cualquiera que instale el APK active el envío de datos por accidente o a propósito.
 
@@ -62,7 +62,7 @@ La mayoría de las tabletas solo tienen un puerto USB-C. Si lo usas para el cabl
 
 Android bloquea por diseño que cualquier app finja tu ubicación, a menos que la elijas explícitamente. Después de instalar la app una vez:
 
-`Ajustes > Opciones de desarrollador > Seleccionar app de ubicación falsa` → elige **GAGA Operador**.
+`Ajustes > Opciones de desarrollador > Seleccionar app de ubicación falsa` → elige **GAGA App**.
 
 Sin este paso, el botón "Activar ubicación simulada" de la pantalla de Integraciones falla con un mensaje claro (ya está manejado en el código, no truena la app) explicando este mismo paso.
 
@@ -112,7 +112,7 @@ Requiere una PC con el SDK de Android (trae `adb`, ya viene con Android Studio) 
    ```
    Debe listar la tableta (no "unauthorized" - si sale así, revisa el diálogo de depuración USB en la pantalla de la tableta). Luego el comando real:
    ```bash
-   adb shell dpm set-device-owner com.gagagps.operator/.kiosk.KioskAdminReceiver
+   adb shell dpm set-device-owner com.gaga.app/.kiosk.KioskAdminReceiver
    ```
    Debe responder `Success:` - si da un error tipo "not allowed" o menciona una cuenta existente, la tableta no está limpia, repite el paso 1.
 6. En Ajustes de Android (no de la app) > Pantalla de bloqueo, pon el bloqueo en **"Ninguno"** o **"Deslizar"** - con un PIN/patrón/contraseña real, Android SIEMPRE va a pedir el código al encender, sin importar el Modo Kiosko (ninguna app, ni siquiera Device Owner, puede saltarse eso - es una protección de seguridad real de Android). Si el bloqueo real importa para otra cosa, dilo y lo platicamos, pero para "cero toques al encender" tiene que estar así.
@@ -127,6 +127,49 @@ Entra a la app (ya vas a estar dentro, no hay otra forma), ve a Ajustes con la c
 ### Limitación real, no ocultada
 
 Un diálogo del sistema que necesite mostrarse (poco común, ya que el fix de permiso USB de `device_filter.xml` evita el más frecuente) podría quedar bloqueado por Lock Task Mode en algunos casos - no se ha probado en campo con el kiosko activo todavía. Probar bien antes de dar esto por resuelto en producción.
+
+## Reinstalación limpia (eliminar todo y volver a instalar)
+
+Referencia rápida para copiar/pegar - borra la app, todos sus datos/permisos y el estado de
+Device Owner de una tableta, y la deja lista de nuevo. Mismos conceptos que arriba, resumidos.
+
+### 1. Eliminar por completo
+
+Si la tableta **ya es Device Owner**, `adb` no puede desinstalarla directo - Android lo bloquea
+mientras siga siendo Device Owner (protección real del sistema, para que nadie quite el control
+de un MDM sin permiso). Hay que liberarlo primero DESDE la propia app:
+
+1. Abre la app → engranaje de Ajustes → contraseña → sección "Modo Kiosko" → botón
+   **"Liberar Device Owner (para desinstalar)"**.
+
+Con eso hecho (o si la tableta nunca fue Device Owner), desinstala normal - borra la app y TODOS
+sus datos/permisos automáticamente, sin comando aparte:
+
+```bash
+adb uninstall com.gaga.app
+```
+
+(Instalación vieja sin renombrar todavía: usa `com.gagagps.operator` en vez de `com.gaga.app`.)
+
+### 2. Instalar y dejar operando
+
+```bash
+# 1. Instala el APK firmado
+adb install ruta\al\app-release.apk
+
+# 2. Vuélvela Device Owner (SIN ninguna cuenta agregada en la tableta en este momento)
+adb shell dpm set-device-owner com.gaga.app/.kiosk.KioskAdminReceiver
+```
+
+Dos pasos manuales de Android (no de la app, no se pueden automatizar ni por adb):
+
+- `Ajustes > Opciones de desarrollador > Seleccionar app de ubicación falsa` → **GAGA App**
+  (solo necesario si se usa RTK).
+- `Ajustes > Pantalla de bloqueo` → **Ninguno** (o Deslizar) - si no, el Modo Kiosko no abre
+  "cero toques" al encender la tableta.
+
+De ahí en adelante, el resto (Modo Operador, servidor/token/id, NTRIP, activar Kiosko) es
+configuración normal dentro de la app.
 
 ## Actualización automática (sin Play Store)
 
@@ -148,7 +191,7 @@ Se activa desde el mismo panel de Ajustes, sección "Actualización automática"
 
 1. Sube el `versionCode` (entero, siempre mayor al anterior) y `versionName` en `app/android/android/app/build.gradle` antes de compilar - la tableta compara contra `versionCode`, no contra el nombre.
 2. Genera el APK firmado (Android Studio > Build > Generate Signed Bundle/APK).
-3. En el panel de Admin (rol `admin` únicamente) > Sistema > "Actualización de la app": selecciona el archivo `.apk` y dale "Publicar" - **el `versionCode`/`versionName` se leen directo del propio APK** (`AndroidManifest.xml`, vía `app-info-parser`), no hay que escribirlos a mano ni arriesgarse a equivocarse de número; el backend calcula el SHA-256 él mismo al recibir el archivo. Si el `versionCode` del APK no es mayor al ya publicado, o el paquete no es `com.gagagps.operator`, se rechaza con un mensaje claro. Ahí mismo se ve el historial completo de versiones publicadas (quién, cuándo, tamaño).
+3. En el panel de Admin (rol `admin` únicamente) > Sistema > "Actualización de la app": selecciona el archivo `.apk` y dale "Publicar" - **el `versionCode`/`versionName` se leen directo del propio APK** (`AndroidManifest.xml`, vía `app-info-parser`), no hay que escribirlos a mano ni arriesgarse a equivocarse de número; el backend calcula el SHA-256 él mismo al recibir el archivo. Si el `versionCode` del APK no es mayor al ya publicado, o el paquete no es `com.gaga.app`, se rechaza con un mensaje claro. Ahí mismo se ve el historial completo de versiones publicadas (quién, cuándo, tamaño).
 4. Dos botones para forzar la actualización sin esperar a las 2 AM: **"Actualizar todos los dispositivos"** o, eligiendo una tableta del selector, **"Actualizar esta tableta"** - ambos piden confirmación explícita antes de mandar la señal.
    - **Límite real de este mecanismo, no oculto**: la señal viaja por el socket que la tableta ya mantiene abierto mientras el Operador está en uso (`useOperatorSocket.ts` avisa su `deviceId` al conectar, `FleetSocketServer.sendToDevice`/`broadcast` lo usan para dirigir el evento) - **solo llega a una tableta que tenga la app abierta y el socket conectado en ese momento**. Una tableta apagada, reiniciando, o sin datos móviles en ese instante simplemente no la recibe - se pone al día sola en su siguiente revisión programada (2 AM) o la próxima vez que alguien fuerce la actualización con ella ya conectada. No hay (todavía) un mecanismo tipo notificación push que la despierte estando apagada/dormida.
 5. Sin forzar nada, cualquier tableta con el switch de Ajustes activado se pone al día sola en su revisión de las 2 AM.

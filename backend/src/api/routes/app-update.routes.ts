@@ -13,11 +13,11 @@ import { isValidSharedSecret } from '../../utils/sharedSecret';
 
 // el paquete real de la app Android (applicationId en build.gradle) - rechaza publicar el apk de
 // otra app por error, no solo confiar en que quien sube el archivo se equivoco de ventana
-const EXPECTED_PACKAGE = 'com.gagagps.operator';
+const EXPECTED_PACKAGE = 'com.gaga.app';
 // ComponentName#flattenToString() completo - el aprovisionamiento QR de Android (leido por el
 // propio sistema operativo durante el setup de fabrica, no por esta app) necesita el nombre de
 // clase completo, a diferencia de `adb shell dpm set-device-owner` que acepta el atajo ".kiosk...."
-const ADMIN_COMPONENT = 'com.gagagps.operator/com.gagagps.operator.kiosk.KioskAdminReceiver';
+const ADMIN_COMPONENT = 'com.gaga.app/com.gaga.app.kiosk.KioskAdminReceiver';
 // SHA-256 (base64url) del certificado con el que se firma el APK release - fijo mientras se siga
 // usando el mismo keystore, no cambia entre versiones (a diferencia de PACKAGE_CHECKSUM, que hashea
 // el archivo completo y hay que recalcular en cada release). Bug real de campo que motivo el
@@ -136,6 +136,36 @@ export function buildAppUpdateRouter({
   // cual en GET /api/settings - esto no expone nada que un admin no viera ya). El sistema
   // operativo de la tableta lee este JSON directo del QR durante el setup de fabrica - nunca pasa
   // por nuestra app ni por este backend en ese momento, solo descarga el APK de `downloadUrl`.
+  // misma logica de protocolo/clave que /qr-provisioning (ver comentario ahi abajo) - factorizada
+  // porque ahora dos rutas la necesitan igual (el QR de aprovisionamiento y el QR de descarga simple)
+  function buildDownloadUrl(req: express.Request): string {
+    const forwardedProto = req.get('x-forwarded-proto');
+    const protocol = forwardedProto ? forwardedProto.split(',')[0].trim() : req.protocol;
+    return `${protocol}://${req.get('host')}/api/app/download?key=${encodeURIComponent(env.telemetrySharedSecret ?? '')}`;
+  }
+
+  // QR "de descarga" simple - no aprovisiona nada, solo abre la URL de /download en el navegador
+  // al escanearlo con cualquier lector de QR normal (util para instalar/actualizar el APK a mano en
+  // una tableta que ya tiene Device Owner via adb, sin teclear la URL en la pantalla de la tableta)
+  router.get('/download-qr', authMiddleware, canManage, async (req, res) => {
+    try {
+      const latest = await appReleaseRepo.findLatest();
+      if (!latest) return res.status(404).json({ error: 'Sin release publicado todavía' });
+      if (!env.telemetrySharedSecret) {
+        return res.status(400).json({ error: 'Configura el telemetry shared secret antes de generar el QR' });
+      }
+
+      res.json({
+        versionCode: latest.version_code,
+        versionName: latest.version_name,
+        downloadUrl: buildDownloadUrl(req),
+      });
+    } catch (err) {
+      console.error('app-update.routes GET /download-qr:', (err as Error).message);
+      res.status(500).json({ error: 'Error generando el QR de descarga' });
+    }
+  });
+
   router.get('/qr-provisioning', authMiddleware, canManage, async (req, res) => {
     try {
       const latest = await appReleaseRepo.findLatest();
@@ -148,9 +178,7 @@ export function buildAppUpdateRouter({
       // docker-compose.yml) - sin esto el QR traería una URL http:// real que el aprovisionamiento
       // de Android probablemente rechace. No se toca `app.set('trust proxy', ...)` globalmente
       // (afectaría req.ip del rate limiter) - solo se lee el header aquí, con fallback seguro.
-      const forwardedProto = req.get('x-forwarded-proto');
-      const protocol = forwardedProto ? forwardedProto.split(',')[0].trim() : req.protocol;
-      const downloadUrl = `${protocol}://${req.get('host')}/api/app/download?key=${encodeURIComponent(env.telemetrySharedSecret)}`;
+      const downloadUrl = buildDownloadUrl(req);
 
       res.json({
         versionCode: latest.version_code,

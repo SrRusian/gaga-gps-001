@@ -111,5 +111,11 @@
          INSTALL_REASON_POLICY); este permiso es defensivo, sin el algunas versiones/fabricantes
          de Android podrian mostrar la pantalla de confirmacion de instalacion igual -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- UpdateScheduler.kt necesita esto para AlarmManager.setExactAndAllowWhileIdle() - sin
+         declararlo, Android 12+ lanza SecurityException en tiempo de ejecucion y tumbaba la app
+         completa (crash real confirmado en hardware, ver UpdateScheduler.kt). Device Owner recibe
+         este permiso otorgado automaticamente al instalar, sin dialogo - pero solo si esta
+         declarado aqui. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
 </manifest>

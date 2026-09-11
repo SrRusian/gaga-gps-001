@@ -688,7 +688,12 @@ mock-location, RTK/NTRIP, "Modo Operador" - en
 **Modo Kiosko** (tableta bloqueada dentro de la app, para montaje en
 vehículo) usa Device Owner + Lock Task Mode de Android - requiere un
 comando `adb` de una sola vez por tableta física (con la tableta sin
-ninguna cuenta agregada en ese momento). Paso a paso completo en
+ninguna cuenta agregada en ese momento). El aprovisionamiento se
+estandarizó en adb manual (el QR de Android para esto choca con una
+política de Google que bloquea DPCs personalizados no aprobados -
+apelación en trámite, sin fecha garantizada). Paso a paso completo,
+incluida la referencia rápida para eliminar/reinstalar una tableta,
+en
 [`app/android/README.md`](app/android/README.md#modo-kiosko-tableta-bloqueada-dentro-de-la-app).
 
 **Actualización automática sin Play Store** (para tabletas fuera de
