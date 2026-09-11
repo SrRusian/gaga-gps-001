@@ -99,7 +99,7 @@ class PositionProcessor {
       }
 
       if (this.signalLostService) {
-        this.signalLostService.recordPosition(position.deviceId);
+        this.signalLostService.recordPosition(position.deviceId, position.projectId ?? null);
       }
 
       if (this.positionFilter) {

@@ -148,8 +148,8 @@ const deviceManager = new DeviceManager({ deviceRepo });
 // socketServer se asigna después - evita ciclo con FleetSocketServer (mismo patrón que incidentAlertService abajo)
 const geofenceService = new GeofenceAlertService({ geofenceRepo, geofenceEventRepo, alertEventRepo });
 const preventiveStopService = new PreventiveStopService({ io, alertEventRepo });
+// socketServer se asigna después - evita ciclo con FleetSocketServer (mismo patrón que geofenceService abajo)
 const signalLostService = new SignalLostService({
-  io,
   preventiveStopService,
   deviceManager,
   alertEventRepo,
@@ -174,6 +174,7 @@ const socketServer = new FleetSocketServer({
 // mismo patrón de ciclo evitado que socketServer.incidentAlertService abajo
 geofenceService.socketServer = socketServer;
 speedAlertService.socketServer = socketServer;
+signalLostService.socketServer = socketServer;
 
 const positionFilter = new PositionFilterService(env.positionFilter);
 const speedEstimator = new SpeedEstimationService();
@@ -461,7 +462,7 @@ async function loadPersistedState(): Promise<void> {
     const devices = await deviceRepo.findAll();
     const staleTrackedDevices = devices
       .filter((d) => d.status === 'online' && d.last_update)
-      .map((d) => ({ deviceId: d.unique_id, lastSeenAt: d.last_update as Date }));
+      .map((d) => ({ deviceId: d.unique_id, lastSeenAt: d.last_update as Date, projectId: d.project_id }));
     signalLostService.hydrate(staleTrackedDevices);
     console.log(
       `${staleTrackedDevices.length} dispositivo(s) "online" recuperado(s) para monitoreo de señal`,

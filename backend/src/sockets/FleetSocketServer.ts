@@ -231,6 +231,23 @@ class FleetSocketServer {
   sendToDevice(deviceId: string, event: string, payload: unknown): void {
     this.io.to(deviceRoom(deviceId)).emit(event, payload);
   }
+
+  // como broadcastToProject, pero sin mandarselo a excludeDeviceId - para avisos de "otro vehiculo
+  // de tu proyecto tiene un problema" que no le hacen sentido dirigidos a el mismo (ver
+  // SignalLostService, que ademas manda por separado un aviso en primera persona a excludeDeviceId
+  // via sendToDevice)
+  broadcastToProjectExceptDevice(
+    projectId: number | null,
+    excludeDeviceId: string,
+    event: string,
+    payload: unknown,
+  ): void {
+    const target =
+      projectId === null
+        ? this.io.to(ADMIN_ROOM)
+        : this.io.to(projectRoom(projectId)).to(ADMIN_ROOM);
+    target.except(deviceRoom(excludeDeviceId)).emit(event, payload);
+  }
 }
 
 export default FleetSocketServer;

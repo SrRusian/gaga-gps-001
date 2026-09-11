@@ -143,21 +143,19 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
 
-    // dirigido al propio vehiculo afectado ("REDUZCA VELOCIDAD" es una instruccion para quien lo
-    // esta manejando, no un aviso general de flota) - sin filtrar por deviceId, cualquier operador
-    // conectado veia el aviso de CUALQUIER otro vehiculo con senal perdida como si fuera el suyo
+    // el backend ya decide el mensaje segun la audiencia (SignalLostService.ts): al propio
+    // vehiculo afectado le llega en primera persona via un evento dirigido solo a el, al resto del
+    // proyecto en tercera persona ("VEHICULO X SIN SEÑAL") por seguridad - aqui solo se muestra
+    // el que de verdad llego, sin filtrar de nuevo
     socket.on('signal:lost:level1', (data) => {
-      if (data.deviceId !== deviceId) return;
       showWarning(data.message);
       soundsRef.current.playWarningSound();
     });
     socket.on('signal:lost:level2', (data) => {
-      if (data.deviceId !== deviceId) return;
       showDanger(data.message);
       soundsRef.current.playDangerSound(data.loop);
     });
-    socket.on('signal:recovered', (data) => {
-      if (data.deviceId !== deviceId) return;
+    socket.on('signal:recovered', () => {
       clearAlertState();
       soundsRef.current.stopSound();
     });
