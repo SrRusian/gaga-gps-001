@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
@@ -99,8 +100,10 @@
     <!-- Ya no controla el mecanismo real de mock-location (eso lo decide Opciones de desarrollador
          desde Android 6), pero Android SIGUE usando que este permiso este declarado como filtro
          para decidir que apps mostrar en "Seleccionar app de ubicacion ficticia" - sin esto la app
-         nunca aparece en esa lista, sin importar reinicios ni reinstalaciones limpias -->
-    <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" />
+         nunca aparece en esa lista, sin importar reinicios ni reinstalaciones limpias.
+         tools:ignore="MockLocation": lint asume que esto es solo para debug/tests - aqui es real,
+         el RTK corregido depende de mock-location tambien en release, no solo en pruebas. -->
+    <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" tools:ignore="MockLocation" />
     <!-- para que el envio de posicion se retome solo si la tableta se reinicia por completo -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- actualizacion automatica sin Play Store (ver update/AppUpdateManager.kt) - la instalacion
