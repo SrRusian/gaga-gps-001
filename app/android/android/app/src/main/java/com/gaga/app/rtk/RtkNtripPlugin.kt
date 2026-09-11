@@ -75,16 +75,28 @@ class RtkNtripPlugin : Plugin() {
                 emitUsbDevices()
             }
             override fun onUsbAttached() {
-                // siempre agarra el receptor solo al detectarlo - sin flag que preguntar, sin
-                // clic manual (ver device_filter.xml/AndroidManifest.xml para el permiso USB)
-                if (usb.isConnected()) return
-                val drivers = usb.listDevices()
-                // prefiere el u-blox si hay varios USB conectados a la vez; si no hay ninguno con
-                // ese vendor id (otro modelo de receptor, por ejemplo) usa el primero disponible
-                val chosen = drivers.find { it.device.vendorId == RtkPrefs.UBLOX_VENDOR_ID } ?: drivers.firstOrNull()
-                chosen?.let { usb.connect(it.device.deviceId, RtkPrefs.getBaudRate(context)) }
+                connectToAvailableUsbDevice()
             }
         }
+        // el receptor puede ya estar conectado desde antes de que la app arrancara (reinicio de
+        // la app sin mover el cable) - ACTION_USB_DEVICE_ATTACHED solo dispara en un attach fisico
+        // nuevo, nunca en este caso. Bug real: sin esto, el auto-conectar (y con el, mock
+        // location) se quedaba sin disparar hasta el siguiente desconecta/reconecta fisico del
+        // cable - el checklist de "ubicacion simulada" en Ajustes volvia a pedir verificar en
+        // cada reapertura de la app aunque el receptor nunca se hubiera movido.
+        connectToAvailableUsbDevice()
+    }
+
+    // siempre agarra el receptor solo al detectarlo - sin flag que preguntar, sin clic manual
+    // (ver device_filter.xml/AndroidManifest.xml para el permiso USB). Compartido entre el evento
+    // de attach fisico y la comprobacion al arrancar la app (ver load()).
+    private fun connectToAvailableUsbDevice() {
+        if (usb.isConnected()) return
+        val drivers = usb.listDevices()
+        // prefiere el u-blox si hay varios USB conectados a la vez; si no hay ninguno con ese
+        // vendor id (otro modelo de receptor, por ejemplo) usa el primero disponible
+        val chosen = drivers.find { it.device.vendorId == RtkPrefs.UBLOX_VENDOR_ID } ?: drivers.firstOrNull()
+        chosen?.let { usb.connect(it.device.deviceId, RtkPrefs.getBaudRate(context)) }
     }
 
     private fun handleReceiverData(data: ByteArray) {
@@ -341,6 +353,7 @@ class RtkNtripPlugin : Plugin() {
         ret.put("ntripDataRateBps", ntripRate.currentBytesPerSecond())
         ret.put("ntripTotalBytes", ntripRate.totalBytes)
         ret.put("mockLocationActive", mockLocation.isActive())
+        ret.put("mockLocationAllowed", mockLocation.isAllowedByOs())
         ret.put("swMapsOutputRunning", swMapsServer.isRunning)
         ret.put("swMapsPort", RtkPrefs.getSwMapsPort(context))
         ret.put("correctionMode", RtkPrefs.getCorrectionMode(context).key)

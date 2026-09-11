@@ -106,6 +106,11 @@ export interface RtkStatus {
   ntripDataRateBps: number;
   ntripTotalBytes: number;
   mockLocationActive: boolean;
+  // permiso real de Android (AppOps) - a diferencia de mockLocationActive (si ESTE proceso ya
+  // arranco el feed), esto refleja si "Seleccionar app de ubicacion falsa" ya apunta a esta app,
+  // sin cambiar con reinicios de la app. Es lo que debe decidir si el checklist de Ajustes se
+  // muestra o no - ver DeviceSettingsPanel.tsx.
+  mockLocationAllowed: boolean;
   swMapsOutputRunning: boolean;
   swMapsPort: number;
   correctionMode: CorrectionMode;
@@ -210,6 +215,7 @@ const webRtkFallback: RtkNtripPlugin = {
     ntripDataRateBps: 0,
     ntripTotalBytes: 0,
     mockLocationActive: false,
+    mockLocationAllowed: false,
     swMapsOutputRunning: false,
     swMapsPort: 11123,
     correctionMode: 'ntrip',

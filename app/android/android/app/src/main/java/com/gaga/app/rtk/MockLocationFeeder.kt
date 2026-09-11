@@ -1,12 +1,15 @@
 package com.gaga.app.rtk
 
+import android.app.AppOpsManager
 import android.content.Context
 import android.location.Criteria
 import android.location.Location
 import android.location.LocationManager
 import android.location.provider.ProviderProperties
 import android.os.Build
+import android.os.Process
 import android.os.SystemClock
+import com.gaga.app.traccar.TraccarSenderService
 
 // Alimenta el fix RTK corregido al GPS_PROVIDER del sistema via addTestProvider/setTestProviderLocation.
 // A partir de ahi, TODO lo que lea LocationManager (navigator.geolocation del WebView incluido,
@@ -40,6 +43,11 @@ class MockLocationFeeder(private val context: Context) {
             }
             locationManager.setTestProviderEnabled(LocationManager.GPS_PROVIDER, true)
             providerAdded = true
+            // addTestProvider() reemplaza el GPS_PROVIDER real - cualquier LocationListener ya
+            // registrado contra el proveedor anterior (TraccarSenderService) queda huerfano sin
+            // aviso, sin error. Sin esto el envio continuo se quedaba mudo cada vez que RTK
+            // activaba ubicacion simulada despues de que el envio ya estuviera corriendo.
+            TraccarSenderService.reregisterLocationListener()
             true
         } catch (e: SecurityException) {
             false
@@ -75,7 +83,28 @@ class MockLocationFeeder(private val context: Context) {
         } catch (_: Exception) {
         }
         providerAdded = false
+        // mismo motivo que en start() - volver al GPS real tambien reemplaza el proveedor y deja
+        // huerfano al listener del envio continuo
+        TraccarSenderService.reregisterLocationListener()
     }
 
     fun isActive(): Boolean = providerAdded
+
+    // "isActive()" (providerAdded) solo refleja si ESTE proceso ya llamo addTestProvider() con
+    // exito - se resetea en cada reinicio de la app aunque la seleccion real de Android
+    // ("Seleccionar app de ubicacion falsa" en Opciones de desarrollador) siga siendo esta app,
+    // sin haber cambiado. Bug real reportado: el checklist de Ajustes volvia a pedir "verificar"
+    // en cada reapertura de la app, aunque el usuario ya lo hubiera configurado bien antes. Esto
+    // consulta el permiso real de Android (AppOps), sin efectos secundarios - no requiere haber
+    // llamado start() primero, y no cambia con reinicios del proceso.
+    fun isAllowedByOs(): Boolean {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION, Process.myUid(), context.packageName)
+        } else {
+            @Suppress("DEPRECATION")
+            appOps.checkOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION, Process.myUid(), context.packageName)
+        }
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
 }

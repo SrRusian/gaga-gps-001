@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.UserManager
 import android.provider.Settings
 
 // Envuelve las llamadas reales a DevicePolicyManager - todo aqui requiere que la app ya sea
@@ -38,6 +39,11 @@ object KioskManager {
         val admin = adminComponent(activity)
         dpm.setLockTaskPackages(admin, arrayOf(activity.packageName))
         dpm.setStatusBarDisabled(admin, true)
+        // bloquea TODA la pantalla de "Opciones de desarrollador" mientras el kiosko este activo -
+        // no existe una API mas fina para bloquear solo "seleccionar app de ubicacion falsa", esta
+        // es la unica palanca real (ver KioskPlugin/README). Reversible sin adb apagando el kiosko
+        // (exitKiosk) - a diferencia de releaseDeviceOwner, que si necesita reaprovisionar.
+        dpm.addUserRestriction(admin, UserManager.DISALLOW_DEBUGGING_FEATURES)
         val homeFilter = IntentFilter(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) }
         dpm.addPersistentPreferredActivity(admin, homeFilter, ComponentName(activity, homeActivity))
         if (!isLockTaskActive(activity)) activity.startLockTask()
@@ -51,6 +57,7 @@ object KioskManager {
         val dpm = devicePolicyManager(activity)
         val admin = adminComponent(activity)
         dpm.setStatusBarDisabled(admin, false)
+        dpm.clearUserRestriction(admin, UserManager.DISALLOW_DEBUGGING_FEATURES)
         dpm.clearPackagePersistentPreferredActivities(admin, activity.packageName)
     }
 

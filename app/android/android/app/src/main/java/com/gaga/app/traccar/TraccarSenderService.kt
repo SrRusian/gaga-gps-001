@@ -34,6 +34,21 @@ class TraccarSenderService : Service() {
 
         @Volatile var isRunning: Boolean = false
             private set
+
+        @Volatile private var runningInstance: TraccarSenderService? = null
+
+        // MockLocationFeeder.addTestProvider()/removeTestProvider() (RtkNtripPlugin) reemplaza el
+        // GPS_PROVIDER real por uno de prueba (o viceversa) - Android no conserva los
+        // LocationListener ya registrados contra el proveedor anterior al hacer ese cambio, asi
+        // que el envio continuo se quedaba "mudo" (sin error visible) cada vez que RTK activaba o
+        // desactivaba la ubicacion simulada despues de que este servicio ya estuviera escuchando -
+        // bug real reportado en campo, coincide con el patron "solo Enviar ubicacion manual
+        // funciona" ya visto antes. Reabrir la app disparaba un registro nuevo (por eso "arreglaba"
+        // el sintoma) sin que nadie entendiera por que. Fix: quien cambia el proveedor avisa aqui
+        // para que el listener se vuelva a registrar de inmediato, sin esperar a un reinicio.
+        fun reregisterLocationListener() {
+            runningInstance?.startLocationUpdates(force = true)
+        }
     }
 
     private lateinit var locationManager: LocationManager
@@ -94,6 +109,7 @@ class TraccarSenderService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundCompat()
+        runningInstance = this
         startLocationUpdates()
         isRunning = true
         return START_STICKY
@@ -110,6 +126,7 @@ class TraccarSenderService : Service() {
         sendWakeLock?.let { if (it.isHeld) it.release() }
         sendWakeLock = null
         isRunning = false
+        if (runningInstance === this) runningInstance = null
         super.onDestroy()
     }
 
@@ -120,9 +137,9 @@ class TraccarSenderService : Service() {
     // todas en el listener. A 1s (default) no cambia nada perceptible; en un intervalo mayor
     // (tableta en reposo, probando otro valor) es la diferencia real entre GPS siempre encendido
     // y GPS duty-cycled. Se vuelve a llamar si el intervalo cambia en caliente (ver prefsListener).
-    private fun startLocationUpdates() {
+    private fun startLocationUpdates(force: Boolean = false) {
         val intervalMs = TraccarPrefs.getIntervalMs(applicationContext)
-        if (intervalMs == registeredIntervalMs) return
+        if (!force && intervalMs == registeredIntervalMs) return
         try {
             locationManager.removeUpdates(listener)
         } catch (_: SecurityException) {
