@@ -21,7 +21,7 @@ object TraccarPrefs {
     private const val KEY_SERVERS = "servers"
     private const val KEY_DEVICE_ID = "device_id"
     private const val KEY_PASSWORD = "password"
-    private const val KEY_INTERVAL_MS = "interval_ms"
+    const val KEY_INTERVAL_MS = "interval_ms"
     private const val KEY_AUTO_START = "auto_start"
 
     const val DEFAULT_INTERVAL_MS = 1000L

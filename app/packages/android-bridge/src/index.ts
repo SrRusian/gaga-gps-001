@@ -79,6 +79,19 @@ export interface RtkFix {
 // se tenga que rehacer despues, pero se muestran bloqueados "proximamente" en el front
 export type CorrectionMode = 'ntrip' | 'pointperfect' | 'usb_serial';
 
+// fix real del receptor, emitido al ritmo que el propio receptor lo entrega (5-10Hz tipico) - a
+// diferencia de rtkStatus (solo cambia de vez en cuando), esto llega en cada fix, para que la
+// posicion local pueda refrescarse mas rapido que navigator.geolocation.watchPosition (que en la
+// practica el navegador entrega ~1/seg sin importar que tan rapido produzca fixes el hardware)
+export interface RtkFixEvent {
+  latitude: number;
+  longitude: number;
+  speedMps?: number;
+  courseDeg?: number;
+  accuracyMeters: number;
+  timestamp: number;
+}
+
 export interface RtkStatus {
   usbConnected: boolean;
   connectedUsbDeviceName: string | null;
@@ -137,6 +150,10 @@ export interface RtkNtripPlugin {
   addListener(
     eventName: 'usbDevicesChanged',
     listenerFunc: (data: { devices: UsbDeviceInfo[] }) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'rtkFix',
+    listenerFunc: (fix: RtkFixEvent) => void,
   ): Promise<PluginListenerHandle>;
 }
 

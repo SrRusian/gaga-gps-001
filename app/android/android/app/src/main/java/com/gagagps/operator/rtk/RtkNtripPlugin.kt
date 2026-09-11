@@ -102,7 +102,10 @@ class RtkNtripPlugin : Plugin() {
             val fix = NmeaParser.parseGga(line)
             if (fix != null) {
                 lastFix = fix // se guarda igual sin fix (lat/lon null) - para mostrar "buscando satelites"
-                if (fix.latitude != null && fix.longitude != null) mockLocation.feed(fix)
+                if (fix.latitude != null && fix.longitude != null) {
+                    mockLocation.feed(fix)
+                    emitFix(fix)
+                }
             }
         }
         if (lineBuffer.length > 4096) lineBuffer.clear() // basura binaria/UBX, evita crecer sin limite
@@ -358,5 +361,21 @@ class RtkNtripPlugin : Plugin() {
 
     private fun emitStatus() {
         notifyListeners("rtkStatus", buildStatus())
+    }
+
+    // evento aparte de "rtkStatus" (que solo se manda al cambiar algo relevante) - este se manda
+    // en CADA fix real del receptor, al ritmo que el propio receptor lo entregue (5-10Hz tipico,
+    // ver RtkPrefs.DEFAULT_BAUD_RATE) para que la posicion local pueda actualizarse mas rapido que
+    // el envio al servidor (siempre a 1/seg, ver TraccarSenderService) sin saturarlo - consumido
+    // por useDeviceGeolocation.ts en la web
+    private fun emitFix(fix: NmeaFix) {
+        val obj = JSObject()
+        obj.put("latitude", fix.latitude)
+        obj.put("longitude", fix.longitude)
+        fix.speedMps?.let { obj.put("speedMps", it) }
+        fix.courseDeg?.let { obj.put("courseDeg", it) }
+        obj.put("accuracyMeters", fix.accuracyMeters)
+        obj.put("timestamp", fix.timestamp)
+        notifyListeners("rtkFix", obj)
     }
 }
