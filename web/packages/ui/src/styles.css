@@ -169,6 +169,13 @@
   padding: 12px;
   text-align: center;
 }
+.gg-stat-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 6px;
+  color: #8b949e;
+}
 .gg-stat-card__label {
   font-size: 10px;
   color: #8b949e;
