@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
-// Iconos de navegacion del panel Admin - un solo SVG por nombre, stroke currentColor
+// Iconos compartidos por los shells de Admin y Supervisor/Encargado - un solo SVG por
+// nombre, stroke currentColor
 export type IconName =
   | 'dashboard'
   | 'system'
@@ -9,6 +10,7 @@ export type IconName =
   | 'shifts'
   | 'devices'
   | 'signal'
+  | 'signalOff'
   | 'users'
   | 'geofence'
   | 'equipment'
@@ -18,7 +20,10 @@ export type IconName =
   | 'chevron'
   | 'collapse'
   | 'expand'
-  | 'pin';
+  | 'pin'
+  | 'alertTriangle'
+  | 'bell'
+  | 'stop';
 
 const PATHS: Record<IconName, ReactNode> = {
   dashboard: (
@@ -115,6 +120,33 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M12 22s7-6.7 7-12A7 7 0 0 0 5 10c0 5.3 7 12 7 12Z" />
       <circle cx="12" cy="10" r="2.6" />
+    </>
+  ),
+  signalOff: (
+    <>
+      <path d="M4.5 12.5a10.5 10.5 0 0 1 15 0" />
+      <path d="M7.7 15.7a6 6 0 0 1 8.6 0" />
+      <circle cx="12" cy="18.5" r="1.5" fill="currentColor" stroke="none" />
+      <path d="M3 3l18 18" />
+    </>
+  ),
+  alertTriangle: (
+    <>
+      <path d="M12 3.5 2.4 20h19.2z" />
+      <path d="M12 9.5v5" />
+      <circle cx="12" cy="17.3" r="1" fill="currentColor" stroke="none" />
+    </>
+  ),
+  bell: (
+    <>
+      <path d="M6 9a6 6 0 0 1 12 0c0 4.2 1.5 6 2 7H4c.5-1 2-2.8 2-7Z" />
+      <path d="M10 20a2 2 0 0 0 4 0" />
+    </>
+  ),
+  stop: (
+    <>
+      <path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z" />
+      <path d="M9.3 9.3l5.4 5.4M14.7 9.3l-5.4 5.4" />
     </>
   ),
 };

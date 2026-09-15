@@ -1,5 +1,5 @@
 import { StatCard } from '@gaga-gps/ui';
-import { NavIcon } from '../../../components/NavIcons';
+import { NavIcon } from '../../../../components/NavIcons';
 
 export interface DashboardStatsProps {
   deviceCount: number;

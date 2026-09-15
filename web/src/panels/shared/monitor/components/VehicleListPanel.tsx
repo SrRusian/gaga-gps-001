@@ -1,4 +1,5 @@
 import { VehicleCard } from '@gaga-gps/ui';
+import { NavIcon } from '../../components/NavIcons';
 import type { FleetVehicle } from '../useSupervisorSocket';
 
 const OFFLINE_THRESHOLD_MS = 45000;
@@ -12,7 +13,10 @@ export interface VehicleListPanelProps {
 export function VehicleListPanel({ vehicles, now, onSelect }: VehicleListPanelProps) {
   return (
     <div className="sup-vehicle-panel sup-glass">
-      <div className="sup-section-header">Vehículos registrados</div>
+      <div className="sup-section-header sup-section-title">
+        <NavIcon name="devices" size={14} />
+        Vehículos registrados
+      </div>
       <div className="sup-vehicle-list">
         {vehicles.map((v) => {
           const isOffline = now.getTime() - v.lastSeen > OFFLINE_THRESHOLD_MS;

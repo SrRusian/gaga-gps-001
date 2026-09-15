@@ -1,5 +1,5 @@
 import type { ProjectRow } from '../../../types';
-import { NavIcon, type IconName } from '../../../components/NavIcons';
+import { NavIcon, type IconName } from '../../../../components/NavIcons';
 import type { Scope } from '../scope';
 
 export type Overlay = 'projects' | 'shifts' | 'devices' | 'users' | 'geofences' | 'equipment' | 'maps' | null;

@@ -1,4 +1,5 @@
 import { Button } from '@gaga-gps/ui';
+import { NavIcon } from '../../components/NavIcons';
 
 export interface StopStatus {
   active: boolean;
@@ -35,13 +36,15 @@ export function StopControlPanel({ stopStatus, onActivate, onDeactivate }: StopC
   }
 
   return (
-    <div className="sup-stop-section sup-glass">
+    <div className="sup-stop-section">
       {!stopStatus.active ? (
         <Button variant="danger" className="sup-stop-btn" onClick={handleActivate}>
+          <NavIcon name="stop" size={16} />
           Parada preventiva colectiva
         </Button>
       ) : (
         <Button variant="primary" className="sup-stop-btn" onClick={handleDeactivate}>
+          <NavIcon name="signal" size={16} />
           Reanudar operación
         </Button>
       )}
