@@ -1,6 +1,7 @@
 import { AlertBanner } from '@gaga-gps/ui';
 import type { AlertEventType } from '@gaga-gps/shared-types';
 import { useState } from 'react';
+import { NavIcon } from '../../components/NavIcons';
 import type { AlertEntry } from '../useSupervisorSocket';
 import { EMPTY_FILTERS, useAlertHistory } from '../useAlertHistory';
 
@@ -44,9 +45,12 @@ export function AlertsPanel({ alerts, alertCount, onResolveIncident }: AlertsPan
   }
 
   return (
-    <div className="sup-alerts-section sup-glass">
+    <div className="sup-alerts-section">
       <div className="sup-section-header sup-alerts-header">
-        <span>Alertas{alertsView === 'active' && alertCount > 0 ? ` (${alertCount})` : ''}</span>
+        <span className="sup-section-title">
+          <NavIcon name="bell" size={14} />
+          Alertas{alertsView === 'active' && alertCount > 0 ? ` (${alertCount})` : ''}
+        </span>
         <div className="sup-alerts-toggle">
           <button
             className={alertsView === 'active' ? 'active' : ''}
