@@ -2,6 +2,7 @@ import type { RequestHandler } from 'express';
 import express from 'express';
 import type InfractionRepository from '../../repositories/InfractionRepository';
 import type { UserRole } from '../../repositories/UserRepository';
+import { startOfTodayIso } from '../../utils/dateScope';
 
 export interface InfractionsRouterDeps {
   infractionRepo: InfractionRepository;
@@ -23,7 +24,14 @@ export function buildInfractionsRouter({ infractionRepo, authMiddleware, require
       const projectId = req.user!.role === 'admin' ? null : (req.user!.projectId ?? null);
       const limit = req.query.limit ? Math.min(parseInt(String(req.query.limit), 10), 500) : undefined;
       const offset = req.query.offset ? parseInt(String(req.query.offset), 10) : undefined;
-      const rows = await infractionRepo.findByProject(projectId, { limit, offset });
+
+      // Supervisor solo ve "su turno" (por ahora, el dia calendario actual) y no puede pedir un
+      // rango propio - Encargado (y admin/project_administrator) sí filtran libremente por fecha
+      const isSupervisor = req.user!.role === 'project_supervisor';
+      const from = isSupervisor ? startOfTodayIso() : (req.query.from ? String(req.query.from) : undefined);
+      const to = isSupervisor ? undefined : (req.query.to ? String(req.query.to) : undefined);
+
+      const rows = await infractionRepo.findByProject(projectId, { limit, offset, from, to });
       res.json(rows);
     } catch (err) {
       console.error('infractions.routes GET /:', (err as Error).message);

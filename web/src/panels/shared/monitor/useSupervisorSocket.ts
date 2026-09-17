@@ -43,7 +43,7 @@ export interface AlertEntry {
 
 const SEVERITY_RANK: Record<AlertEntry['severity'], number> = { danger: 0, warning: 1, info: 2 };
 
-const INCIDENT_CATEGORY_LABEL: Record<IncidentCategory, string> = {
+export const INCIDENT_CATEGORY_LABEL: Record<IncidentCategory, string> = {
   obstacle: 'Objeto en el camino',
   accident: 'Accidente',
   traffic: 'Tráfico/bloqueo',
@@ -125,15 +125,20 @@ export function useSupervisorSocket() {
       });
     });
 
+    // pedido explicito: geocercas/velocidad son avisos que solo debe ver el operador (si de verdad
+    // cruza el limite ya queda registrado como infraccion permanente, ver pestaña "Infracciones") -
+    // Supervisor/Encargado ya no los ven en vivo, para no llenar "Activas" de avisos que el propio
+    // operador puede corregir a tiempo. 'power_loss' SI se mantiene (mismo canal generico
+    // 'supervisor:alert', ver power-events.routes.ts) - es un estado de peligro directo, no un
+    // aviso que se "cruza" progresivamente.
     socket.on('supervisor:alert', (data) => {
-      const key = `geofence:${data.deviceId}`;
+      if (data.type !== 'power_loss') return;
+      const key = `power_loss:${data.deviceId}`;
       if (data.action !== 'entered') {
         resolveAlert(key);
         return;
       }
-      const severity =
-        data.type === 'geofence_red' ? 'danger' : data.type === 'geofence_parking' ? 'info' : 'warning';
-      upsertAlert(key, `Vehículo ${data.deviceId} - ${data.geofenceName ?? 'geocerca'}`, severity);
+      upsertAlert(key, `Vehículo ${data.deviceId} perdió corriente fuera de zona autorizada`, 'danger');
     });
 
     socket.on('supervisor:signal_lost', (data) => {

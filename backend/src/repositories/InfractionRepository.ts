@@ -68,9 +68,29 @@ class InfractionRepository {
 
   async findByProject(
     projectId: number | null,
-    { limit = 100, offset = 0 }: { limit?: number; offset?: number } = {},
+    {
+      limit = 100,
+      offset = 0,
+      from,
+      to,
+    }: { limit?: number; offset?: number; from?: string; to?: string } = {},
   ): Promise<InfractionWithNamesRow[]> {
     try {
+      const conditions: string[] = ['($1::int IS NULL OR i.project_id = $1 OR i.project_id IS NULL)'];
+      const params: unknown[] = [projectId];
+
+      if (from) {
+        params.push(from);
+        conditions.push(`i.occurred_at >= $${params.length}`);
+      }
+      if (to) {
+        params.push(to);
+        conditions.push(`i.occurred_at <= $${params.length}`);
+      }
+
+      params.push(limit);
+      params.push(offset);
+
       const { rows } = await query<InfractionWithNamesRow>(
         `SELECT i.*, d.name AS device_name, u.name AS operator_name, r.name AS reviewed_by_name
          FROM infractions i
@@ -78,10 +98,10 @@ class InfractionRepository {
          LEFT JOIN operator_sessions s ON s.id = i.operator_session_id
          LEFT JOIN users u ON u.id = s.user_id
          LEFT JOIN users r ON r.id = i.reviewed_by
-         WHERE ($1::int IS NULL OR i.project_id = $1 OR i.project_id IS NULL)
+         WHERE ${conditions.join(' AND ')}
          ORDER BY i.occurred_at DESC
-         LIMIT $2 OFFSET $3`,
-        [projectId, limit, offset],
+         LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        params,
       );
       return rows;
     } catch (err) {

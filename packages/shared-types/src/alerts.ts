@@ -55,8 +55,17 @@ export interface GeofenceProximityClearPayload {
   timestamp: string;
 }
 
-export interface SupervisorGeofenceAlertPayload extends Partial<GeofenceAlertPayload> {
+// canal generico reusado tal cual por 3 servicios distintos (GeofenceAlertService,
+// SpeedAlertService, power-events.routes.ts) - el `type` real que viaja aqui incluye los 3 grupos,
+// no solo geocerca, por eso no extiende Partial<GeofenceAlertPayload> (ese `type` es mas angosto
+// y rompia el chequeo de tipos en useSupervisorSocket.ts al comparar contra 'power_loss')
+export interface SupervisorGeofenceAlertPayload {
   deviceId: string;
+  type?: GeofenceAlertPayload['type'] | SpeedAlertPayload['type'] | 'power_loss';
+  geofenceId?: number;
+  geofenceName?: string;
+  message?: string;
+  loop?: boolean;
   action: 'entered' | 'exited';
   timestamp: string;
 }

@@ -23,7 +23,7 @@ export default function ProjectManagerPanel() {
     >
       <div className="sup-layout">
         <aside className="sup-sidebar">
-          <AlertsPanel alerts={s.alerts} alertCount={s.alertCount} />
+          <AlertsPanel alerts={s.alerts} alertCount={s.alertCount} canAccessHistory />
         </aside>
 
         <div className="sup-map-area">

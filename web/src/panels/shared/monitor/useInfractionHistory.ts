@@ -11,11 +11,14 @@ export function useInfractionHistory() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  async function search() {
+  async function search(filters?: { from?: string; to?: string }) {
     setLoading(true);
     setError('');
     try {
-      setRows(await api.get<InfractionRow[]>('/api/infractions'));
+      const params = new URLSearchParams();
+      if (filters?.from) params.set('from', new Date(filters.from).toISOString());
+      if (filters?.to) params.set('to', new Date(filters.to).toISOString());
+      setRows(await api.get<InfractionRow[]>(`/api/infractions?${params.toString()}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error obteniendo infracciones');
     } finally {

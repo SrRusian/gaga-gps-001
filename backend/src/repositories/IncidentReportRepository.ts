@@ -19,6 +19,12 @@ export interface IncidentReportRow {
   resolved_at: Date | null;
 }
 
+export interface IncidentHistoryRow extends IncidentReportRow {
+  device_name: string | null;
+  reported_by_name: string | null;
+  resolved_by_name: string | null;
+}
+
 class IncidentReportRepository {
   async findOpenByProject(projectId: number): Promise<IncidentReportRow[]> {
     try {
@@ -41,6 +47,44 @@ class IncidentReportRepository {
       return rows;
     } catch (err) {
       console.error('IncidentReportRepository.findAllOpen:', (err as Error).message);
+      throw err;
+    }
+  }
+
+  // abiertos + resueltos (a diferencia de findOpenByProject/findAllOpen) - para el panel de
+  // Supervisor/Encargado ("Incidentes"): Supervisor siempre manda `from` = arranque del dia actual
+  // (su "turno"), Encargado puede filtrar libremente por rango - ver infractions.routes.ts para el
+  // mismo criterio ya aplicado ahi
+  async findHistory(
+    projectId: number,
+    { from, to }: { from?: string; to?: string } = {},
+  ): Promise<IncidentHistoryRow[]> {
+    try {
+      const conditions: string[] = ['i.project_id = $1'];
+      const params: unknown[] = [projectId];
+
+      if (from) {
+        params.push(from);
+        conditions.push(`i.reported_at >= $${params.length}`);
+      }
+      if (to) {
+        params.push(to);
+        conditions.push(`i.reported_at <= $${params.length}`);
+      }
+
+      const { rows } = await query<IncidentHistoryRow>(
+        `SELECT i.*, d.name AS device_name, u.name AS reported_by_name, r.name AS resolved_by_name
+         FROM incident_reports i
+         LEFT JOIN devices d ON d.unique_id = i.device_id
+         LEFT JOIN users u ON u.id = i.reported_by
+         LEFT JOIN users r ON r.id = i.resolved_by
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY i.reported_at DESC`,
+        params,
+      );
+      return rows;
+    } catch (err) {
+      console.error('IncidentReportRepository.findHistory:', (err as Error).message);
       throw err;
     }
   }
