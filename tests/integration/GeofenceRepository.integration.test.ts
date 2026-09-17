@@ -273,6 +273,82 @@ describe('GeofenceRepository - PostGIS real', () => {
     expect(matches.map((g) => g.id)).toContain(circle.id);
   });
 
+  it('circulo: contained=true adentro, contained=false y distance_meters>0 dentro del buffer de proximidad', async () => {
+    const circle = await repo.create({
+      name: 'Círculo de proximidad',
+      projectId: testProjectId,
+      type: 'danger',
+      shapeType: 'circle',
+      centerLat: -10.35,
+      centerLon: -150.56,
+      radiusMeters: 50,
+    });
+    createdGeofenceIds.push(circle.id);
+
+    const inside = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: -10.35,
+      longitude: -150.56,
+    });
+    const insideRow = inside.find((g) => g.id === circle.id);
+    expect(insideRow?.contained).toBe(true);
+    expect(insideRow?.distance_meters).toBe(0);
+
+    // ~67m del centro (17m fuera del radio de 50m) - sin buffer de proximidad no deberia matchear
+    const nearWithoutBuffer = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: -10.3506,
+      longitude: -150.56,
+    });
+    expect(nearWithoutBuffer.map((g) => g.id)).not.toContain(circle.id);
+
+    // mismo punto, ahora con alertableTypes+lookahead - debe matchear con contained=false
+    const nearWithBuffer = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: -10.3506,
+      longitude: -150.56,
+      alertableTypes: ['danger'],
+      proximityLookaheadMeters: 100,
+    });
+    const nearRow = nearWithBuffer.find((g) => g.id === circle.id);
+    expect(nearRow?.contained).toBe(false);
+    expect(nearRow?.distance_meters).toBeGreaterThan(0);
+  });
+
+  it('footprintWkt reemplaza al punto crudo - un rectangulo que toca el circulo matchea aunque su centro este afuera', async () => {
+    const circle = await repo.create({
+      name: 'Círculo con footprint',
+      projectId: testProjectId,
+      type: 'danger',
+      shapeType: 'circle',
+      centerLat: 5.1,
+      centerLon: 120.2,
+      radiusMeters: 10,
+    });
+    createdGeofenceIds.push(circle.id);
+
+    // punto crudo centrado bien lejos del circulo - no deberia matchear
+    const withoutFootprint = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 5.1005,
+      longitude: 120.2,
+    });
+    expect(withoutFootprint.map((g) => g.id)).not.toContain(circle.id);
+
+    // un rectangulo "vehiculo" grande centrado en el mismo punto lejano (~55m del circulo) SI
+    // alcanza a tocarlo - su borde sur llega a ~4m del centro del circulo (radio 10m)
+    const withFootprint = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 5.1005,
+      longitude: 120.2,
+      footprintWkt:
+        'POLYGON((120.19982 5.10104, 120.20018 5.10104, 120.20018 5.09996, 120.19982 5.09996, 120.19982 5.10104))',
+    });
+    const row = withFootprint.find((g) => g.id === circle.id);
+    expect(row).toBeDefined();
+    expect(row?.contained).toBe(true);
+  });
+
   it('projectId null (dispositivo sin proyecto) no matchea ninguna geocerca real', async () => {
     const circle = await repo.create({
       name: 'Círculo con proyecto real',

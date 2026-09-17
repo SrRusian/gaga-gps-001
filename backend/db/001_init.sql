@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS vehicle_types (
   name VARCHAR(255) NOT NULL,
   length_meters DOUBLE PRECISION NOT NULL,
   width_meters DOUBLE PRECISION NOT NULL,
+  -- opcional - no todos los tipos necesitan limite propio (mismo criterio nullable/sin CHECK que
+  -- devices.speed_limit_kmh/geofences.speed_limit_kmh). SpeedAlertService lo combina con el limite
+  -- del dispositivo/grupo/geocerca y gana siempre el mas estricto.
+  max_speed_kmh DOUBLE PRECISION,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -418,3 +422,27 @@ CREATE TABLE IF NOT EXISTS app_releases (
   released_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_app_releases_version_code ON app_releases (version_code DESC);
+
+-- registro permanente de infracciones reales (exceso de velocidad confirmado 100%+, o vehiculo
+-- tocando una geocerca de peligro) - a diferencia de alert_events (estado en vivo que se
+-- sobreescribe/resuelve solo), esto nunca se sobreescribe: una fila por episodio real, para que un
+-- encargado pueda revisar el historico completo. Los avisos "silenciosos" (proximidad lejana,
+-- solo para el operador) nunca generan fila aqui - ver GeofenceAlertService/SpeedAlertService.
+CREATE TABLE IF NOT EXISTS infractions (
+  id BIGSERIAL PRIMARY KEY,
+  project_id INTEGER REFERENCES projects(id),
+  device_id VARCHAR(255) NOT NULL REFERENCES devices(unique_id),
+  -- quien operaba el vehiculo en el momento - NULL si no habia turno activo (caso raro)
+  operator_session_id BIGINT REFERENCES operator_sessions(id),
+  infraction_type VARCHAR(20) NOT NULL CHECK (infraction_type IN ('speed', 'geofence')),
+  message TEXT NOT NULL,
+  latitude DOUBLE PRECISION NOT NULL,
+  longitude DOUBLE PRECISION NOT NULL,
+  metadata JSONB,
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_by INTEGER REFERENCES users(id),
+  reviewed_at TIMESTAMPTZ,
+  review_notes TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_infractions_project_time ON infractions (project_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_infractions_device_time ON infractions (device_id, occurred_at DESC);

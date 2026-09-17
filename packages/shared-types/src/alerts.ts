@@ -36,6 +36,25 @@ export interface GeofenceClearPayload {
   timestamp: string;
 }
 
+// aviso silencioso de proximidad a una geocerca peligrosa (rectangulo real del vehiculo, ver
+// GeofenceAlertService "tier silencioso") - canal propio, deliberadamente separado de
+// GeofenceAlertPayload/GeofenceClearPayload: se manda SOLO al operador afectado (sendToDevice,
+// nunca broadcastToProject), nunca se persiste (ni alert_events ni infractions), y no debe poder
+// pisar/limpiar una alerta real que ya este en pantalla (ver alert:critical/alert:warning/alert:clear)
+export interface GeofenceProximityNoticePayload {
+  deviceId: string;
+  geofenceId: number;
+  geofenceName: string;
+  distanceMeters: number;
+  message: string;
+  timestamp: string;
+}
+
+export interface GeofenceProximityClearPayload {
+  deviceId: string;
+  timestamp: string;
+}
+
 export interface SupervisorGeofenceAlertPayload extends Partial<GeofenceAlertPayload> {
   deviceId: string;
   action: 'entered' | 'exited';
@@ -240,4 +259,27 @@ export interface AlertHistoryRow {
   metadata: Record<string, unknown> | null;
   triggered_at: string;
   resolved_at: string | null;
+}
+
+// registro permanente de infracciones reales (velocidad/geocerca) - ver backend/db/001_init.sql
+// tabla `infractions`, generado solo por el sistema (nunca creado a mano)
+export type InfractionType = 'speed' | 'geofence';
+
+export interface InfractionRow {
+  id: number;
+  project_id: number | null;
+  device_id: string;
+  device_name: string | null;
+  operator_session_id: number | null;
+  operator_name: string | null;
+  infraction_type: InfractionType;
+  message: string;
+  latitude: number;
+  longitude: number;
+  metadata: Record<string, unknown> | null;
+  occurred_at: string;
+  reviewed_by: number | null;
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  review_notes: string | null;
 }

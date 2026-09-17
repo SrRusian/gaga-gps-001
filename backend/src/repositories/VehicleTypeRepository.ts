@@ -5,6 +5,7 @@ export interface VehicleTypeRow {
   name: string;
   length_meters: number;
   width_meters: number;
+  max_speed_kmh: number | null;
   created_at: Date;
 }
 
@@ -33,15 +34,18 @@ class VehicleTypeRepository {
     name,
     lengthMeters,
     widthMeters,
+    maxSpeedKmh,
   }: {
     name: string;
     lengthMeters: number;
     widthMeters: number;
+    maxSpeedKmh?: number | null;
   }): Promise<VehicleTypeRow> {
     try {
       const { rows } = await query<VehicleTypeRow>(
-        `INSERT INTO vehicle_types (name, length_meters, width_meters) VALUES ($1, $2, $3) RETURNING *`,
-        [name, lengthMeters, widthMeters],
+        `INSERT INTO vehicle_types (name, length_meters, width_meters, max_speed_kmh)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [name, lengthMeters, widthMeters, maxSpeedKmh ?? null],
       );
       return rows[0];
     } catch (err) {
@@ -52,7 +56,12 @@ class VehicleTypeRepository {
 
   async update(
     id: number,
-    { name, lengthMeters, widthMeters }: { name?: string; lengthMeters?: number; widthMeters?: number },
+    {
+      name,
+      lengthMeters,
+      widthMeters,
+      maxSpeedKmh,
+    }: { name?: string; lengthMeters?: number; widthMeters?: number; maxSpeedKmh?: number | null },
   ): Promise<VehicleTypeRow | null> {
     const sets: string[] = [];
     const values: unknown[] = [id];
@@ -67,6 +76,10 @@ class VehicleTypeRepository {
     if (widthMeters !== undefined) {
       values.push(widthMeters);
       sets.push(`width_meters = $${values.length}`);
+    }
+    if (maxSpeedKmh !== undefined) {
+      values.push(maxSpeedKmh);
+      sets.push(`max_speed_kmh = $${values.length}`);
     }
     if (sets.length === 0) return this.findById(id);
 

@@ -88,6 +88,10 @@ type FindMatchingSpatial = (params: {
   projectId: number | null;
   latitude: number;
   longitude: number;
+  footprintWkt?: string | null;
+  accuracyMeters?: number;
+  alertableTypes?: string[];
+  proximityLookaheadMeters?: number;
 }) => Promise<GeofenceMatchRow[]>;
 type BroadcastToProject = (projectId: number | null, event: string, payload: unknown) => void;
 
@@ -147,13 +151,30 @@ describe('GeofenceAlertService', () => {
     expect(service.activeGeofences).toHaveLength(0);
   });
 
-  it('consulta findMatchingSpatial con el proyecto y las coordenadas de la posición', async () => {
+  it('consulta findMatchingSpatial con el proyecto, coordenadas y contexto de proximidad', async () => {
     await service.evaluate(pos('V1', 7));
     expect(findMatchingSpatial).toHaveBeenCalledWith({
       projectId: 7,
       latitude: 19.35,
       longitude: -103.56,
+      footprintWkt: null,
+      accuracyMeters: 0,
+      alertableTypes: expect.arrayContaining(['danger', 'forbidden', 'warning', 'maintenance', 'authorized_route']),
+      proximityLookaheadMeters: expect.any(Number),
     });
+  });
+
+  it('el buffer de proximidad nunca incluye "parking" (info, puramente informativa)', async () => {
+    await service.evaluate(pos('V1', 7));
+    const call = findMatchingSpatial.mock.calls[0][0];
+    expect(call.alertableTypes).not.toContain('parking');
+  });
+
+  it('pasa el footprintWkt/accuracy de la posicion cuando vienen presentes', async () => {
+    await service.evaluate({ ...pos('V1', 7), footprintWkt: 'POLYGON((0 0,0 0,0 0,0 0,0 0))', accuracy: 3 });
+    expect(findMatchingSpatial).toHaveBeenCalledWith(
+      expect.objectContaining({ footprintWkt: 'POLYGON((0 0,0 0,0 0,0 0,0 0))', accuracyMeters: 3 }),
+    );
   });
 
   it('no emite nada mientras el vehículo está fuera de todas las geocercas', async () => {
@@ -448,5 +469,155 @@ describe('GeofenceAlertService', () => {
       'alert:warning',
       expect.anything(),
     );
+  });
+
+  describe('proximidad elastica (tiers silencioso/urgente) - contained: false', () => {
+    it('tier silencioso: solo sendToDevice (nunca broadcastToProject), nunca se registra', async () => {
+      const sendToDevice = vi.fn();
+      const broadcastToProject = vi.fn();
+      const recordOrEscalate = vi.fn().mockResolvedValue(undefined);
+      const create = vi.fn().mockResolvedValue(undefined);
+      const withRepo = new GeofenceAlertService({
+        geofenceRepo: {
+          findMatchingSpatial: vi
+            .fn()
+            .mockResolvedValueOnce([{ ...dangerCircleRow, contained: false, distance_meters: 10 }])
+            .mockResolvedValueOnce([{ ...dangerCircleRow, contained: false, distance_meters: 3 }]),
+        },
+        socketServer: { broadcastToProject, sendToDevice },
+        alertEventRepo: { recordOrEscalate, resolveOpen: vi.fn().mockResolvedValue(undefined) },
+        infractionRepo: { create },
+      });
+      await withRepo.evaluate(pos());
+      await withRepo.evaluate(pos());
+
+      expect(sendToDevice).toHaveBeenCalledWith(
+        'V1',
+        'alert:proximity_notice',
+        expect.objectContaining({ geofenceId: dangerCircleRow.id, deviceId: 'V1' }),
+      );
+      expect(broadcastToProject).not.toHaveBeenCalled();
+      expect(recordOrEscalate).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('tier urgente: mismo canal que la critica de siempre, mensaje de proximidad, SI se registra', async () => {
+      const recordOrEscalate = vi.fn().mockResolvedValue(undefined);
+      const create = vi.fn().mockResolvedValue(undefined);
+      const broadcastToProject = vi.fn();
+      const withRepo = new GeofenceAlertService({
+        geofenceRepo: {
+          findMatchingSpatial: vi
+            .fn()
+            .mockResolvedValueOnce([{ ...dangerCircleRow, contained: false, distance_meters: 5 }])
+            .mockResolvedValueOnce([{ ...dangerCircleRow, contained: false, distance_meters: 1 }]),
+        },
+        socketServer: { broadcastToProject },
+        alertEventRepo: { recordOrEscalate, resolveOpen: vi.fn().mockResolvedValue(undefined) },
+        infractionRepo: { create },
+      });
+      await withRepo.evaluate(pos());
+      await withRepo.evaluate(pos());
+
+      expect(broadcastToProject).toHaveBeenCalledWith(
+        7,
+        'alert:critical',
+        expect.objectContaining({ message: expect.stringContaining('ACERCÁNDOSE') }),
+      );
+      expect(recordOrEscalate).toHaveBeenCalledWith(expect.objectContaining({ severity: 'danger' }));
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          infractionType: 'geofence',
+          metadata: expect.objectContaining({ proximity: true }),
+        }),
+      );
+    });
+
+    it('sin convergencia (distancia estable) no dispara ningun tier de proximidad', async () => {
+      const sendToDevice = vi.fn();
+      const broadcastToProject = vi.fn();
+      const withRepo = new GeofenceAlertService({
+        geofenceRepo: {
+          findMatchingSpatial: vi
+            .fn()
+            .mockResolvedValueOnce([{ ...dangerCircleRow, contained: false, distance_meters: 3 }])
+            .mockResolvedValueOnce([{ ...dangerCircleRow, contained: false, distance_meters: 3 }]),
+        },
+        socketServer: { broadcastToProject, sendToDevice },
+      });
+      await withRepo.evaluate(pos());
+      await withRepo.evaluate(pos());
+
+      expect(broadcastToProject).not.toHaveBeenCalled();
+      expect(sendToDevice).not.toHaveBeenCalled();
+    });
+
+    it('clearDevice limpia un aviso silencioso activo (sendToDevice proximity_clear)', async () => {
+      const sendToDevice = vi.fn();
+      const withRepo = new GeofenceAlertService({
+        geofenceRepo: {
+          findMatchingSpatial: vi
+            .fn()
+            .mockResolvedValueOnce([{ ...dangerCircleRow, contained: false, distance_meters: 10 }])
+            .mockResolvedValueOnce([{ ...dangerCircleRow, contained: false, distance_meters: 3 }]),
+        },
+        socketServer: { broadcastToProject: vi.fn(), sendToDevice },
+      });
+      await withRepo.evaluate(pos());
+      await withRepo.evaluate(pos());
+      sendToDevice.mockClear();
+
+      withRepo.clearDevice('V1', 7);
+
+      expect(sendToDevice).toHaveBeenCalledWith(
+        'V1',
+        'alert:proximity_clear',
+        expect.objectContaining({ deviceId: 'V1' }),
+      );
+    });
+  });
+
+  describe('infracciones (tabla `infractions`, permanente)', () => {
+    it('el tier critico (ya tocando) crea una infraccion sin el flag de proximidad', async () => {
+      const create = vi.fn().mockResolvedValue(undefined);
+      const withRepo = new GeofenceAlertService({
+        geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([dangerCircleRow]) },
+        socketServer,
+        infractionRepo: { create },
+      });
+      await withRepo.evaluate(pos());
+
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          infractionType: 'geofence',
+          latitude: 19.35,
+          longitude: -103.56,
+          metadata: expect.objectContaining({ proximity: false }),
+        }),
+      );
+    });
+
+    it('nunca crea infraccion para "parking" (severidad info, puramente informativa)', async () => {
+      const create = vi.fn().mockResolvedValue(undefined);
+      const withRepo = new GeofenceAlertService({
+        geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([parkingCircleRow]) },
+        socketServer,
+        infractionRepo: { create },
+      });
+      await withRepo.evaluate(pos());
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('no re-crea la infraccion en cada tick mientras se mantiene en la misma severidad', async () => {
+      const create = vi.fn().mockResolvedValue(undefined);
+      const withRepo = new GeofenceAlertService({
+        geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([dangerCircleRow]) },
+        socketServer,
+        infractionRepo: { create },
+      });
+      await withRepo.evaluate(pos());
+      await withRepo.evaluate(pos());
+      expect(create).toHaveBeenCalledTimes(1);
+    });
   });
 });

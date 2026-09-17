@@ -26,14 +26,22 @@ export function buildVehicleTypesRouter({ vehicleTypeRepo, authMiddleware, requi
 
   router.post('/', authMiddleware, canManage, async (req, res) => {
     try {
-      const { name, lengthMeters, widthMeters } = req.body;
+      const { name, lengthMeters, widthMeters, maxSpeedKmh } = req.body;
       if (!name || !lengthMeters || !widthMeters) {
         return res.status(400).json({ error: 'name, lengthMeters y widthMeters son requeridos' });
       }
       if (lengthMeters <= 0 || widthMeters <= 0) {
         return res.status(400).json({ error: 'lengthMeters y widthMeters deben ser mayores a 0' });
       }
-      const vehicleType = await vehicleTypeRepo.create({ name, lengthMeters, widthMeters });
+      if (maxSpeedKmh != null && maxSpeedKmh <= 0) {
+        return res.status(400).json({ error: 'maxSpeedKmh debe ser mayor a 0' });
+      }
+      const vehicleType = await vehicleTypeRepo.create({
+        name,
+        lengthMeters,
+        widthMeters,
+        maxSpeedKmh: maxSpeedKmh ?? null,
+      });
       res.status(201).json(vehicleType);
     } catch (err) {
       console.error('vehicle-types.routes POST /:', (err as Error).message);
@@ -43,17 +51,21 @@ export function buildVehicleTypesRouter({ vehicleTypeRepo, authMiddleware, requi
 
   router.patch('/:id', authMiddleware, canManage, async (req, res) => {
     try {
-      const { name, lengthMeters, widthMeters } = req.body;
+      const { name, lengthMeters, widthMeters, maxSpeedKmh } = req.body;
       if (lengthMeters !== undefined && lengthMeters <= 0) {
         return res.status(400).json({ error: 'lengthMeters debe ser mayor a 0' });
       }
       if (widthMeters !== undefined && widthMeters <= 0) {
         return res.status(400).json({ error: 'widthMeters debe ser mayor a 0' });
       }
+      if (maxSpeedKmh != null && maxSpeedKmh <= 0) {
+        return res.status(400).json({ error: 'maxSpeedKmh debe ser mayor a 0' });
+      }
       const vehicleType = await vehicleTypeRepo.update(Number(req.params.id), {
         name,
         lengthMeters,
         widthMeters,
+        maxSpeedKmh,
       });
       if (!vehicleType) return res.status(404).json({ error: 'Tipo de vehículo no encontrado' });
       res.json(vehicleType);

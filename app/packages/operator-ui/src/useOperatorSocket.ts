@@ -38,6 +38,16 @@ export interface ThreatVehicle {
   distance: number;
 }
 
+// aviso silencioso de proximidad a geocerca peligrosa - deliberadamente separado del slot `alert`
+// de arriba (nunca se persiste, nunca lo ve nadie mas que este operador) para que un
+// alert:proximity_clear no pueda borrar por accidente una alerta real (critica/warning) que ya
+// este en pantalla - ver GeofenceAlertService._evaluateSilentTier
+export interface ProximityNotice {
+  geofenceName: string;
+  distanceMeters: number;
+  message: string;
+}
+
 const LOCAL_DISCONNECT_LEVEL1_MS = 10000;
 const LOCAL_DISCONNECT_LEVEL2_MS = 20000;
 
@@ -54,6 +64,7 @@ export function useOperatorSocket(deviceId: string | null) {
   const [threat, setThreat] = useState<ThreatVehicle | null>(null);
   const [activeGeofenceId, setActiveGeofenceId] = useState<number | null>(null);
   const [incidents, setIncidents] = useState<Record<number, IncidentReportedPayload>>({});
+  const [proximityNotice, setProximityNotice] = useState<ProximityNotice | null>(null);
   const { playWarningSound, playDangerSound, stopSound } = useAlertSound();
   const soundsRef = useRef({ playWarningSound, playDangerSound, stopSound });
   soundsRef.current = { playWarningSound, playDangerSound, stopSound };
@@ -143,6 +154,17 @@ export function useOperatorSocket(deviceId: string | null) {
         soundsRef.current.stopSound();
       }
     });
+
+    // canal propio del aviso silencioso - solo llega dirigido a este dispositivo (sendToDevice), sin
+    // sonido, sin tocar el slot `alert` real (ver comentario de ProximityNotice arriba)
+    socket.on('alert:proximity_notice', (data) => {
+      setProximityNotice({
+        geofenceName: data.geofenceName,
+        distanceMeters: data.distanceMeters,
+        message: data.message,
+      });
+    });
+    socket.on('alert:proximity_clear', () => setProximityNotice(null));
 
     // el backend ya decide el mensaje segun la audiencia (SignalLostService.ts): al propio
     // vehiculo afectado le llega en primera persona via un evento dirigido solo a el, al resto del
@@ -328,5 +350,6 @@ export function useOperatorSocket(deviceId: string | null) {
     threat,
     activeGeofenceId,
     incidents,
+    proximityNotice,
   };
 }

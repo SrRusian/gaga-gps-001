@@ -6,9 +6,11 @@ export interface VehicleTypeFormState {
   name: string;
   lengthMeters: string;
   widthMeters: string;
+  // opcional - vacio = sin limite propio para este tipo (a diferencia de largo/ancho, obligatorios)
+  maxSpeedKmh: string;
 }
 
-const EMPTY_FORM: VehicleTypeFormState = { name: '', lengthMeters: '', widthMeters: '' };
+const EMPTY_FORM: VehicleTypeFormState = { name: '', lengthMeters: '', widthMeters: '', maxSpeedKmh: '' };
 
 // catalogo global - solo admin lo administra (crea/edita/elimina), pero cualquier rol con acceso
 // a Dispositivos necesita la lista para el <select> de asignacion (ver DevicesModal). El modal de
@@ -40,6 +42,7 @@ export function useVehicleTypesAdmin() {
       name: vt.name,
       lengthMeters: String(vt.length_meters),
       widthMeters: String(vt.width_meters),
+      maxSpeedKmh: vt.max_speed_kmh != null ? String(vt.max_speed_kmh) : '',
     });
     setVehicleTypeFormModal({ vehicleType: vt });
   }
@@ -47,6 +50,8 @@ export function useVehicleTypesAdmin() {
   async function saveVehicleType() {
     const lengthMeters = parseFloat(vehicleTypeForm.lengthMeters);
     const widthMeters = parseFloat(vehicleTypeForm.widthMeters);
+    const maxSpeedKmhTrimmed = vehicleTypeForm.maxSpeedKmh.trim();
+    const maxSpeedKmh = maxSpeedKmhTrimmed ? parseFloat(maxSpeedKmhTrimmed) : null;
     if (!vehicleTypeForm.name.trim()) {
       alert('El nombre es requerido');
       return;
@@ -55,15 +60,25 @@ export function useVehicleTypesAdmin() {
       alert('Largo y ancho deben ser mayores a 0');
       return;
     }
+    if (maxSpeedKmh !== null && !(maxSpeedKmh > 0)) {
+      alert('La velocidad máxima debe ser mayor a 0 (o dejarse vacía si no aplica)');
+      return;
+    }
     try {
       if (vehicleTypeFormModal?.vehicleType) {
         await adminApi.patch(`/api/vehicle-types/${vehicleTypeFormModal.vehicleType.id}`, {
           name: vehicleTypeForm.name,
           lengthMeters,
           widthMeters,
+          maxSpeedKmh,
         });
       } else {
-        await adminApi.post('/api/vehicle-types', { name: vehicleTypeForm.name, lengthMeters, widthMeters });
+        await adminApi.post('/api/vehicle-types', {
+          name: vehicleTypeForm.name,
+          lengthMeters,
+          widthMeters,
+          maxSpeedKmh,
+        });
       }
       setVehicleTypeFormModal(null);
       loadVehicleTypes();

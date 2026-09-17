@@ -24,6 +24,7 @@ import MapRepository from './repositories/MapRepository';
 import ShiftRepository from './repositories/ShiftRepository';
 import IncidentReportRepository from './repositories/IncidentReportRepository';
 import AlertEventRepository from './repositories/AlertEventRepository';
+import InfractionRepository from './repositories/InfractionRepository';
 import SystemSettingsRepository from './repositories/SystemSettingsRepository';
 import DeviceProjectHistoryRepository from './repositories/DeviceProjectHistoryRepository';
 import UserProjectHistoryRepository from './repositories/UserProjectHistoryRepository';
@@ -82,6 +83,7 @@ import buildProjectsRouter from './api/routes/projects.routes';
 import buildShiftsRouter from './api/routes/shifts.routes';
 import buildIncidentsRouter from './api/routes/incidents.routes';
 import buildAlertsRouter from './api/routes/alerts.routes';
+import buildInfractionsRouter from './api/routes/infractions.routes';
 import buildSettingsRouter from './api/routes/settings.routes';
 import buildDeviceGroupsRouter from './api/routes/device-groups.routes';
 import buildVehicleTypesRouter from './api/routes/vehicle-types.routes';
@@ -147,6 +149,7 @@ const equipmentActivityRepo = new EquipmentActivityRepository();
 const productionRecordRepo = new ProductionRecordRepository();
 const payRateRepo = new PayRateRepository();
 const alertEventRepo = new AlertEventRepository();
+const infractionRepo = new InfractionRepository();
 
 const authMiddleware = buildAuthMiddleware({ userRepo });
 const downloadAuthMiddleware = buildDownloadAuthMiddleware({ userRepo });
@@ -157,7 +160,12 @@ const deviceManager = new DeviceManager({ deviceRepo });
 
 // ── Servicios de seguridad ──────────────────────────────────────
 // socketServer se asigna después - evita ciclo con FleetSocketServer (mismo patrón que incidentAlertService abajo)
-const geofenceService = new GeofenceAlertService({ geofenceRepo, geofenceEventRepo, alertEventRepo });
+const geofenceService = new GeofenceAlertService({
+  geofenceRepo,
+  geofenceEventRepo,
+  alertEventRepo,
+  infractionRepo,
+});
 const preventiveStopService = new PreventiveStopService({ io, alertEventRepo });
 // socketServer se asigna después - evita ciclo con FleetSocketServer (mismo patrón que geofenceService abajo)
 const signalLostService = new SignalLostService({
@@ -168,7 +176,7 @@ const signalLostService = new SignalLostService({
 const collisionService = new CollisionRiskService({ io, alertEventRepo });
 const proximityService = new VehicleProximityService({ io, alertEventRepo });
 // socketServer se asigna después, mismo patrón que geofenceService (evita ciclo con FleetSocketServer)
-const speedAlertService = new SpeedAlertService({ deviceRepo, alertEventRepo });
+const speedAlertService = new SpeedAlertService({ deviceRepo, alertEventRepo, infractionRepo });
 const equipmentManager = new StaticEquipmentManager({ io });
 
 // ── Telemetría propia ───────────────────────────────────────────
@@ -214,6 +222,7 @@ const positionProcessor = new PositionProcessor({
   speedEstimator,
   speedAlertService,
   activityClassificationService,
+  deviceFootprintRepo: deviceRepo,
 });
 
 // ── UI estática ──────────────────────────────────────────────────
@@ -302,6 +311,7 @@ app.use(
     equipmentManager,
     deviceProjectHistoryRepo,
     socketServer,
+    headingTracker: positionProcessor.headingTracker,
   }),
 );
 app.use(
@@ -341,6 +351,7 @@ app.use(
   authMiddleware,
   buildAlertsRouter({ alertEventRepo, requireRole, shiftResolver }),
 );
+app.use('/api/infractions', buildInfractionsRouter({ infractionRepo, authMiddleware, requireRole }));
 // chequeo de rol por-ruta dentro del router, no aquí - ver users.routes.ts
 app.use(
   '/api/users',

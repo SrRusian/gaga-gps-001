@@ -33,6 +33,7 @@ export default function SupervisorPanel() {
             alerts={s.alerts}
             alertCount={s.alertCount}
             onResolveIncident={s.resolveIncident}
+            canReviewInfractions
           />
         </aside>
 

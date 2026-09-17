@@ -53,6 +53,7 @@ export default function OperatorApp() {
     threat,
     activeGeofenceId,
     incidents,
+    proximityNotice,
   } = useOperatorSocket(deviceId);
   const [mapMode, setMapMode] = useMapMode('gaga_operator_map_mode');
   const [autoFollow, setAutoFollow] = useAutoFollow();
@@ -221,6 +222,13 @@ export default function OperatorApp() {
             <div className="op-map-mode-selector-wrap">
               <MapModeSelector mode={mapMode} onChange={setMapMode} />
             </div>
+
+            {proximityNotice && (
+              <div className="op-proximity-notice">
+                <span className="op-proximity-notice-dot" />
+                {proximityNotice.message} ({Math.round(proximityNotice.distanceMeters)} m)
+              </div>
+            )}
 
             {}
             {deviceId && (

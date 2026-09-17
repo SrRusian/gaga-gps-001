@@ -39,6 +39,7 @@ export interface VehicleTypeRow {
   name: string;
   length_meters: number;
   width_meters: number;
+  max_speed_kmh: number | null;
 }
 
 export interface AppReleaseRow {

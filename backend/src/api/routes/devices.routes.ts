@@ -14,6 +14,7 @@ import type IncidentAlertService from '../../services/alerts/IncidentAlertServic
 import type StaticEquipmentManager from '../../services/static_equipment/StaticEquipmentManager';
 import type EquipmentRepository from '../../repositories/EquipmentRepository';
 import type DeviceProjectHistoryRepository from '../../repositories/DeviceProjectHistoryRepository';
+import type { VehicleHeadingTracker } from '../../utils/vehicleFootprint';
 
 interface SocketServerLike {
   broadcastToProject(projectId: number | null, event: string, payload: unknown): void;
@@ -36,6 +37,7 @@ export interface DevicesRouterDeps {
   equipmentManager?: StaticEquipmentManager;
   socketServer?: SocketServerLike;
   deviceProjectHistoryRepo?: DeviceProjectHistoryRepository;
+  headingTracker?: VehicleHeadingTracker;
 }
 
 export function buildDevicesRouter({
@@ -55,6 +57,7 @@ export function buildDevicesRouter({
   equipmentManager,
   socketServer,
   deviceProjectHistoryRepo,
+  headingTracker,
 }: DevicesRouterDeps) {
   const router = express.Router();
 
@@ -215,6 +218,7 @@ export function buildDevicesRouter({
         vehicleProximityService?.clearDevice(device.unique_id, otherDeviceIds);
         speedAlertService?.clearDevice(device.unique_id, device.project_id);
         activityClassificationService?.clearDevice(device.unique_id);
+        headingTracker?.clearDevice(device.unique_id);
 
         const unlinkedEquipment = equipmentManager?.clearDeviceLink(device.unique_id);
         if (unlinkedEquipment && socketServer && equipmentManager) {

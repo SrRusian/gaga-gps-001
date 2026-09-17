@@ -42,6 +42,12 @@ export interface GeofenceMatchRow {
   shape_type: GeofenceShapeType;
   speed_limit_kmh: number | null;
   distance_meters: number;
+  // true = el vehiculo ya toca/esta adentro (circle/polygon filled) - comportamiento de siempre,
+  // alerta critica inmediata. false = cerca pero todavia no toca (solo circle/polygon filled, via
+  // el buffer de proximidad) - GeofenceAlertService evalua el tier elastico (silencioso/urgente).
+  // polyline y polygon sin relleno siempre vienen en true - conservan su severidad fija de siempre,
+  // sin tiering por distancia (ya la decide el propio WHERE con corridor_width_meters).
+  contained: boolean;
 }
 
 class GeofenceRepository {
@@ -94,42 +100,87 @@ class GeofenceRepository {
     projectId,
     latitude,
     longitude,
+    footprintWkt = null,
+    accuracyMeters = 0,
+    alertableTypes = [],
+    proximityLookaheadMeters = 0,
   }: {
     projectId: number | null;
     latitude: number;
     longitude: number;
+    // rectangulo orientado real del vehiculo (ver backend/src/utils/vehicleFootprint.ts), agrandado
+    // por la precision GPS actual (ST_Buffer) - null si el dispositivo no tiene tipo de vehiculo
+    // asignado o rumbo confiable todavia, en cuyo caso se usa el punto crudo de siempre SIN buffer
+    // (cero regresion para esos dispositivos, comportamiento identico al de antes de esta feature)
+    footprintWkt?: string | null;
+    accuracyMeters?: number;
+    // tipos con severidad real (AREA_SEVERITY en GeofenceAlertService, fuente unica de verdad) -
+    // solo estos ganan el buffer de proximidad extra para el aviso elastico; vacio = comportamiento
+    // identico al de antes (ningun match nuevo, solo los 5 casos de siempre)
+    alertableTypes?: string[];
+    proximityLookaheadMeters?: number;
   }): Promise<GeofenceMatchRow[]> {
     try {
       // La severidad de cada match la decide siempre el `type` en GeofenceAlertService
-      // (AREA_SEVERITY) - aqui solo se decide SI una geocerca aplica en este punto, segun su
-      // forma/relleno/modo:
-      //  - circle: dentro del radio (ST_DWithin, sin cambios)
-      //  - polygon filled=true: adentro de la zona completa (ST_Contains, sin cambios)
+      // (AREA_SEVERITY) - aqui solo se decide SI una geocerca aplica, segun su forma/relleno/modo,
+      // contra una geometria de prueba `fp` (el rectangulo del vehiculo si hay uno, si no el punto
+      // crudo, igual que siempre):
+      //  - circle: dentro del radio (ST_DWithin) + buffer de proximidad si el tipo es alertable
+      //  - polygon filled=true: toca/adentro (ST_Intersects) + buffer de proximidad si es alertable
       //  - polygon filled=false: cerca del borde (ST_DWithin contra ST_Boundary, un solo umbral)
       //  - polyline stay_inside=true ("debe quedarse dentro"): FUERA del ancho de la linea
       //  - polyline stay_inside=false ("no tocar"): cerca de la linea (ST_DWithin, un solo umbral)
+      // `contained` distingue "ya toca" (circle/polygon filled dentro del umbral base, sin el buffer
+      // extra) de "cerca pero todavia no" (solo alcanzable via el buffer de proximidad) - polyline y
+      // polygon sin relleno siempre contained=true, conservan su severidad fija de siempre.
       const { rows } = await query<GeofenceMatchRow>(
-        `SELECT g.id, g.name, g.type, g.shape_type, g.speed_limit_kmh,
+        `WITH fp AS (
+           SELECT CASE
+             WHEN $4::text IS NOT NULL THEN ST_Buffer(ST_GeogFromText($4), COALESCE($5::double precision, 0))
+             ELSE ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography
+           END AS g
+         )
+         SELECT g.id, g.name, g.type, g.shape_type, g.speed_limit_kmh,
                 CASE
                   WHEN g.shape_type = 'polygon' AND g.filled = FALSE
-                    THEN ST_Distance(ST_Boundary(g.geog::geometry)::geography, pt.g)
-                  ELSE ST_Distance(g.geog, pt.g)
-                END AS distance_meters
-         FROM geofences g,
-              LATERAL (SELECT ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography AS g) pt
+                    THEN ST_Distance(ST_Boundary(g.geog::geometry)::geography, fp.g)
+                  WHEN g.shape_type = 'circle'
+                    THEN GREATEST(ST_Distance(g.geog, fp.g) - g.radius_meters, 0)
+                  ELSE ST_Distance(g.geog, fp.g)
+                END AS distance_meters,
+                CASE
+                  WHEN g.shape_type = 'circle' THEN ST_DWithin(g.geog, fp.g, g.radius_meters)
+                  WHEN g.shape_type = 'polygon' AND g.filled = TRUE
+                    THEN ST_Intersects(g.geog::geometry, fp.g::geometry)
+                  ELSE TRUE
+                END AS contained
+         FROM geofences g, fp
          WHERE g.active = TRUE
            AND g.project_id = $1
            AND (
-             (g.shape_type = 'circle' AND ST_DWithin(g.geog, pt.g, g.radius_meters))
-             OR (g.shape_type = 'polygon' AND g.filled = TRUE AND ST_Contains(g.geog::geometry, pt.g::geometry))
+             (g.shape_type = 'circle' AND ST_DWithin(g.geog, fp.g, g.radius_meters
+               + CASE WHEN g.type = ANY($6::text[]) THEN $7 ELSE 0 END))
+             OR (g.shape_type = 'polygon' AND g.filled = TRUE AND (
+                   ST_Intersects(g.geog::geometry, fp.g::geometry)
+                   OR (g.type = ANY($6::text[])
+                       AND ST_DWithin(ST_Boundary(g.geog::geometry)::geography, fp.g, $7))
+                 ))
              OR (g.shape_type = 'polygon' AND g.filled = FALSE
-                 AND ST_DWithin(ST_Boundary(g.geog::geometry)::geography, pt.g, g.corridor_width_meters))
+                 AND ST_DWithin(ST_Boundary(g.geog::geometry)::geography, fp.g, g.corridor_width_meters))
              OR (g.shape_type = 'polyline' AND g.stay_inside = TRUE
-                 AND NOT ST_DWithin(g.geog, pt.g, g.corridor_width_meters))
+                 AND NOT ST_DWithin(g.geog, fp.g, g.corridor_width_meters))
              OR (g.shape_type = 'polyline' AND g.stay_inside = FALSE
-                 AND ST_DWithin(g.geog, pt.g, g.corridor_width_meters))
+                 AND ST_DWithin(g.geog, fp.g, g.corridor_width_meters))
            )`,
-        [projectId, latitude, longitude],
+        [
+          projectId,
+          latitude,
+          longitude,
+          footprintWkt,
+          accuracyMeters,
+          alertableTypes,
+          proximityLookaheadMeters,
+        ],
       );
       return rows;
     } catch (err) {

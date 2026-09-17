@@ -29,6 +29,7 @@ export function VehicleTypesModal({ open, onClose, admin }: VehicleTypesModalPro
                 <th>Nombre</th>
                 <th>Largo (m)</th>
                 <th>Ancho (m)</th>
+                <th>Vel. máx (km/h)</th>
                 <th></th>
               </tr>
             </thead>
@@ -38,6 +39,7 @@ export function VehicleTypesModal({ open, onClose, admin }: VehicleTypesModalPro
                   <td>{vt.name}</td>
                   <td>{vt.length_meters.toFixed(2)}</td>
                   <td>{vt.width_meters.toFixed(2)}</td>
+                  <td>{vt.max_speed_kmh != null ? vt.max_speed_kmh.toFixed(0) : '—'}</td>
                   <td className="org-row-actions">
                     <button className="btn btn-sm" onClick={() => admin.openEditVehicleType(vt)}>
                       Editar
@@ -89,6 +91,19 @@ export function VehicleTypesModal({ open, onClose, admin }: VehicleTypesModalPro
             value={admin.vehicleTypeForm.widthMeters}
             onChange={(e) =>
               admin.setVehicleTypeForm({ ...admin.vehicleTypeForm, widthMeters: e.target.value })
+            }
+          />
+        </div>
+        <div className="gg-modal-field">
+          <label>Velocidad máxima (km/h)</label>
+          <input
+            type="number"
+            step="1"
+            min="1"
+            placeholder="ej. 60 (opcional, deja vacío si no aplica)"
+            value={admin.vehicleTypeForm.maxSpeedKmh}
+            onChange={(e) =>
+              admin.setVehicleTypeForm({ ...admin.vehicleTypeForm, maxSpeedKmh: e.target.value })
             }
           />
         </div>

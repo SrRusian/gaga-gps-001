@@ -158,6 +158,33 @@
   color: #0b0d10;
 }
 
+/* aviso silencioso de proximidad - discreto a propósito (badge chico, sin pulsar, sin sonido),
+   deliberadamente distinto de #op-alert-overlay/#op-alert-message (esos sí son la alerta real) */
+.op-proximity-notice {
+  position: absolute;
+  top: 60px;
+  left: 12px;
+  right: 12px;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(20, 23, 28, 0.92);
+  border: 1px solid var(--op-warning);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--op-text);
+}
+.op-proximity-notice-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--op-warning);
+  flex-shrink: 0;
+}
+
 .op-floating-actions {
   position: absolute;
   bottom: 16px;

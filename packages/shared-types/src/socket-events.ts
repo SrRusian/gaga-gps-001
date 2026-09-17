@@ -9,6 +9,8 @@ import type {
   EquipmentVehicleApproachingPayload,
   GeofenceAlertPayload,
   GeofenceClearPayload,
+  GeofenceProximityClearPayload,
+  GeofenceProximityNoticePayload,
   IncidentNearbyPayload,
   IncidentReportedPayload,
   IncidentResolvedPayload,
@@ -51,6 +53,11 @@ export interface ServerToClientEvents {
   'alert:info': (payload: GeofenceAlertPayload) => void;
   'alert:clear': (payload: GeofenceClearPayload) => void;
   'supervisor:alert': (payload: SupervisorGeofenceAlertPayload) => void;
+
+  // aviso silencioso de proximidad a geocerca peligrosa - solo llega al operador afectado
+  // (sendToDevice), canal propio deliberadamente separado de alert:*/alert:clear de arriba
+  'alert:proximity_notice': (payload: GeofenceProximityNoticePayload) => void;
+  'alert:proximity_clear': (payload: GeofenceProximityClearPayload) => void;
 
   'signal:lost:level1': (payload: SignalLostPayload) => void;
   'signal:lost:level2': (payload: SignalLostPayload) => void;

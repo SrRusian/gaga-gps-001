@@ -215,23 +215,52 @@ class DeviceRepository {
     }
   }
 
-  // limite propio del dispositivo + el de su grupo (si tiene) - SpeedAlertService combina ambos con
-  // el de la geocerca/ruta y se queda con el mas estricto
-  async findSpeedLimits(
-    uniqueId: string,
-  ): Promise<{ deviceLimit: number | null; groupLimit: number | null }> {
+  // limite propio del dispositivo + el de su grupo + el de su tipo de vehiculo (si tiene alguno) -
+  // SpeedAlertService combina los 3 con el de la geocerca/ruta y se queda con el mas estricto.
+  // De paso trae largo/ancho reales del tipo de vehiculo (PositionProcessor los usa para construir
+  // el rectangulo orientado de deteccion de proximidad a geocercas peligrosas) - un solo query cubre
+  // las dos necesidades, mismo patron ya usado para vehicle_type_name en SELECT_WITH_VEHICLE_TYPE
+  async findAlertContext(uniqueId: string): Promise<{
+    deviceLimit: number | null;
+    groupLimit: number | null;
+    vehicleTypeLimit: number | null;
+    lengthMeters: number | null;
+    widthMeters: number | null;
+  }> {
     try {
-      const { rows } = await query<{ device_limit: number | null; group_limit: number | null }>(
-        `SELECT d.speed_limit_kmh AS device_limit, g.speed_limit_kmh AS group_limit
+      const { rows } = await query<{
+        device_limit: number | null;
+        group_limit: number | null;
+        vehicle_type_limit: number | null;
+        length_meters: number | null;
+        width_meters: number | null;
+      }>(
+        `SELECT d.speed_limit_kmh AS device_limit, g.speed_limit_kmh AS group_limit,
+                vt.max_speed_kmh AS vehicle_type_limit, vt.length_meters, vt.width_meters
          FROM devices d
          LEFT JOIN device_groups g ON g.id = d.group_id
+         LEFT JOIN vehicle_types vt ON vt.id = d.vehicle_type_id
          WHERE d.unique_id = $1`,
         [uniqueId],
       );
-      if (!rows[0]) return { deviceLimit: null, groupLimit: null };
-      return { deviceLimit: rows[0].device_limit, groupLimit: rows[0].group_limit };
+      if (!rows[0]) {
+        return {
+          deviceLimit: null,
+          groupLimit: null,
+          vehicleTypeLimit: null,
+          lengthMeters: null,
+          widthMeters: null,
+        };
+      }
+      return {
+        deviceLimit: rows[0].device_limit,
+        groupLimit: rows[0].group_limit,
+        vehicleTypeLimit: rows[0].vehicle_type_limit,
+        lengthMeters: rows[0].length_meters,
+        widthMeters: rows[0].width_meters,
+      };
     } catch (err) {
-      console.error('DeviceRepository.findSpeedLimits:', (err as Error).message);
+      console.error('DeviceRepository.findAlertContext:', (err as Error).message);
       throw err;
     }
   }
@@ -266,9 +295,11 @@ class DeviceRepository {
         const uniqueId = rows[0]?.unique_id;
         if (uniqueId) {
           // debe purgar TODAS las FK reales a devices - grep REFERENCES devices en 001_init.sql
-          // equipment_activity_segments.operator_session_id REFERENCES operator_sessions(id) sin
-          // cascade - debe purgarse ANTES de borrar operator_sessions, si no 23503
+          // equipment_activity_segments.operator_session_id / infractions.operator_session_id
+          // REFERENCES operator_sessions(id) sin cascade - deben purgarse ANTES de borrar
+          // operator_sessions, si no 23503
           await client.query('DELETE FROM equipment_activity_segments WHERE device_id = $1', [uniqueId]);
+          await client.query('DELETE FROM infractions WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM operator_sessions WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM positions WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM device_sensor_snapshots WHERE device_id = $1', [uniqueId]);
