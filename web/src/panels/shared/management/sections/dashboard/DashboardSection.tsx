@@ -185,7 +185,11 @@ export function DashboardSection() {
 
   function openCreateGeofence() {
     geofencesAdmin.resetGeofenceForm();
-    geofencesAdmin.setGeoShape('polygon');
+    // onShapeChange (no setGeoShape crudo) - tambien entra a draw_polygon en MapboxDraw. Bug real
+    // reportado: como 'polygon' ya es el shape default, el <select> de Forma nunca disparaba su
+    // onChange al abrir el panel, así que el mapa se quedaba en simple_select y los clics no
+    // creaban vertices - solo cambiar a Línea/corredor (que sí dispara onShapeChange) funcionaba.
+    geofencesAdmin.onShapeChange('polygon');
     setActiveOverlay(null);
     geofencesAdmin.setShowGeoPanel(true);
   }
