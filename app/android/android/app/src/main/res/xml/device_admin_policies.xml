@@ -3,7 +3,11 @@
      "Device Owner" (dpm set-device-owner) ya otorga todo lo que Modo Kiosko necesita
      (Lock Task Mode, deshabilitar barra de estado, actividad de inicio persistente) sin
      tener que pedir politicas clasicas de "administrador de dispositivo" (borrado remoto,
-     forzar PIN, etc.) que no se usan aqui. -->
+     forzar PIN, etc.) que no se usan aqui. force-lock es la unica excepcion - la necesita
+     DevicePolicyManager.lockNow() para apagar la pantalla al entrar en suspension por
+     perdida de corriente (ver power/PowerSuspendAlarmReceiver.kt). -->
 <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-policies />
+    <uses-policies>
+        <force-lock />
+    </uses-policies>
 </device-admin>

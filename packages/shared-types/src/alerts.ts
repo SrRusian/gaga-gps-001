@@ -217,7 +217,8 @@ export type AlertEventType =
   | 'preventive_stop'
   | 'incident'
   | 'equipment_variable'
-  | 'speed';
+  | 'speed'
+  | 'power_loss';
 
 export type AlertEventSeverity = 'info' | 'warning' | 'danger';
 

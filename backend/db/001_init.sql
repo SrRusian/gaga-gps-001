@@ -259,7 +259,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
   id BIGSERIAL PRIMARY KEY,
   project_id INTEGER REFERENCES projects(id),
   alert_type VARCHAR(20) NOT NULL
-    CHECK (alert_type IN ('geofence', 'signal_lost', 'collision', 'proximity', 'preventive_stop', 'incident', 'equipment_variable', 'speed')),
+    CHECK (alert_type IN ('geofence', 'signal_lost', 'collision', 'proximity', 'preventive_stop', 'incident', 'equipment_variable', 'speed', 'power_loss')),
   severity VARCHAR(10) NOT NULL CHECK (severity IN ('info', 'warning', 'danger')),
   device_id VARCHAR(255),
   device_id_2 VARCHAR(255),

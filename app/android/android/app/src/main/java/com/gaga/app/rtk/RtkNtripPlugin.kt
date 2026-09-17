@@ -16,6 +16,26 @@ import kotlinx.coroutines.launch
 // NMEA parseado -> mock location + salida SW Maps; RTCM del caster -> bytes al receptor.
 @CapacitorPlugin(name = "RtkNtrip")
 class RtkNtripPlugin : Plugin() {
+    companion object {
+        // referencia al plugin ya cargado - permite que TraccarSenderService (fuera del mundo de
+        // plugins de Capacitor) apague/reencienda USB+NTRIP+ubicacion simulada durante la
+        // suspension por perdida de corriente (ver power/PowerSuspendAlarmReceiver.kt), sin que
+        // ninguno de los dos conozca los detalles internos del otro
+        @Volatile private var instance: RtkNtripPlugin? = null
+
+        // desconectar USB ya en cascada apaga mock location y NTRIP (ver onDisconnected() abajo) -
+        // no hace falta duplicar esa logica aqui
+        fun suspend() {
+            instance?.usb?.disconnect()
+        }
+
+        // intenta reconectar al mismo receptor que ya estaba enchufado (si sigue ahi) - mismo
+        // camino que un attach fisico nuevo, sin duplicar logica
+        fun resume() {
+            instance?.connectToAvailableUsbDevice()
+        }
+    }
+
     private lateinit var usb: UsbSerialManager
     private lateinit var mockLocation: MockLocationFeeder
     private var ntrip: NtripClient? = null
@@ -32,6 +52,7 @@ class RtkNtripPlugin : Plugin() {
     private var lineBuffer = StringBuilder()
 
     override fun load() {
+        instance = this
         usb = UsbSerialManager(context)
         mockLocation = MockLocationFeeder(context)
         usb.listener = object : UsbSerialManager.Listener {

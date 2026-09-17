@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 19,
-      "versionName": "1.0.16-trim-settings-text",
+      "versionCode": 39,
+      "versionName": "1.0.35-lazy-mock-location",
       "outputFile": "app-release.apk"
     }
   ],

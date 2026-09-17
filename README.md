@@ -3,12 +3,17 @@
 Sistema propio de geolocalización y control de flota en tiempo real
 para operación minera.
 
-Reemplaza a Traccar Server como backend de telemetría: las tabletas
-en los vehículos siguen usando la app **Traccar Client** sin
-modificaciones (protocolo OsmAnd), pero reportan directamente a este
-backend Node.js, que persiste la telemetría, evalúa reglas de
-seguridad automáticas y distribuye todo en tiempo real a tres paneles
-web.
+Backend propio de telemetría, sin depender de Traccar Server: los
+vehículos reportan posición directamente a este backend Node.js. En
+producción, las tabletas montadas en los vehículos corren la **app
+nativa propia del proyecto** (`app/android`, "GAGA App" - Capacitor +
+Kotlin, paquete `com.gaga.app`), que unifica en un solo APK el panel
+de Operador, el envío de posición, el receptor RTK/NTRIP, Modo
+Kiosko (tableta bloqueada dentro de la app) y actualización
+automática sin Play Store - ver [App Android](#app-android). El
+backend persiste la telemetría, evalúa reglas de seguridad
+automáticas y distribuye todo en tiempo real a los paneles web y a
+la propia app.
 
 ---
 
@@ -35,7 +40,8 @@ web.
     - [Variables de entorno](#variables-de-entorno)
     - [Caddy: HTTPS y dominio](#caddy-https-y-dominio)
     - [Desarrollo local](#desarrollo-local)
-12. [Configurar Traccar Client en las tabletas](#configurar-traccar-client-en-las-tabletas)
+    - [App Android](#app-android)
+12. [Configuración de telemetría (`/gps`)](#configuración-de-telemetría-gps)
 13. [Referencia de la API](#referencia-de-la-api)
 14. [Eventos de Socket.io](#eventos-de-socketio)
 15. [Seguridad del backend](#seguridad-del-backend)
@@ -51,15 +57,21 @@ web.
 ## Visión general
 
 GAGA-GPS rastrea en tiempo real una flota de vehículos y maquinaria
-dentro de una operación minera, usando tabletas Android con Traccar
-Client como dispositivos GPS. El backend recibe esa telemetría
+dentro de una operación minera, usando tabletas Android con la app
+nativa propia del proyecto ("GAGA App", con GPS/RTK/NTRIP
+integrado) como dispositivo GPS. El backend recibe esa telemetría
 directamente, la persiste, evalúa un conjunto de reglas de seguridad
-automáticas (geocercas, anticolisión, pérdida de señal, aproximación
-a equipo pesado, parada preventiva colectiva) y distribuye todo en
-tiempo real a tres interfaces web, detrás de un login único:
+automáticas
+(geocercas, anticolisión, pérdida de señal, aproximación a equipo
+pesado, parada preventiva colectiva, suspensión por pérdida de
+corriente del vehículo) y distribuye todo en tiempo real a tres
+interfaces web y a la propia app, detrás de un login único:
 
-- **Operador** (`/operator`) - vista en campo, en la tableta del
-  vehículo: mapa, alertas, posición/velocidad propia.
+- **Operador** (`/operator`) - vista en campo, exclusiva de la app
+  nativa instalada en la tableta del vehículo: mapa, alertas,
+  posición/velocidad propia. En una tableta montada de forma fija se
+  complementa con Modo Kiosko (bloqueada dentro de la app) y
+  suspensión automática por pérdida de corriente del vehículo.
 - **Supervisor** (`/supervisor`) y **Encargado** (`/manager`) - sala
   de control de solo lectura: mapa, flota, alertas, historial. El
   Supervisor se acota a su turno programado; el Encargado ve todo el
@@ -72,7 +84,7 @@ tiempo real a tres interfaces web, detrás de un login único:
 ## Arquitectura
 
 ```
-Tableta (Traccar Client, protocolo OsmAnd)
+Tableta (GAGA App nativa)
         │ GET/POST /gps?id=...&lat=...&lon=...
         ▼
 backend/src/api/routes/telemetry.routes.ts
@@ -109,7 +121,7 @@ externo ni polling intermedio.
 | Procesamiento geoespacial | GDAL                                     | Conversión de imágenes satelitales/drone georreferenciadas a MBTiles               |
 | Contenerización          | Docker + Docker Compose                  | Stack completo en un solo `docker-compose.yml`, igual para desarrollo y producción |
 | Reverse proxy HTTPS      | Caddy 2.11                               | Terminación HTTPS automática y proxy inverso hacia el backend                      |
-| Cliente GPS              | Traccar Client (app de terceros)         | Corre en las tabletas, protocolo OsmAnd                                            |
+| App móvil                | Capacitor + Kotlin nativo ("GAGA App")   | APK propio, único cliente GPS del proyecto - panel Operador, envío de posición, receptor RTK/NTRIP, Modo Kiosko (Device Owner) y actualización OTA sin Play Store |
 
 Monorepo con `npm workspaces` (sin Turborepo/Nx - no se justifican
 para el tamaño de este equipo): un solo `package-lock.json`, un solo
@@ -163,9 +175,15 @@ gaga-gps-001/
 │       └── ui/                    # Button, AlertBanner, VehicleCard, MapModeSelector, StatCard, tokens de color
 │
 ├── app/
-│   ├── android/                   # proyecto Capacitor - empaqueta el bundle de web/ + operator-ui, sin fork
+│   ├── android/                   # proyecto Capacitor ("GAGA App", com.gaga.app) - empaqueta el bundle de web/ + operator-ui
+│   │   └── android/app/src/main/java/com/gaga/app/
+│   │       ├── traccar/           # envío de posición nativo (protocolo OsmAnd) + buffer sin conexión
+│   │       ├── rtk/                # receptor RTK por USB + cliente NTRIP + mock-location
+│   │       ├── kiosk/              # Modo Kiosko (Device Owner + Lock Task Mode)
+│   │       ├── update/             # actualización automática sin Play Store (PackageInstaller)
+│   │       └── power/              # suspensión por pérdida de corriente del vehículo
 │   └── packages/
-│       ├── android-bridge/        # interfaz TS hacia los plugins nativos (TraccarSender, RtkNtrip)
+│       ├── android-bridge/        # interfaz TS hacia los plugins nativos (TraccarSender, RtkNtrip, Kiosk, AppUpdate, Power)
 │       └── operator-ui/           # OperatorApp + DeviceSettingsPanel - exclusivos de la app, web/ los importa por nombre
 │
 ├── packages/
@@ -327,7 +345,7 @@ la primera vez que se crea el volumen de PostgreSQL.
 | Tabla                     | Propósito                                                                                          |
 | -------------------------- | --------------------------------------------------------------------------------------------------- |
 | `projects`                | Sitios de operación aislados entre sí                                                               |
-| `devices`                 | Dispositivos/tabletas - `unique_id` es el identificador configurado en Traccar Client                |
+| `devices`                 | Dispositivos/tabletas - `unique_id` es el identificador configurado en la app (Ajustes > Servidor e identidad) |
 | `positions`                | Hypertable de TimescaleDB - una fila por posición GPS, particionada por `fix_time`                   |
 | `geofences`                | Geocercas - polígono o polilínea/corredor (círculo solo heredado); paleta fija de 9 tipos semánticos |
 | `geofence_events`          | Auditoría de entradas/salidas de geocercas                                                          |
@@ -431,10 +449,11 @@ lo resuelve.
 
 ### Historial unificado de alertas
 
-Las 6 familias de alerta (geocerca, señal perdida, colisión,
-proximidad, parada preventiva, incidente) quedan registradas en
-`alert_events` - alimenta tanto "Activas" (sobrevive a un reload de
-la página) como "Historial con filtros" en el panel de Supervisor.
+Las familias de alerta (geocerca, velocidad, señal perdida, colisión,
+proximidad, parada preventiva, incidente, pérdida de corriente del
+vehículo) quedan registradas en `alert_events` - alimenta tanto
+"Activas" (sobrevive a un reload de la página) como "Historial con
+filtros" en el panel de Supervisor.
 
 ### Importador de mapas satelitales
 
@@ -463,6 +482,7 @@ resuelve solo a qué turno programado pertenece según la hora actual.
 | `VehicleProximityService`  | Radar de distancia entre vehículos fuera de un corredor/ruta autorizada                    |
 | `PreventiveStopService`    | Parada preventiva colectiva - solo un rol de supervisión puede desactivarla                |
 | `StaticEquipmentManager`   | Guía de aproximación a equipo estático con radio de giro                                   |
+| `SpeedAlertService`        | Exceso de velocidad - combina el límite de la geocerca/ruta con el del dispositivo/grupo, siempre gana el más estricto |
 
 **Geocercas evalúa vía PostGIS** (`ST_Contains`/`ST_DWithin` + índice
 `GiST` sobre `geofences.geog`) - un solo query indexado, filtrado
@@ -670,10 +690,14 @@ visual, no para probar funcionalidad real con datos.
 
 ### App Android
 
-El APK (`app/android`) empaqueta el mismo bundle de `web/` con
-Capacitor - un solo login, sin fork de código. Cada vez que cambie
-algo en `web/` y el APK deba llevarlo, hay que sincronizarlo a mano
-antes de compilar en Android Studio:
+El APK ("GAGA App", `app/android`, paquete `com.gaga.app`) empaqueta
+el mismo bundle de `web/` con Capacitor - un solo login, sin fork de
+código. Sirve para los 5 roles: un dispositivo recién instalado
+queda en modo básico (solo login); las funciones de Operador (envío
+de posición, RTK/NTRIP, Modo Kiosko) quedan ocultas hasta activar
+"Modo Operador" desde Ajustes. Cada vez que cambie algo en `web/` y
+el APK deba llevarlo, hay que sincronizarlo a mano antes de compilar
+en Android Studio:
 
 ```bash
 cd app/android
@@ -704,26 +728,38 @@ una o todas las tabletas se hace desde el panel de Admin (Sistema).
 Detalle completo (gotchas de firma, límites reales) en
 [`app/android/README.md`](app/android/README.md#actualización-automática-sin-play-store).
 
-## Configurar Traccar Client en las tabletas
+**Suspensión por pérdida de corriente del vehículo** (solo con Modo
+Kiosko activo) - si se corta la corriente del vehículo, tras 1 minuto
+sin que vuelva la tableta entra en ahorro máximo: apaga GPS/RTK,
+pantalla y WiFi, y desconecta el socket del panel Operador (con sus
+alertas activas silenciadas). El backend decide si es una pérdida
+"autorizada" (dentro de una geocerca de Estacionamiento, sin alerta)
+o real (fuera de zona, alerta `power_loss`). Vuelve exactamente donde
+quedó en cuanto regresa la corriente - nunca se despierta por otro
+motivo mientras el kiosko esté activo. Detalle completo en
+[`app/android/README.md`](app/android/README.md#suspensión-por-pérdida-de-corriente-del-vehículo).
+Planeado para automatizar el paso manual restante ("No Battery Mode")
+vía Samsung Knox SDK - ver [Visión a futuro](#visión-a-futuro).
 
-En la app Traccar Client (Android/iOS):
+## Configuración de telemetría (`/gps`)
 
-- **Device Identifier**: cualquier texto único para ese vehículo
-  (ej. `CAMION-01`) - se convierte en `unique_id` en `devices`.
-- **Server URL**: URL completa hasta `/gps`, usando la IP LAN o el
-  dominio real del backend (nunca `localhost`):
-  ```
-  http://<ip-o-dominio-del-backend>:3001/gps?key=TU_CLAVE_SECRETA
-  ```
+El envío de posición se configura enteramente desde la propia GAGA
+App (Ajustes > Servidor e identidad) - servidor, clave compartida e
+identificador del dispositivo, sin ningún paso externo. Ver
+[App Android](#app-android) y
+[`app/android/README.md`](app/android/README.md).
+
+Referencia del endpoint que la app consume internamente:
+
+- **Identificador**: texto único por vehículo (ej. `CAMION-01`) - se
+  convierte en `unique_id` en `devices`.
+- **URL**: `http://<dominio-del-backend>/gps?id=...&lat=...&lon=...&key=TU_CLAVE_SECRETA`
   (el parámetro `key` solo si `TELEMETRY_SHARED_SECRET` está
   configurado).
-- **Frequency / Distance**: 15-20 segundos como referencia general -
-  el sistema también soporta reportes más frecuentes (hasta
-  1/segundo) gracias a la política de compresión de datos.
-
-El backend acepta `GET` o `POST`, con los parámetros en la URL o en
-el cuerpo de la petición - distintas versiones de Traccar Client usan
-una u otra forma.
+- **Frecuencia**: 1 segundo por defecto (editable desde Ajustes) - la
+  política de compresión de datos soporta ese ritmo sin problema.
+- Acepta `GET` o `POST`, con los parámetros en la URL o en el cuerpo
+  de la petición.
 
 ## Referencia de la API
 
@@ -780,6 +816,17 @@ Todas las rutas bajo `/api/*` (excepto `/api/auth/login` y
 | GET      | `/api/fleet/stop/status`                  | No                            | Estado actual de la parada preventiva                                          |
 | GET      | `/api/settings`                           | JWT (`admin`)                 | Configuración global editable (ej. `telemetrySharedSecret`)                    |
 | PATCH    | `/api/settings`                           | JWT (`admin`)                 | Actualiza un valor - aplica en caliente, sin reiniciar el proceso                |
+| GET      | `/api/app/latest`                         | Clave compartida              | Manifest de la última versión publicada del APK (versionCode, sha256)          |
+| GET      | `/api/app/download`                       | Clave compartida              | Descarga el binario del APK publicado                                          |
+| POST     | `/api/app/report-version`                 | Clave compartida              | La app reporta su versión instalada (siempre, aunque la auto-actualización esté apagada) |
+| POST     | `/api/app/fcm-token`                      | Clave compartida              | Guarda el token de push de una tableta (envío real pendiente, ver Visión a futuro) |
+| GET      | `/api/app/releases`                       | JWT (`admin`)                 | Historial completo de versiones publicadas                                     |
+| GET      | `/api/app/version-info`                   | JWT (cualquier rol)           | `{versionCode, versionName}` de la última versión, para el detalle de vehículo  |
+| POST     | `/api/app/release`                        | JWT (`admin`), multipart      | Publica un APK nuevo - lee versionCode/versionName/paquete del propio archivo   |
+| GET      | `/api/app/qr-provisioning`                | JWT (`admin`)                 | Payload para el QR de aprovisionamiento Device Owner (sin adb/computadora)      |
+| POST     | `/api/app/force-update`                   | JWT (`admin`)                 | Fuerza el chequeo de actualización en una tableta conectada, o en todas         |
+| POST     | `/api/power-events/power-lost`            | Clave compartida              | La app avisa pérdida de corriente (Modo Kiosko) - backend decide si es zona autorizada |
+| POST     | `/api/power-events/power-restored`        | Clave compartida              | La app avisa que volvió la corriente y salió de suspensión                     |
 | GET      | `/health`                                 | No                            | Estado de PostgreSQL/Redis y de la parada preventiva                            |
 
 ## Eventos de Socket.io
@@ -935,8 +982,8 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota
 | Entrar a una ruta protegida manda de vuelta al login en loop                  | No hay sesión válida, o el rol no coincide con esa ruta                            | Iniciar sesión con un usuario del rol correcto; si persiste, revisar errores de red a `/api/auth/login`         |
 | `401`/`403` en `/api/fleet/stop` o `/resume` con sesión iniciada             | El usuario no tiene un rol autorizado, o el token venció                          | Confirmar el rol en Admin → Usuarios; si es correcto, volver a iniciar sesión                                    |
 | El socket no conecta / sin actualizaciones en vivo                           | Conexión sin JWT válido en el handshake                                            | Confirmar que hay sesión válida antes de que la app llame a `createSocket()`                                     |
-| `404` en Traccar Client al mandar posición                                  | La tableta usa `POST` en vez de `GET`, u otra combinación                          | Ambos métodos están soportados - verificar que el backend esté actualizado                                       |
-| `400` "Faltan parámetros requeridos" pese a que la tableta manda datos      | Traccar Client envía los parámetros en el body, no en la URL                       | Ambas formas están soportadas - confirmar `express.urlencoded()` en `app.ts`                                      |
+| `404` en la app al mandar posición                                          | La tableta usa `POST` en vez de `GET`, u otra combinación                          | Ambos métodos están soportados - verificar que el backend esté actualizado                                       |
+| `400` "Faltan parámetros requeridos" pese a que la tableta manda datos      | El envío llega con los parámetros en el body, no en la URL                         | Ambas formas están soportadas - confirmar `express.urlencoded()` en `app.ts`                                      |
 | `DELETE /api/devices/:id` responde 409                                       | El dispositivo tiene historial de posiciones                                       | Usar `?force=true` para purgar también el historial                                                              |
 | Vehículo aparece con nombre igual a su ID técnico                            | El dispositivo se auto-registró sin nombre amigable                                | Editar el nombre desde Admin → Dashboard → overlay Dispositivos                                                  |
 | El backend arranca pero dice `degraded` en `/health`                        | PostgreSQL o Redis no accesibles con las credenciales del `.env`                   | Revisar `docker compose logs gaga-backend`                                                                        |
@@ -949,23 +996,33 @@ HGETALL gaga:fleet:state     # estado actual de toda la flota
 
 ## Visión a futuro
 
-Dirección declarada del proyecto, no implementada todavía:
+Dirección declarada del proyecto, no implementada todavía. La app
+móvil nativa propia para operadores (RTK, GPS/mock-location,
+Modo Kiosko, actualización OTA) **ya está construida** - ver
+[App Android](#app-android) - lo que sigue es lo que todavía falta:
 
-- **App móvil propia para operadores**, en reemplazo de Traccar
-  Client - el backend ya es compatible (acepta el protocolo OsmAnd
-  de cualquier cliente que lo hable), así que esto es una app nueva,
-  no un cambio de protocolo. Incluiría:
-  - Integración con RTK del dispositivo, si está disponible, para
-    mejorar precisión.
-  - Detección de mock-location (GPS falso/simulado) - anti-spoofing.
-  - Permisos nativos de tableta (ubicación, direcciones, avisos) -
-    la idea es un "Google Maps empresarial propio" para la
-    operación, no solo un rastreador.
-  - De construirse, el stack natural por consistencia sería React
-    Native (reutilizando `packages/shared-types` y parte de
-    `web/packages/client`) - todo el proyecto se mantiene en TypeScript
-    de punta a punta deliberadamente, para no migrar a otro lenguaje
-    cuando llegue este momento.
+- **Automatización de "No Battery Mode" vía Samsung Knox SDK** - hoy
+  se activa a mano una sola vez por tableta durante el
+  aprovisionamiento. El camino real es el Knox Service Plugin vía
+  `DevicePolicyManager.setApplicationRestrictions()` (mismo mecanismo
+  estándar de Android Enterprise que ya usa esta app para Modo
+  Kiosko, no un SDK aparte que haya que importar) - bloqueado por
+  ahora porque el registro en el portal de desarrolladores de Knox
+  para obtener la llave KPE (gratuita) requiere un correo corporativo
+  que el usuario todavía no tiene. Ya confirmado contra documentación
+  oficial de Samsung que la arquitectura Device Owner actual de la
+  app cumple el requisito de Android 15+/Knox SDK 3.11+ (Device
+  Administrator clásico está perdiendo acceso, Device Owner no) - no
+  hará falta ningún cambio estructural cuando haya acceso. Detalle en
+  [`app/android/README.md`](app/android/README.md#samsung-knox-sdk-planeado-pendiente-de-acceso---no-battery-mode-automático).
+- **Notificación push instantánea (Firebase Cloud Messaging)** - para
+  despertar de inmediato una tableta apagada/sin datos ante una
+  actualización forzada o una alerta crítica, en vez de esperar a su
+  próxima revisión programada (hoy diaria, 2 AM) o a que el socket
+  esté conectado. El endpoint de registro de token ya existe
+  (`POST /api/app/fcm-token`); el envío real (`firebase-admin`) está
+  pendiente de que el usuario provea las credenciales de un proyecto
+  Firebase propio.
 - **Más roles** - el sistema ya está preparado para esto sin cambios
   de schema (roles genéricos, ver [Autenticación y roles](#autenticación-y-roles));
   candidatos mencionados: `dispatcher`, `technician`.

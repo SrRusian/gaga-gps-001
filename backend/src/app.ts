@@ -84,6 +84,7 @@ import buildAlertsRouter from './api/routes/alerts.routes';
 import buildSettingsRouter from './api/routes/settings.routes';
 import buildDeviceGroupsRouter from './api/routes/device-groups.routes';
 import buildEquipmentVariablesRouter from './api/routes/equipment-variables.routes';
+import buildPowerEventsRouter from './api/routes/power-events.routes';
 import buildProductionRouter from './api/routes/production.routes';
 import MapPipelineService from './services/maps/MapPipelineService';
 
@@ -352,6 +353,11 @@ app.use(
     authMiddleware,
     requireRole,
   }),
+);
+// clave compartida, no JWT - ver power-events.routes.ts
+app.use(
+  '/api/power-events',
+  buildPowerEventsRouter({ deviceRepo, geofenceRepo, alertEventRepo, signalLostService, socketServer }),
 );
 app.use(
   '/api/production',

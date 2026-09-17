@@ -20,6 +20,7 @@ class KioskPlugin : Plugin() {
         ret.put("active", activity?.let { KioskManager.isLockTaskActive(it) } ?: false)
         ret.put("developerOptionsEnabled", KioskManager.isDeveloperOptionsEnabled(context))
         ret.put("wasQrProvisioned", KioskPrefs.getWasQrProvisioned(context))
+        ret.put("exactAlarmsGranted", KioskManager.areExactAlarmsGranted(context))
         call.resolve(ret)
     }
 
@@ -28,6 +29,16 @@ class KioskPlugin : Plugin() {
     @PluginMethod
     fun openDeveloperOptions(call: PluginCall) {
         KioskManager.openDeveloperOptionsOrAbout(context)
+        call.resolve()
+    }
+
+    // atajo a la pantalla de "Alarmas y recordatorios" para conceder SCHEDULE_EXACT_ALARM - sin
+    // esto, la suspension por perdida de corriente y la actualizacion automatica caen a un
+    // temporizador inexacto que Android puede retrasar varios segundos/minutos (bug real
+    // confirmado, ver KioskManager.areExactAlarmsGranted)
+    @PluginMethod
+    fun openExactAlarmSettings(call: PluginCall) {
+        KioskManager.openExactAlarmSettings(context)
         call.resolve()
     }
 

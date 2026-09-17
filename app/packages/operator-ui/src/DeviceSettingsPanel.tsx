@@ -207,6 +207,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     active: false,
     developerOptionsEnabled: false,
     wasQrProvisioned: false,
+    exactAlarmsGranted: false,
   });
   const [kioskBusy, setKioskBusy] = useState(false);
   const [kioskError, setKioskError] = useState('');
@@ -713,9 +714,9 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     }
     const confirmed = confirm(
       'Esto activa el Modo Kiosko: la tableta va a quedar bloqueada dentro de esta app - sin ' +
-        'barra de estado, sin boton de inicio/recientes. Tambien bloquea "Opciones de ' +
-        'desarrollador" de Android (incluida "ubicacion falsa") para que nadie pueda cambiarla - ' +
-        'configura el RTK antes de activar esto si todavia no lo hiciste. Solo se puede salir ' +
+        'barra de estado, sin boton de inicio/recientes/encendido/volumen. Configura RTK y ' +
+        '"Alarmas y recordatorios" antes de activar esto si todavia no lo hiciste - una vez ' +
+        'activo, Lock Task Mode impide llegar a cualquier Ajuste de Android. Solo se puede salir ' +
         'desde aqui mismo (Ajustes), con la contrasena de ajustes.\n\n¿Continuar?',
     );
     if (!confirmed) return;
@@ -760,6 +761,14 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   // cualquier tableta (use RTK o no), rompiendole el GPS real sin que nadie lo pidiera.
   async function openDeveloperOptionsSettings() {
     await Kiosk.openDeveloperOptions().catch(() => {});
+  }
+
+  // bug real confirmado en hardware: Device Owner NO recibe SCHEDULE_EXACT_ALARM otorgado solo
+  // (contrario a lo que se asumia antes) - sin esto, la suspension por perdida de corriente tarda
+  // varios segundos/minutos mas de lo configurado. refreshState() (poll cada 4s) ya recoge el
+  // cambio solo despues de concederlo en Ajustes, no hace falta un boton de "verificar" aparte.
+  async function openExactAlarmSettings() {
+    await Kiosk.openExactAlarmSettings().catch(() => {});
   }
 
   async function retryMockLocationCheck() {
@@ -1279,9 +1288,21 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
           </div>
           {kioskError && <div className="ds-error-block">{kioskError}</div>}
           <p className="ds-hint">
-            Bloquea la tableta dentro de la app y las Opciones de desarrollador de Android. Para
-            salir: vuelve aqui con la contrasena y apaga el switch.
+            Bloquea la tableta dentro de la app. Para salir: vuelve aqui con la contrasena y apaga
+            el switch.
           </p>
+          {!kioskStatus.exactAlarmsGranted && (
+            <div className="ds-hint" style={{ border: '1px solid #d29922', borderRadius: 6, padding: 10 }}>
+              <p>
+                <strong>Pendiente:</strong> falta conceder "Alarmas y recordatorios" - sin esto, la
+                suspension por perdida de corriente y la actualizacion automatica pueden tardar
+                varios segundos/minutos mas de lo configurado.
+              </p>
+              <div className="ds-actions">
+                <button onClick={openExactAlarmSettings}>Abrir Ajustes de Android</button>
+              </div>
+            </div>
+          )}
           {kioskStatus.isDeviceOwner && (
             <div className="ds-actions" style={{ marginTop: 10 }}>
               <button onClick={releaseDeviceOwner} disabled={kioskBusy}>

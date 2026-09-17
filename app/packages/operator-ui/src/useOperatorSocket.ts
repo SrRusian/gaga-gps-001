@@ -1,5 +1,5 @@
 import { createSocket } from '@gaga-gps/client';
-import { AppUpdate } from '@gaga-gps/android-bridge';
+import { AppUpdate, Power } from '@gaga-gps/android-bridge';
 import type {
   ActiveMap,
   Geofence,
@@ -60,6 +60,7 @@ export function useOperatorSocket(deviceId: string | null) {
 
   const disconnectedAtRef = useRef<number | null>(null);
   const localSignalLevelRef = useRef<'none' | 'level1' | 'level2'>('none');
+  const powerSuspendedRef = useRef(false);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -249,7 +250,35 @@ export function useOperatorSocket(deviceId: string | null) {
       setTimeout(clearAlertState, 5000);
     });
 
+    // suspension por perdida de corriente (ver power/PowerSuspendAlarmReceiver.kt) - GPS/RTK/
+    // pantalla ya se apagan del lado nativo, pero sin esto el socket seguia conectado y
+    // procesando alertas/posiciones de toda la flota en segundo plano - bug real reportado en
+    // campo ("se apago la pantalla pero de fondo se estan escuchando las alertas igual"). Se
+    // desconecta/reconecta el mismo socket (conserva sus listeners) en vez de crear uno nuevo.
+    // Desconectar el socket solo evita eventos NUEVOS - una alerta ya sonando (ej. parada
+    // preventiva activa desde antes de perder corriente) sigue sonando si no se detiene aparte,
+    // por eso tambien se limpia el estado/sonido activo al entrar en suspension (bug real
+    // reportado: "hay un alto total activo... se sigue escuchando la alerta de fondo").
+    function onPowerSuspended() {
+      powerSuspendedRef.current = true;
+      socket.disconnect();
+      clearAlertState();
+      soundsRef.current.stopSound();
+    }
+    Power.getStatus().then((status) => {
+      if (status.suspended) onPowerSuspended();
+    });
+    const powerListenerPromise = Power.addListener('powerStatus', (status) => {
+      if (status.suspended) {
+        onPowerSuspended();
+      } else {
+        powerSuspendedRef.current = false;
+        if (!socket.connected) socket.connect();
+      }
+    });
+
     return () => {
+      powerListenerPromise.then((h) => h.remove());
       socket.disconnect();
     };
   }, [deviceId]);
@@ -258,6 +287,10 @@ export function useOperatorSocket(deviceId: string | null) {
     if (!deviceId) return;
 
     const interval = setInterval(() => {
+      // desconexion intencional por suspension de energia (power/PowerSuspendAlarmReceiver.kt) -
+      // no es perdida real de senal, este vigilante local no debe disparar su propia alerta
+      // mientras dure (bug real: "sin conexion prolongada" sonando de fondo tras la suspension)
+      if (powerSuspendedRef.current) return;
       if (disconnectedAtRef.current === null) return;
       const elapsed = Date.now() - disconnectedAtRef.current;
 

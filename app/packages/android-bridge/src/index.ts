@@ -237,6 +237,12 @@ export interface KioskStatus {
   // true si esta tableta se convirtio en Device Owner via el QR de aprovisionamiento (no via adb) -
   // la web lo usa para aprovisionarse sola al primer arranque, sin pedir el codigo de "Modo Operador"
   wasQrProvisioned: boolean;
+  // SCHEDULE_EXACT_ALARM concedido - bug real confirmado en hardware: Device Owner NO lo recibe
+  // otorgado solo (verificado contra documentacion oficial de Android 14, contrario a lo asumido
+  // antes) - sin esto, la suspension por perdida de corriente cae a un temporizador inexacto que
+  // Android puede retrasar varios segundos/minutos (26s en vez de 15, confirmado con log real).
+  // Ver openExactAlarmSettings()/checklist en DeviceSettingsPanel.tsx
+  exactAlarmsGranted: boolean;
 }
 
 export interface KioskPlugin {
@@ -244,6 +250,7 @@ export interface KioskPlugin {
   enable(): Promise<void>;
   disable(): Promise<void>;
   openDeveloperOptions(): Promise<void>;
+  openExactAlarmSettings(): Promise<void>;
   // renuncia a Device Owner desde dentro de la app - unica forma confiable de desbloquear la
   // desinstalacion normal sin un reseteo de fabrica completo (adb shell dpm remove-active-admin y
   // pm clear estan bloqueados por el shell en builds de produccion, confirmado en hardware real)
@@ -257,10 +264,12 @@ const webKioskFallback: KioskPlugin = {
     active: false,
     developerOptionsEnabled: false,
     wasQrProvisioned: false,
+    exactAlarmsGranted: false,
   }),
   enable: async () => unavailable('Kiosk'),
   disable: async () => unavailable('Kiosk'),
   openDeveloperOptions: async () => unavailable('Kiosk'),
+  openExactAlarmSettings: async () => unavailable('Kiosk'),
   releaseDeviceOwner: async () => unavailable('Kiosk'),
 };
 
@@ -313,4 +322,28 @@ export const Kiosk = registerPlugin<KioskPlugin>('Kiosk', {
 
 export const AppUpdate = registerPlugin<AppUpdatePlugin>('AppUpdate', {
   web: webAppUpdateFallback,
+});
+
+export interface PowerStatus {
+  // true mientras la tableta esta en suspension profunda por perdida de corriente (ver
+  // power/PowerSuspendAlarmReceiver.kt) - GPS/RTK/pantalla apagados. useOperatorSocket.ts usa
+  // esto para desconectar su propio socket mientras dure, sin eso la suspension no es total.
+  suspended: boolean;
+}
+
+export interface PowerPlugin {
+  getStatus(): Promise<PowerStatus>;
+  addListener(
+    eventName: 'powerStatus',
+    listenerFunc: (status: PowerStatus) => void,
+  ): Promise<PluginListenerHandle>;
+}
+
+const webPowerFallback: PowerPlugin = {
+  getStatus: async () => ({ suspended: false }),
+  addListener: (async () => ({ remove: async () => {} })) as PowerPlugin['addListener'],
+};
+
+export const Power = registerPlugin<PowerPlugin>('Power', {
+  web: webPowerFallback,
 });

@@ -61,6 +61,21 @@
         <receiver android:name=".update.UpdateCheckReceiver" android:enabled="true" android:exported="false" />
         <receiver android:name=".update.UpdateInstallReceiver" android:enabled="true" android:exported="false" />
 
+        <!-- Notificacion push (FCM) - actualizacion remota instantanea sin importar pantalla/
+             sesion, ni con la app cerrada. Solo aplica si google-services.json esta presente (ver
+             el try/catch condicional en app/build.gradle) - inofensivo sin el. -->
+        <service
+            android:name=".update.FCMService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Suspension por perdida de corriente del vehiculo - ver power/PowerSuspendScheduler.kt.
+             Solo se invoca con un Intent explicito (AlarmManager), nunca por intent-filter implicito. -->
+        <receiver android:name=".power.PowerSuspendAlarmReceiver" android:enabled="true" android:exported="false" />
+
         <!-- Modo Kiosko - ver res/xml/device_admin_policies.xml y KioskManager.kt. Requiere que la
              app se aprovisione una sola vez como Device Owner (adb, ver app/android/README.md) -
              sin eso, este receiver existe pero nunca se activa. -->
@@ -97,6 +112,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- apagar/reencender WiFi durante la suspension por perdida de corriente (ver
+         power/PowerSuspendAlarmReceiver.kt) - WifiManager.setWifiEnabled() esta bloqueado para
+         apps normales desde Android 10, pero Device Owner esta exento de esa restriccion -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- ConnectivityManager.registerNetworkCallback() en AppUpdateManager.waitForNetwork() -
+         confirma que WiFi ya tiene internet real (no solo el radio encendido) antes de revisar
+         actualizaciones con la tableta suspendida por perdida de corriente -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Ya no controla el mecanismo real de mock-location (eso lo decide Opciones de desarrollador
          desde Android 6), pero Android SIGUE usando que este permiso este declarado como filtro
          para decidir que apps mostrar en "Seleccionar app de ubicacion ficticia" - sin esto la app

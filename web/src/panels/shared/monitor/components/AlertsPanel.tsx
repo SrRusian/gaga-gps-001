@@ -14,6 +14,7 @@ const ALERT_TYPE_LABEL: Record<AlertEventType, string> = {
   incident: 'Incidente',
   equipment_variable: 'Variable de equipo',
   speed: 'Velocidad',
+  power_loss: 'Pérdida de energía',
 };
 
 const SEVERITY_LABEL = { info: 'Info', warning: 'Precaución', danger: 'Peligro' } as const;

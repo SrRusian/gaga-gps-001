@@ -62,7 +62,7 @@ export default function OperatorApp() {
     useIncidentReporter(deviceId);
 
   const { position: localGeo, error: geoError, supported: geoSupported } = useDeviceGeolocation();
-  const batteryLevel = useBatteryLevel();
+  const { level: batteryLevel, charging: batteryCharging } = useBatteryLevel();
   useDeviceSensorReporter(deviceId);
 
   // posición propia: local tiene prioridad sobre servidor; alertas siguen siendo del servidor
@@ -267,7 +267,16 @@ export default function OperatorApp() {
               {batteryLevel !== null && (
                 <div className="op-info-item">
                   <span className="op-info-label">Batería</span>
-                  <span className="op-info-value">{batteryLevel}%</span>
+                  <span className="op-info-value">
+                    {batteryCharging ? (
+                      <span className="op-battery-charging">
+                        <span className="op-battery-charging-dot" />
+                        Conectada
+                      </span>
+                    ) : (
+                      `${batteryLevel}%`
+                    )}
+                  </span>
                 </div>
               )}
             </footer>

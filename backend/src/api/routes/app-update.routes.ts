@@ -10,6 +10,7 @@ import { env } from '../../config';
 import type AppReleaseRepository from '../../repositories/AppReleaseRepository';
 import type DeviceRepository from '../../repositories/DeviceRepository';
 import { isValidSharedSecret } from '../../utils/sharedSecret';
+import { sendForceUpdatePush } from '../../services/push/FirebasePushService';
 
 // el paquete real de la app Android (applicationId en build.gradle) - rechaza publicar el apk de
 // otra app por error, no solo confiar en que quien sube el archivo se equivoco de ventana
@@ -127,6 +128,28 @@ export function buildAppUpdateRouter({
     } catch (err) {
       console.error('app-update.routes POST /report-version:', (err as Error).message);
       res.status(500).json({ error: 'Error guardando la version reportada' });
+    }
+  });
+
+  // token de Firebase Cloud Messaging de esta tableta (ver FCMService.kt, todavia sin activar del
+  // lado nativo hasta tener google-services.json - ver README) - clave compartida, mismo criterio
+  // que /report-version. Se guarda para poder mandarle una señal instantanea de "actualiza ahora"
+  // sin depender del socket (que solo existe con el mapa abierto en pantalla)
+  router.post('/fcm-token', async (req, res) => {
+    const { deviceId, token, key } = req.body;
+    if (!isValidSharedSecret(env.telemetrySharedSecret, key)) {
+      return res.status(401).json({ error: 'Clave inválida' });
+    }
+    if (!deviceId || !token) {
+      return res.status(400).json({ error: 'deviceId y token son requeridos' });
+    }
+    try {
+      const updated = await deviceRepo.mergeAttributes(String(deviceId), { fcmToken: String(token) });
+      if (!updated) return res.status(404).json({ error: 'Dispositivo no encontrado' });
+      res.json({ success: true });
+    } catch (err) {
+      console.error('app-update.routes POST /fcm-token:', (err as Error).message);
+      res.status(500).json({ error: 'Error guardando el token' });
     }
   });
 
@@ -276,15 +299,25 @@ export function buildAppUpdateRouter({
     }
   });
 
-  // dispara una revision inmediata en la(s) tableta(s) conectada(s) ahora mismo (socket) - sin
-  // deviceId, a todas; con deviceId, solo a esa. Una tableta apagada/sin socket conectado en este
-  // momento no lo recibe - se pone al dia en su siguiente revision programada (2 AM) o al arrancar
-  router.post('/force-update', authMiddleware, canManage, (req, res) => {
+  // dispara una revision inmediata en la(s) tableta(s) - dos canales independientes, cada uno
+  // cubre lo que el otro no puede: el socket (instantaneo, pero solo llega si el operador tiene
+  // la app abierta en el mapa con sesion iniciada) y el push de FCM (llega sin importar
+  // pantalla/sesion, incluso con la app cerrada - no-op silencioso si FIREBASE_SERVICE_ACCOUNT_JSON
+  // no esta configurado, ver FirebasePushService.ts). Sin deviceId, a todas; con deviceId, solo a esa.
+  router.post('/force-update', authMiddleware, canManage, async (req, res) => {
     const { deviceId } = req.body as { deviceId?: string };
     if (deviceId) {
       socketServer.sendToDevice(deviceId, 'device:force_update', {});
+      const device = await deviceRepo.findByUniqueId(deviceId);
+      const token = device?.attributes.fcmToken;
+      if (typeof token === 'string') await sendForceUpdatePush([token]);
     } else {
       socketServer.broadcast('device:force_update', {});
+      const devices = await deviceRepo.findAll();
+      const tokens = devices
+        .map((d) => d.attributes.fcmToken)
+        .filter((t): t is string => typeof t === 'string');
+      await sendForceUpdatePush(tokens);
     }
     res.json({ success: true });
   });

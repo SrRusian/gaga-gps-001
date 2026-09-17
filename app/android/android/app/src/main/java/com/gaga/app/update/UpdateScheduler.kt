@@ -20,14 +20,18 @@ object UpdateScheduler {
     private const val REQUEST_CODE = 4211
     private const val CHECK_HOUR = 2
 
-    // Bug real confirmado en hardware: la suposicion de que Device Owner esta exento de la
-    // restriccion de alarmas exactas de Android 12+ era falsa sin declarar el permiso en el
-    // manifest (ver AndroidManifest.xml) - sin el, esto lanzaba SecurityException dentro del hilo
-    // de plugins de Capacitor y tumbaba la app COMPLETA en cada arranque (AppUpdatePlugin.configure
-    // llama a schedule() al inicializar el plugin). Con el permiso ya declarado esto no deberia
-    // volver a pasar, pero se cae a una alarma inexacta en vez de crashear si de todos modos falla
-    // (ej. un build viejo instalado antes de este fix, o un fabricante que revoca el permiso) -
-    // una revision de actualizacion que llegue con unos minutos de retraso no es grave, un crash si.
+    // Bug real confirmado en hardware, dos rondas: (1) sin declarar SCHEDULE_EXACT_ALARM en el
+    // manifest, esto lanzaba SecurityException dentro del hilo de plugins de Capacitor y tumbaba
+    // la app COMPLETA en cada arranque (AppUpdatePlugin.configure llama a schedule() al
+    // inicializar el plugin) - ya declarado, arreglado. (2) Confirmado despues (ver
+    // KioskManager.areExactAlarmsGranted, mismo permiso que usa PowerSuspendScheduler): la
+    // suposicion de que Device Owner recibe SCHEDULE_EXACT_ALARM otorgado solo es FALSA (verificado
+    // contra documentacion oficial de Android 14 - Device Owner no aparece en la lista de
+    // excepciones). El fallback a alarma inexacta de aqui abajo sigue siendo necesario en la
+    // practica, no solo defensivo - una revision de actualizacion con minutos de retraso no es
+    // grave (a diferencia de la suspension por perdida de corriente, que sí necesita el permiso
+    // real - ver el checklist de "Alarmas y recordatorios" en Ajustes > Modo Kiosko, la misma
+    // concesion arregla ambos schedulers).
     fun schedule(context: Context) {
         val intent = Intent(context, UpdateCheckReceiver::class.java)
         val pendingIntent = PendingIntent.getBroadcast(

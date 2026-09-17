@@ -46,6 +46,9 @@ class SignalLostService {
   lastSeen: Record<string, number>;
   alertLevel: Record<string, AlertLevel>;
   projectByDevice: Record<string, number | null>;
+  // dispositivos en suspension de energia autorizada (ver power-events.routes.ts) - checkAllDevices
+  // los salta por completo mientras dure, aunque lleven horas/dias sin mandar nada
+  suspendedDevices: Record<string, boolean>;
   checkInterval: ReturnType<typeof setInterval> | null;
   readonly LEVEL1_MS = 10000;
   readonly LEVEL2_MS = 20000;
@@ -68,7 +71,20 @@ class SignalLostService {
     this.lastSeen = {};
     this.alertLevel = {};
     this.projectByDevice = {};
+    this.suspendedDevices = {};
     this.checkInterval = null;
+  }
+
+  // el dispositivo avisó que perdió corriente dentro de una geocerca tipo estacionamiento
+  // (type=parking) - deja de contar como "sin señal" mientras dure, sin importar cuánto tiempo pase
+  suspendDevice(deviceId: string): void {
+    this.suspendedDevices[deviceId] = true;
+  }
+
+  // corriente restaurada o interacción detectada - vuelve a contar sin_señal normal. No dispara
+  // handleRecovery() por sí solo: eso ya lo hace recordPosition() en cuanto llegue una posición real
+  resumeDevice(deviceId: string): void {
+    delete this.suspendedDevices[deviceId];
   }
 
   hydrate(records: { deviceId: string; lastSeenAt: Date; projectId: number | null }[]): void {
@@ -82,6 +98,9 @@ class SignalLostService {
     const wasLost = this.alertLevel[deviceId];
     this.lastSeen[deviceId] = Date.now();
     this.projectByDevice[deviceId] = projectId;
+    // cualquier posicion real (encendido normal, o interaccion sospechosa sin corriente - ver
+    // power-events.routes.ts) significa que ya no esta "silenciosamente suspendido"
+    delete this.suspendedDevices[deviceId];
 
     if (wasLost && wasLost !== 'none') {
       this.handleRecovery(deviceId);
@@ -108,6 +127,7 @@ class SignalLostService {
     const now = Date.now();
 
     Object.entries(this.lastSeen).forEach(([deviceId, lastTime]) => {
+      if (this.suspendedDevices[deviceId]) return;
       const elapsed = now - lastTime;
       const currentLevel = this.alertLevel[deviceId] || 'none';
 
@@ -249,6 +269,7 @@ class SignalLostService {
     delete this.lastSeen[deviceId];
     delete this.alertLevel[deviceId];
     delete this.projectByDevice[deviceId];
+    delete this.suspendedDevices[deviceId];
   }
 }
 
