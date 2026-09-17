@@ -54,7 +54,6 @@ export function DevicesModal({
               <tr>
                 <th>ID</th>
                 <th>Nombre</th>
-                <th>Tipo</th>
                 <th>Tipo de vehículo</th>
                 {scope === 'global' && <th>Proyecto</th>}
                 <th>Estado</th>
@@ -67,7 +66,6 @@ export function DevicesModal({
                 <tr key={d.id}>
                   <td>{d.unique_id}</td>
                   <td>{d.name}</td>
-                  <td>{d.type}</td>
                   <td>{d.vehicle_type_name ?? '-'}</td>
                   {scope === 'global' && (
                     <td>{projects.find((p) => p.id === d.project_id)?.name ?? 'Sin asignar'}</td>
@@ -111,14 +109,6 @@ export function DevicesModal({
           <input
             value={admin.deviceForm.name}
             onChange={(e) => admin.setDeviceForm({ ...admin.deviceForm, name: e.target.value })}
-          />
-        </div>
-        <div className="gg-modal-field">
-          <label>Tipo</label>
-          <input
-            placeholder="vehicle"
-            value={admin.deviceForm.type}
-            onChange={(e) => admin.setDeviceForm({ ...admin.deviceForm, type: e.target.value })}
           />
         </div>
         <div className="gg-modal-field">

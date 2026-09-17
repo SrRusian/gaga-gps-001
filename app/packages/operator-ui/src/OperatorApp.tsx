@@ -81,7 +81,6 @@ export default function OperatorApp() {
       altitude: localGeo.altitude ?? base?.altitude,
       fixTime: new Date(localGeo.timestamp).toISOString(),
       deviceName: base?.deviceName,
-      deviceType: base?.deviceType,
     };
     return { ...fleet, [deviceId]: merged };
   }, [fleet, deviceId, localGeo]);
@@ -146,8 +145,9 @@ export default function OperatorApp() {
     navigate('/', { replace: true });
   }
 
+  const myVehicleTypeName = deviceId ? (vehicleFootprints[deviceId]?.vehicleTypeName ?? null) : null;
   const deviceName = myDisplay?.deviceName
-    ? `${myDisplay.deviceName}${myDisplay.deviceType ? ` (${myDisplay.deviceType})` : ''}`
+    ? `${myDisplay.deviceName}${myVehicleTypeName ? ` (${myVehicleTypeName})` : ''}`
     : (deviceId ?? 'Sin vehículo asignado');
 
   return (

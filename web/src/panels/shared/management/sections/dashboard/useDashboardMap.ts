@@ -96,6 +96,7 @@ export function useDashboardMap({ scopedDevices, historyMode, hasMaps }: UseDash
         latestVersionCode: latestAppVersionCode,
       }
     : undefined;
+  const detailVehicleTypeName = detailDevice?.vehicle_type_name ?? null;
 
   useEffect(() => {
     if (!hasMaps && mapMode !== 'streets') setMapMode('streets');
@@ -204,6 +205,7 @@ export function useDashboardMap({ scopedDevices, historyMode, hasMaps }: UseDash
     detail,
     detailOffline,
     detailAppVersion,
+    detailVehicleTypeName,
     activeSession,
   };
 }

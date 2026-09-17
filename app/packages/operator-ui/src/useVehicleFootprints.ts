@@ -4,12 +4,14 @@ import { useEffect, useState } from 'react';
 const api = createApiClient({ getToken: getStoredToken });
 
 export interface VehicleFootprint {
+  vehicleTypeName: string | null;
   lengthMeters: number | null;
   widthMeters: number | null;
 }
 
 interface DeviceRow {
   unique_id: string;
+  vehicle_type_name?: string | null;
   vehicle_type_length_meters?: number | null;
   vehicle_type_width_meters?: number | null;
 }
@@ -29,7 +31,11 @@ export function useVehicleFootprints() {
           Object.fromEntries(
             rows.map((d) => [
               d.unique_id,
-              { lengthMeters: d.vehicle_type_length_meters ?? null, widthMeters: d.vehicle_type_width_meters ?? null },
+              {
+                vehicleTypeName: d.vehicle_type_name ?? null,
+                lengthMeters: d.vehicle_type_length_meters ?? null,
+                widthMeters: d.vehicle_type_width_meters ?? null,
+              },
             ]),
           ),
         );

@@ -64,7 +64,12 @@ export default function SupervisorPanel() {
               </div>
             )}
 
-            <VehicleListPanel vehicles={s.vehicles} now={s.now} onSelect={s.selectVehicle} />
+            <VehicleListPanel
+              vehicles={s.vehicles}
+              now={s.now}
+              onSelect={s.selectVehicle}
+              vehicleTypeNamesById={s.deviceVehicleTypeNamesById}
+            />
           </div>
 
           <div className="sup-bottom-left-stack">
@@ -84,6 +89,7 @@ export default function SupervisorPanel() {
           offline={s.detailOffline}
           operatorSession={s.activeSession}
           appVersion={s.detailAppVersion}
+          vehicleTypeName={s.detailVehicleTypeName}
           onClose={s.closeVehicleDetail}
         />
       )}
