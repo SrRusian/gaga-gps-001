@@ -1,5 +1,6 @@
 package com.gaga.app.rtk
 
+import android.location.Location
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -33,6 +34,26 @@ class RtkNtripPlugin : Plugin() {
         // camino que un attach fisico nuevo, sin duplicar logica
         fun resume() {
             instance?.connectToAvailableUsbDevice()
+        }
+
+        // TraccarSenderService llama esto con el MISMO Location que acaba de mandar al servidor
+        // (ver TraccarSenderService.sendLocation) - bug real reportado en campo: el marcador propio
+        // del Operador (que usa navigator.geolocation, normalmente resuelto por Fused Location de
+        // Play Services - GPS+red combinados) se veia en un punto distinto al que Admin/Supervisor
+        // ven desde el servidor (que recibe el GPS_PROVIDER crudo, sin mezcla de red). Emitir el fix
+        // exacto que se envia garantiza que coincidan siempre, sin depender de que las dos fuentes
+        // de ubicacion independientes del sistema operativo concuerden. useDeviceGeolocation.ts lo
+        // trata como una fuente mas (por timestamp, igual que rtkFix) - si RTK ya entrego un fix mas
+        // reciente por el canal rapido, este se descarta solo, sin pisar nada.
+        fun emitGpsFix(location: Location) {
+            val obj = JSObject()
+            obj.put("latitude", location.latitude)
+            obj.put("longitude", location.longitude)
+            if (location.hasSpeed()) obj.put("speedMps", location.speed)
+            if (location.hasBearing()) obj.put("courseDeg", location.bearing)
+            if (location.hasAccuracy()) obj.put("accuracyMeters", location.accuracy)
+            obj.put("timestamp", location.time)
+            instance?.notifyListeners("gpsFix", obj)
         }
     }
 

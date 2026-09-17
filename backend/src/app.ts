@@ -109,8 +109,15 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// bug real reportado: express.json() sin limite explicito usa el default de 100kb - un KML de
+// geocercas de apenas ~100KB en crudo ya lo pasaba (el JSON que lo envuelve infla el tamano por
+// el escapado de comillas/saltos de linea), respondiendo 413 sin ninguna relacion con Google ni
+// con el navegador. Mismo criterio generoso que ya se usa para mapas/APK (multer, limites propios
+// via MAX_MAP_UPLOAD_MB/MAX_APK_UPLOAD_MB) - esta ruta solo necesita cubrir KML/GeoJSON de
+// geocercas, pero se sube el limite global (aplica a toda la API) para no tener que acordarse de
+// codificar cada endpoint nuevo que reciba texto largo por separado.
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(requestLogger);
 
 // ── Repositorios ────────────────────────────────────────────────

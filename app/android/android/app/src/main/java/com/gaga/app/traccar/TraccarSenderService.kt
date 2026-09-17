@@ -15,7 +15,9 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.gaga.app.MainActivity
@@ -39,10 +41,11 @@ class TraccarSenderService : Service() {
         const val CHANNEL_ID = "gaga_position_sender"
         const val NOTIFICATION_ID = 4210
 
-        // tope de seguridad del wake lock por envio - de sobra para el peor caso real (varios
-        // servidores configurados, 5s de timeout cada uno en TraccarUplink), nunca deberia
-        // alcanzarse en un envio normal
-        private const val SEND_WAKE_LOCK_TIMEOUT_MS = 15_000L
+        // cuanto tiempo sin un fix de GPS antes de aceptar un fix de NETWORK_PROVIDER como
+        // respaldo (ver listener) - mayor al intervalo de envio normal para no alternar entre
+        // GPS/red en cada tick por un solo fix perdido, pero menor a los saltos largos reportados
+        // en campo (minutos), para que de verdad ayude en esos casos
+        private const val NETWORK_FALLBACK_GRACE_MS = 5_000L
 
         @Volatile var isRunning: Boolean = false
             private set
@@ -73,6 +76,11 @@ class TraccarSenderService : Service() {
                 } catch (_: SecurityException) {
                 }
                 instance.registeredIntervalMs = -1L
+                // aqui SI se suelta el wake lock de verdad (a diferencia del envio activo normal,
+                // ver comentario junto a sendWakeLock) - la suspension por perdida de corriente es
+                // justo el caso donde el ahorro de bateria si importa de verdad (tableta sin
+                // corriente del vehiculo)
+                instance.sendWakeLock?.let { if (it.isHeld) it.release() }
             }
         }
 
@@ -83,12 +91,19 @@ class TraccarSenderService : Service() {
 
     private lateinit var locationManager: LocationManager
 
-    // wake lock acotado a "recibi un fix, lo estoy mandando" - NO se mantiene por toda la vida del
-    // servicio. Bug real corregido: la version anterior tomaba un PARTIAL_WAKE_LOCK una sola vez en
-    // onStartCommand y lo soltaba hasta onDestroy, manteniendo el CPU despierto sin dormir en
-    // absoluto mientras el envio estuviera activo (horas, con pantalla apagada) - un desperdicio
-    // real de bateria que no aportaba nada una vez que el intervalo de GPS ya esta acotado (ver
-    // startLocationUpdates). Con timeout como red de seguridad si algo se cuelga.
+    // Bug real reportado en campo (ronda posterior a la optimizacion de abajo, confirmado con
+    // logcat real - GnssLocationProvider entregando un fix real cada 1s exacto a nivel de chip,
+    // pero la app solo llegaba a mandar cada ~4s): con el wake lock acotado solo al momento de
+    // cada envio, el CPU podia volver a dormir entre un fix y el siguiente - Android agrupaba la
+    // entrega del callback de ubicacion a su propio ritmo en vez de despertar exacto cada
+    // segundo, aunque el chip GPS si producia un fix por segundo real. Pedido explicito: 1
+    // peticion por segundo al servidor es un requisito duro, no negociable por bateria - se
+    // revierte a mantener el wake lock TODO el tiempo que el envio continuo este activo (no solo
+    // durante cada envio individual). Impacto de bateria aceptado a proposito: mientras el envio
+    // continuo esta activo, la tableta esta operando con corriente del vehiculo de todas formas -
+    // el ahorro de bateria real ya lo cubre por completo el sistema de suspension por perdida de
+    // corriente (ver PowerSuspendAlarmReceiver.kt), que SI suelta este wake lock (ver suspendGps()
+    // arriba). No hay timeout aqui a proposito - se suelta explicitamente en suspendGps()/onDestroy().
     private var sendWakeLock: PowerManager.WakeLock? = null
     private var lastSentAtMs: Long = 0L
     private var registeredIntervalMs: Long = -1L
@@ -197,19 +212,89 @@ class TraccarSenderService : Service() {
         applicationContext.startActivity(launchIntent)
     }
 
-    private val listener = object : LocationListener {
+    // respaldo por red (WiFi/celular) cuando el GPS no entrega nada por un rato - pedido
+    // explicito, bug real reportado: adentro de un vehiculo techado el chip GPS interno de la
+    // tableta puede quedarse sin ningun satelite visible por minutos, y hasta ahora el envio
+    // continuo se quedaba completamente mudo mientras tanto (el envio MANUAL ya tenia este mismo
+    // respaldo, ver TraccarSenderPlugin.sendNow - el continuo no).
+    //
+    // Bug real de la PRIMERA version de este fix: se probo con requestLocationUpdates(NETWORK_
+    // PROVIDER, ...) continuo, igual que GPS - eso introdujo una regresion real reportada en campo
+    // (el GPS, que SI estaba funcionando bien, empezo a entregar cada ~2s en vez de cada 1s como
+    // antes). Causa probable: Android/el fabricante agrupa o retrasa las entregas cuando hay DOS
+    // proveedores suscritos a la vez con el mismo listener, sin importar que el segundo (red) casi
+    // nunca se estuviera usando. Fix real: NETWORK_PROVIDER ya NO se suscribe de forma continua -
+    // solo se CONSULTA bajo demanda (getLastKnownLocation, igual que ya hace el envio manual) desde
+    // un watchdog aparte que no toca la suscripcion de GPS para nada, asi GPS vuelve a comportarse
+    // exactamente como antes de este fix.
+    private var lastGpsFixAtMs: Long = 0L
+    private val networkFallbackHandler = Handler(Looper.getMainLooper())
+
+    // bug real reportado en campo (ronda posterior a quitar la suscripcion continua): un salto de
+    // 16s de GPS no se llenaba con NINGUN dato de red tampoco - getLastKnownLocation() solo lee
+    // una cache PASIVA; sin nada mas en la tableta pidiendo activamente NETWORK_PROVIDER, esa
+    // cache puede estar vacia o vieja, asi que el respaldo nunca tenia nada real que mandar. Fix:
+    // requestSingleUpdate() (una sola vez, no continuo - no reintroduce el bug de retrasar al GPS)
+    // pide un fix de red FRESCO de verdad cuando hace falta, en vez de confiar en una cache pasiva.
+    private var networkRequestPendingSinceMs: Long = 0L
+    private val singleNetworkListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
+            networkRequestPendingSinceMs = 0L
+            sendLocation(location, System.currentTimeMillis())
+        }
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+        override fun onProviderEnabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {
+            networkRequestPendingSinceMs = 0L
+        }
+    }
+
+    private val networkFallbackRunnable = object : Runnable {
+        override fun run() {
             val now = System.currentTimeMillis()
-            if (now - lastSentAtMs < TraccarPrefs.getIntervalMs(applicationContext)) return
-            lastSentAtMs = now
-            sendWakeLock?.acquire(SEND_WAKE_LOCK_TIMEOUT_MS)
-            ioExecutor.execute {
+            val intervalMs = TraccarPrefs.getIntervalMs(applicationContext)
+            val gpsQuiet = now - lastGpsFixAtMs >= NETWORK_FALLBACK_GRACE_MS
+            // evita apilar varias solicitudes de una sola vez si la anterior nunca respondio (sin
+            // senal de red tampoco) - se vuelve a intentar pasado el mismo periodo de gracia
+            val canRetryRequest = now - networkRequestPendingSinceMs >= NETWORK_FALLBACK_GRACE_MS
+            if (gpsQuiet && canRetryRequest) {
                 try {
-                    TraccarUplink.sendToAllServers(applicationContext, location)
-                } finally {
-                    sendWakeLock?.let { if (it.isHeld) it.release() }
+                    networkRequestPendingSinceMs = now
+                    @Suppress("DEPRECATION")
+                    locationManager.requestSingleUpdate(
+                        LocationManager.NETWORK_PROVIDER,
+                        singleNetworkListener,
+                        Looper.getMainLooper(),
+                    )
+                } catch (_: SecurityException) {
+                    networkRequestPendingSinceMs = 0L
+                } catch (_: IllegalArgumentException) {
+                    networkRequestPendingSinceMs = 0L
                 }
             }
+            networkFallbackHandler.postDelayed(this, intervalMs)
+        }
+    }
+
+    private fun sendLocation(location: Location, now: Long) {
+        if (now - lastSentAtMs < TraccarPrefs.getIntervalMs(applicationContext)) return
+        lastSentAtMs = now
+        // mismo fix exacto que se manda al servidor, reflejado de inmediato al propio WebView (ver
+        // RtkNtripPlugin.emitGpsFix) - bug real reportado en campo: el marcador propio del Operador
+        // (navigator.geolocation) y lo que Admin/Supervisor veian desde el servidor no coincidian
+        RtkNtripPlugin.emitGpsFix(location)
+        // el wake lock ya esta sostenido de forma continua mientras el envio esta activo (ver
+        // comentario junto a sendWakeLock arriba) - ya no se adquiere/suelta por cada envio
+        // individual, eso era justo lo que dejaba dormir al CPU entre un fix y el siguiente
+        ioExecutor.execute {
+            TraccarUplink.sendToAllServers(applicationContext, location)
+        }
+    }
+
+    private val listener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            lastGpsFixAtMs = System.currentTimeMillis()
+            sendLocation(location, lastGpsFixAtMs)
         }
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
         override fun onProviderEnabled(provider: String) {}
@@ -251,6 +336,11 @@ class TraccarSenderService : Service() {
         startForegroundCompat()
         runningInstance = this
         startLocationUpdates()
+        // onStartCommand puede llamarse mas de una vez mientras el servicio ya esta corriendo
+        // (ej. resumeTraccarIfNeeded() en cada apertura de la app) - remover antes de postear evita
+        // apilar varias copias del watchdog corriendo en paralelo, cada vez mas seguido
+        networkFallbackHandler.removeCallbacks(networkFallbackRunnable)
+        networkFallbackHandler.postDelayed(networkFallbackRunnable, TraccarPrefs.getIntervalMs(applicationContext))
         isRunning = true
         return START_STICKY
     }
@@ -260,6 +350,11 @@ class TraccarSenderService : Service() {
             locationManager.removeUpdates(listener)
         } catch (_: SecurityException) {
         }
+        try {
+            locationManager.removeUpdates(singleNetworkListener)
+        } catch (_: SecurityException) {
+        }
+        networkFallbackHandler.removeCallbacks(networkFallbackRunnable)
         getSharedPreferences(TraccarPrefs.PREFS_NAME, MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(prefsListener)
         try {
@@ -291,11 +386,21 @@ class TraccarSenderService : Service() {
         try {
             locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, intervalMs, 0f, listener)
             registeredIntervalMs = intervalMs
+            // mantiene el CPU despierto mientras el envio continuo este activo (ver comentario
+            // junto a sendWakeLock) - acquire() sin timeout aqui es intencional, se suelta
+            // explicitamente en suspendGps()/onDestroy(), no por si solo. setReferenceCounted(false)
+            // (ver onCreate) hace que llamar acquire() de nuevo aqui, aunque ya estuviera sostenido,
+            // sea seguro - nunca se apila.
+            sendWakeLock?.acquire()
         } catch (e: SecurityException) {
             android.util.Log.w("TraccarSender", "Sin permiso de ubicacion")
         } catch (e: IllegalArgumentException) {
             android.util.Log.w("TraccarSender", "GPS no disponible en este dispositivo")
         }
+        // el respaldo por red (NETWORK_PROVIDER) NO se suscribe aqui a proposito - ver el
+        // comentario junto a networkFallbackRunnable arriba (bug real: suscribirlo en paralelo a
+        // GPS_PROVIDER retrasaba las entregas del GPS real). Se consulta bajo demanda desde el
+        // watchdog aparte, sin tocar esta suscripcion.
     }
 
     private fun createChannel() {

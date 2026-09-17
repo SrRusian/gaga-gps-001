@@ -330,7 +330,12 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
 
     const rtkListenerPromise = RtkNtrip.addListener('rtkStatus', (status) => setRtkStatus(status));
     const usbListenerPromise = RtkNtrip.addListener('usbDevicesChanged', (data) => setUsbDevices(data.devices));
-    const interval = setInterval(refreshState, 4000);
+    // 1s (antes 4s) - bug real reportado: con el envio real pasando cada segundo, un poll de 4s
+    // hacia que la bitacora de Ajustes mostrara "rafagas" de 3-4 entradas de golpe seguidas de
+    // silencio, dando la impresion de que el envio era irregular cuando en realidad los timestamps
+    // ya salian consecutivos - era la UI, no el envio real. Solo corre mientras Ajustes esta
+    // abierto (clearInterval en el cleanup de abajo), no es un costo de bateria permanente.
+    const interval = setInterval(refreshState, 1000);
 
     return () => {
       clearInterval(interval);

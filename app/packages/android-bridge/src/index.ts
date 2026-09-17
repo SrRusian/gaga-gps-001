@@ -160,6 +160,14 @@ export interface RtkNtripPlugin {
     eventName: 'rtkFix',
     listenerFunc: (fix: RtkFixEvent) => void,
   ): Promise<PluginListenerHandle>;
+  // mismo fix exacto que TraccarSenderService manda al servidor (GPS_PROVIDER crudo o el
+  // respaldo de red) - garantiza que el marcador propio del Operador coincida con lo que
+  // Admin/Supervisor ven desde el servidor, sin depender de que navigator.geolocation resuelva
+  // igual (normalmente usa Fused Location de Play Services, GPS+red combinados, que puede diferir)
+  addListener(
+    eventName: 'gpsFix',
+    listenerFunc: (fix: RtkFixEvent) => void,
+  ): Promise<PluginListenerHandle>;
 }
 
 // fuera de la app nativa (navegador normal, tablet sin app instalada) no hay plugin real - se

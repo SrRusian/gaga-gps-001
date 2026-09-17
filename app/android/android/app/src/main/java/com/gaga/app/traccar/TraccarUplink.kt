@@ -2,6 +2,7 @@ package com.gaga.app.traccar
 
 import android.content.Context
 import android.location.Location
+import android.os.BatteryManager
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -81,9 +82,11 @@ object TraccarUplink {
         val password = TraccarPrefs.getPassword(context)
         var anySuccess = false
 
+        val batteryPercent = readBatteryPercent(context)
+
         servers.forEach { server ->
             try {
-                sendOsmAnd(server.url, deviceId, password, location)
+                sendOsmAnd(server.url, deviceId, password, location, batteryPercent)
                 addLog(TraccarLogEntry(System.currentTimeMillis(), server.url, true, "OK"))
                 anySuccess = true
             } catch (e: Exception) {
@@ -122,12 +125,17 @@ object TraccarUplink {
             val batch = db.peekOldest(DRAIN_BATCH_SIZE)
             if (batch.isEmpty()) return
 
+            // bateria ACTUAL, no la de cuando se encolo el punto (no se guarda en el buffer) - un
+            // punto viejo reenviado con la bateria de ahora es tan razonable como cualquier otra
+            // aproximacion, sin necesitar cambiar el schema de OfflineBufferStore por esto
+            val batteryPercent = readBatteryPercent(context)
+
             val futures = batch.map { item ->
                 drainWorkers.submit(
                     Callable {
                         val ok = servers.all { server ->
                             try {
-                                sendOsmAnd(server.url, item.deviceId, item.password, item.location)
+                                sendOsmAnd(server.url, item.deviceId, item.password, item.location, batteryPercent)
                                 true
                             } catch (e: Exception) {
                                 false
@@ -148,7 +156,22 @@ object TraccarUplink {
         }
     }
 
-    private fun sendOsmAnd(baseUrl: String, deviceId: String, password: String, location: Location) {
+    // BATTERY_PROPERTY_CAPACITY da el porcentaje 0-100 directo, sin registrar ningun receiver de
+    // ACTION_BATTERY_CHANGED (mucho mas simple para una lectura puntual como esta) - null si el
+    // sistema no lo reporta (algunos fabricantes/emuladores), el parametro batt simplemente se omite
+    private fun readBatteryPercent(context: Context): Int? {
+        val manager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
+        val level = manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        return if (level in 0..100) level else null
+    }
+
+    private fun sendOsmAnd(
+        baseUrl: String,
+        deviceId: String,
+        password: String,
+        location: Location,
+        batteryPercent: Int? = null,
+    ) {
         fun enc(v: String) = URLEncoder.encode(v, "UTF-8")
         val sep = if (baseUrl.contains("?")) "&" else "?"
         val query = buildString {
@@ -160,6 +183,7 @@ object TraccarUplink {
             if (location.hasBearing()) append("&bearing=").append(location.bearing)
             if (location.hasAltitude()) append("&altitude=").append(location.altitude)
             if (location.hasAccuracy()) append("&accuracy=").append(location.accuracy)
+            batteryPercent?.let { append("&batt=").append(it) }
             if (password.isNotBlank()) append("&password=").append(enc(password))
         }
         val url = URL("$baseUrl$sep$query")
