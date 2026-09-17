@@ -1,13 +1,16 @@
 import { query } from '../config/database';
 
-export type InfractionType = 'speed' | 'geofence';
+export type InfractionType = 'speed' | 'geofence' | 'collision';
 
 export interface InfractionRow {
   id: number;
   project_id: number | null;
   device_id: string;
+  // solo para infraction_type='collision' - el otro vehiculo involucrado
+  device_id_2: string | null;
   operator_session_id: number | null;
   infraction_type: InfractionType;
+  severity: number;
   message: string;
   latitude: number;
   longitude: number;
@@ -20,6 +23,7 @@ export interface InfractionRow {
 
 export interface InfractionWithNamesRow extends InfractionRow {
   device_name: string | null;
+  device_2_name: string | null;
   operator_name: string | null;
   reviewed_by_name: string | null;
 }
@@ -31,7 +35,9 @@ class InfractionRepository {
   async create({
     projectId,
     deviceId,
+    deviceId2 = null,
     infractionType,
+    severity = 5,
     message,
     latitude,
     longitude,
@@ -39,7 +45,9 @@ class InfractionRepository {
   }: {
     projectId: number | null;
     deviceId: string;
+    deviceId2?: string | null;
     infractionType: InfractionType;
+    severity?: number;
     message: string;
     latitude: number;
     longitude: number;
@@ -48,16 +56,16 @@ class InfractionRepository {
     try {
       const { rows } = await query<InfractionRow>(
         // el turno activo (si hay) se resuelve aqui mismo - evita que cada servicio de alerta tenga
-        // que conocer OperatorSessionRepository solo para esto. $8 duplica $2 en vez de reusarlo -
+        // que conocer OperatorSessionRepository solo para esto. $9 duplica $2 en vez de reusarlo -
         // reusar el mismo placeholder dentro de un VALUES() y una subconsulta aparte confunde al
         // planner ("inconsistent types deduced for parameter $2", gotcha ya documentado)
         `INSERT INTO infractions
-           (project_id, device_id, operator_session_id, infraction_type, message, latitude, longitude, metadata)
-         VALUES ($1, $2,
-           (SELECT id FROM operator_sessions WHERE device_id = $8 AND ended_at IS NULL LIMIT 1),
-           $3, $4, $5, $6, $7)
+           (project_id, device_id, device_id_2, operator_session_id, infraction_type, severity, message, latitude, longitude, metadata)
+         VALUES ($1, $2, $3,
+           (SELECT id FROM operator_sessions WHERE device_id = $9 AND ended_at IS NULL LIMIT 1),
+           $4, $5, $6, $7, $8, $10)
          RETURNING *`,
-        [projectId, deviceId, infractionType, message, latitude, longitude, metadata, deviceId],
+        [projectId, deviceId, deviceId2, infractionType, severity, message, latitude, longitude, deviceId, metadata],
       );
       return rows[0];
     } catch (err) {
@@ -73,7 +81,16 @@ class InfractionRepository {
       offset = 0,
       from,
       to,
-    }: { limit?: number; offset?: number; from?: string; to?: string } = {},
+      deviceId,
+      operatorName,
+    }: {
+      limit?: number;
+      offset?: number;
+      from?: string;
+      to?: string;
+      deviceId?: string;
+      operatorName?: string;
+    } = {},
   ): Promise<InfractionWithNamesRow[]> {
     try {
       const conditions: string[] = ['($1::int IS NULL OR i.project_id = $1 OR i.project_id IS NULL)'];
@@ -87,14 +104,24 @@ class InfractionRepository {
         params.push(to);
         conditions.push(`i.occurred_at <= $${params.length}`);
       }
+      if (deviceId) {
+        params.push(deviceId);
+        conditions.push(`i.device_id = $${params.length}`);
+      }
+      if (operatorName) {
+        params.push(`%${operatorName}%`);
+        conditions.push(`u.name ILIKE $${params.length}`);
+      }
 
       params.push(limit);
       params.push(offset);
 
       const { rows } = await query<InfractionWithNamesRow>(
-        `SELECT i.*, d.name AS device_name, u.name AS operator_name, r.name AS reviewed_by_name
+        `SELECT i.*, d.name AS device_name, d2.name AS device_2_name,
+                u.name AS operator_name, r.name AS reviewed_by_name
          FROM infractions i
          LEFT JOIN devices d ON d.unique_id = i.device_id
+         LEFT JOIN devices d2 ON d2.unique_id = i.device_id_2
          LEFT JOIN operator_sessions s ON s.id = i.operator_session_id
          LEFT JOIN users u ON u.id = s.user_id
          LEFT JOIN users r ON r.id = i.reviewed_by

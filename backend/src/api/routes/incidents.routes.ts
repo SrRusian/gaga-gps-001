@@ -50,8 +50,18 @@ export function buildIncidentsRouter({
       const isSupervisor = req.user!.role === 'project_supervisor';
       const from = isSupervisor ? startOfTodayIso() : (req.query.from ? String(req.query.from) : undefined);
       const to = isSupervisor ? undefined : (req.query.to ? String(req.query.to) : undefined);
+      const status =
+        req.query.status === 'open' || req.query.status === 'resolved' ? req.query.status : undefined;
+      const deviceId = req.query.deviceId ? String(req.query.deviceId) : undefined;
+      const reportedByName = req.query.reportedByName ? String(req.query.reportedByName) : undefined;
 
-      const incidents = await incidentRepo.findHistory(req.user!.projectId, { from, to });
+      const incidents = await incidentRepo.findHistory(req.user!.projectId, {
+        from,
+        to,
+        status,
+        deviceId,
+        reportedByName,
+      });
       res.json(incidents);
     } catch (err) {
       console.error('incidents.routes GET /history:', (err as Error).message);

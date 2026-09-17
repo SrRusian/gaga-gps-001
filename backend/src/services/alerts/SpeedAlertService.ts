@@ -1,3 +1,5 @@
+import { speedInfractionSeverity } from '../../utils/infractionSeverity';
+
 type Severity = 'warning' | 'danger' | null;
 
 // alerta "casi en el limite" (90%) - explicitamente NO se clasifica como riesgo (pedido de Sergio en
@@ -32,6 +34,7 @@ interface InfractionRepoLike {
     projectId: number | null;
     deviceId: string;
     infractionType: 'speed';
+    severity: number;
     message: string;
     latitude: number;
     longitude: number;
@@ -196,6 +199,7 @@ class SpeedAlertService {
         projectId,
         deviceId,
         infractionType: 'speed',
+        severity: speedInfractionSeverity(limitKmh > 0 ? speedKmh / limitKmh : 1),
         message,
         latitude,
         longitude,

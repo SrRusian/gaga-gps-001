@@ -173,7 +173,7 @@ const signalLostService = new SignalLostService({
   deviceManager,
   alertEventRepo,
 });
-const collisionService = new CollisionRiskService({ io, alertEventRepo });
+const collisionService = new CollisionRiskService({ io, alertEventRepo, infractionRepo, geofenceRepo });
 const proximityService = new VehicleProximityService({ io, alertEventRepo });
 // socketServer se asigna después, mismo patrón que geofenceService (evita ciclo con FleetSocketServer)
 const speedAlertService = new SpeedAlertService({ deviceRepo, alertEventRepo, infractionRepo });
@@ -194,6 +194,7 @@ const socketServer = new FleetSocketServer({
 geofenceService.socketServer = socketServer;
 speedAlertService.socketServer = socketServer;
 signalLostService.socketServer = socketServer;
+collisionService.socketServer = socketServer;
 
 const positionFilter = new PositionFilterService(env.positionFilter);
 const speedEstimator = new SpeedEstimationService();

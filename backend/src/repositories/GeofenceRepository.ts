@@ -189,6 +189,52 @@ class GeofenceRepository {
     }
   }
 
+  // "¿en que ruta autorizada esta este punto, y en que fraccion de su recorrido (0=inicio, 1=fin)?"
+  // - independiente del WHERE de alerta de findMatchingSpatial (una ruta "stay_inside=true" normal
+  // NO aparece ahi mientras el vehiculo va bien, solo cuando se sale) - CollisionRiskService lo usa
+  // para saber si dos vehiculos van por la misma ruta y en que direccion (fraccion creciente vs
+  // decreciente), ST_LineLocatePoint es justo para esto. Si el punto cae en mas de una ruta a la vez
+  // (poco comun), se queda con la mas cercana.
+  async findRouteMembership({
+    projectId,
+    latitude,
+    longitude,
+  }: {
+    projectId: number | null;
+    latitude: number;
+    longitude: number;
+  }): Promise<{ id: number; name: string; corridorWidthMeters: number; lineFraction: number } | null> {
+    try {
+      const { rows } = await query<{
+        id: number;
+        name: string;
+        corridor_width_meters: number;
+        line_fraction: number;
+      }>(
+        `SELECT g.id, g.name, g.corridor_width_meters,
+                ST_LineLocatePoint(g.geog::geometry, pt.g::geometry) AS line_fraction
+         FROM geofences g,
+              LATERAL (SELECT ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography AS g) pt
+         WHERE g.active = TRUE AND g.project_id = $1
+           AND g.shape_type = 'polyline' AND g.type = 'authorized_route'
+           AND ST_DWithin(g.geog, pt.g, g.corridor_width_meters)
+         ORDER BY ST_Distance(g.geog, pt.g) ASC
+         LIMIT 1`,
+        [projectId, latitude, longitude],
+      );
+      if (!rows[0]) return null;
+      return {
+        id: rows[0].id,
+        name: rows[0].name,
+        corridorWidthMeters: rows[0].corridor_width_meters,
+        lineFraction: rows[0].line_fraction,
+      };
+    } catch (err) {
+      console.error('GeofenceRepository.findRouteMembership:', (err as Error).message);
+      throw err;
+    }
+  }
+
   async create({
     name,
     projectId,

@@ -24,13 +24,22 @@ export function useIncidentHistory() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  async function search(filters?: { from?: string; to?: string }) {
+  async function search(filters?: {
+    from?: string;
+    to?: string;
+    status?: 'open' | 'resolved';
+    deviceId?: string;
+    reportedByName?: string;
+  }) {
     setLoading(true);
     setError('');
     try {
       const params = new URLSearchParams();
       if (filters?.from) params.set('from', new Date(filters.from).toISOString());
       if (filters?.to) params.set('to', new Date(filters.to).toISOString());
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.deviceId?.trim()) params.set('deviceId', filters.deviceId.trim());
+      if (filters?.reportedByName?.trim()) params.set('reportedByName', filters.reportedByName.trim());
       setRows(await api.get<IncidentHistoryRow[]>(`/api/incidents/history?${params.toString()}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error obteniendo incidentes');

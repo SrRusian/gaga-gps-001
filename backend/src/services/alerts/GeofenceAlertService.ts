@@ -1,4 +1,5 @@
 import type { Geofence, GeofenceShapeType, GeofenceType } from '@gaga-gps/shared-types';
+import { geofenceInfractionSeverity } from '../../utils/infractionSeverity';
 
 type Severity = 'warning' | 'danger' | 'info' | null;
 
@@ -106,6 +107,7 @@ interface InfractionRepoLike {
     projectId: number | null;
     deviceId: string;
     infractionType: 'geofence';
+    severity: number;
     message: string;
     latitude: number;
     longitude: number;
@@ -425,6 +427,7 @@ class GeofenceAlertService {
         projectId,
         deviceId,
         infractionType: 'geofence',
+        severity: geofenceInfractionSeverity(geofence.type, proximity),
         message: `${message} - Geocerca "${geofence.name}"`,
         latitude,
         longitude,

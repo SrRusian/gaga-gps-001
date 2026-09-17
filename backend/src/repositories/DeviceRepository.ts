@@ -299,7 +299,7 @@ class DeviceRepository {
           // REFERENCES operator_sessions(id) sin cascade - deben purgarse ANTES de borrar
           // operator_sessions, si no 23503
           await client.query('DELETE FROM equipment_activity_segments WHERE device_id = $1', [uniqueId]);
-          await client.query('DELETE FROM infractions WHERE device_id = $1', [uniqueId]);
+          await client.query('DELETE FROM infractions WHERE device_id = $1 OR device_id_2 = $1', [uniqueId]);
           await client.query('DELETE FROM operator_sessions WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM positions WHERE device_id = $1', [uniqueId]);
           await client.query('DELETE FROM device_sensor_snapshots WHERE device_id = $1', [uniqueId]);

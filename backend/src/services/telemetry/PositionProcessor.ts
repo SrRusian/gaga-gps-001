@@ -235,12 +235,9 @@ class PositionProcessor {
 
       if (this.collisionService) {
         const fleet = await this.fleetState.getAll();
-        this.collisionService.evaluate(
-          position as unknown as { deviceId: number; latitude: number; longitude: number },
-          fleet as unknown as Record<
-            string,
-            { deviceId: number; latitude: number; longitude: number }
-          >,
+        await this.collisionService.evaluate(
+          { ...position, projectId: position.projectId ?? null, footprintWkt },
+          fleet,
         );
       }
 

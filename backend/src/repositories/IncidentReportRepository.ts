@@ -57,7 +57,19 @@ class IncidentReportRepository {
   // mismo criterio ya aplicado ahi
   async findHistory(
     projectId: number,
-    { from, to }: { from?: string; to?: string } = {},
+    {
+      from,
+      to,
+      status,
+      deviceId,
+      reportedByName,
+    }: {
+      from?: string;
+      to?: string;
+      status?: IncidentStatus;
+      deviceId?: string;
+      reportedByName?: string;
+    } = {},
   ): Promise<IncidentHistoryRow[]> {
     try {
       const conditions: string[] = ['i.project_id = $1'];
@@ -70,6 +82,18 @@ class IncidentReportRepository {
       if (to) {
         params.push(to);
         conditions.push(`i.reported_at <= $${params.length}`);
+      }
+      if (status) {
+        params.push(status);
+        conditions.push(`i.status = $${params.length}`);
+      }
+      if (deviceId) {
+        params.push(deviceId);
+        conditions.push(`i.device_id = $${params.length}`);
+      }
+      if (reportedByName) {
+        params.push(`%${reportedByName}%`);
+        conditions.push(`u.name ILIKE $${params.length}`);
       }
 
       const { rows } = await query<IncidentHistoryRow>(

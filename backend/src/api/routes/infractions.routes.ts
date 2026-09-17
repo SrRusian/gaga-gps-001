@@ -30,8 +30,17 @@ export function buildInfractionsRouter({ infractionRepo, authMiddleware, require
       const isSupervisor = req.user!.role === 'project_supervisor';
       const from = isSupervisor ? startOfTodayIso() : (req.query.from ? String(req.query.from) : undefined);
       const to = isSupervisor ? undefined : (req.query.to ? String(req.query.to) : undefined);
+      const deviceId = req.query.deviceId ? String(req.query.deviceId) : undefined;
+      const operatorName = req.query.operatorName ? String(req.query.operatorName) : undefined;
 
-      const rows = await infractionRepo.findByProject(projectId, { limit, offset, from, to });
+      const rows = await infractionRepo.findByProject(projectId, {
+        limit,
+        offset,
+        from,
+        to,
+        deviceId,
+        operatorName,
+      });
       res.json(rows);
     } catch (err) {
       console.error('infractions.routes GET /:', (err as Error).message);

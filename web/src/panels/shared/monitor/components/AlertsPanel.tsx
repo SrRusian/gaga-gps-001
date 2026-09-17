@@ -1,67 +1,46 @@
 import { AlertBanner } from '@gaga-gps/ui';
-import type { AlertEventType } from '@gaga-gps/shared-types';
+import type { InfractionRow } from '@gaga-gps/shared-types';
 import { useState } from 'react';
 import { NavIcon } from '../../components/NavIcons';
 import type { AlertEntry } from '../useSupervisorSocket';
 import { INCIDENT_CATEGORY_LABEL } from '../useSupervisorSocket';
-import { EMPTY_FILTERS, useAlertHistory } from '../useAlertHistory';
 import { useIncidentHistory } from '../useIncidentHistory';
 import { useInfractionHistory } from '../useInfractionHistory';
 
-const ALERT_TYPE_LABEL: Record<AlertEventType, string> = {
-  geofence: 'Geocerca',
-  signal_lost: 'Señal perdida',
-  collision: 'Colisión',
-  proximity: 'Proximidad',
-  preventive_stop: 'Parada preventiva',
-  incident: 'Incidente',
-  equipment_variable: 'Variable de equipo',
+type HistoryType = 'incidents' | 'infractions';
+type IncidentStatusFilter = '' | 'open' | 'resolved';
+
+const INFRACTION_TYPE_LABEL: Record<InfractionRow['infraction_type'], string> = {
   speed: 'Velocidad',
-  power_loss: 'Pérdida de energía',
+  geofence: 'Geocerca',
+  collision: 'Colisión',
 };
 
-const SEVERITY_LABEL = { info: 'Info', warning: 'Precaución', danger: 'Peligro' } as const;
-
-function formatDuration(from: string, to: string): string {
-  const seconds = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+// colisión involucra 2 vehiculos (device_id_2) - los demas tipos solo uno
+function infractionVehicleLabel(r: InfractionRow): string {
+  const main = r.device_name ?? r.device_id;
+  if (r.infraction_type === 'collision' && r.device_id_2) {
+    return `${main} / ${r.device_2_name ?? r.device_id_2}`;
+  }
+  return main;
 }
 
-type DateRangeFilters = { from: string; to: string };
-const EMPTY_RANGE: DateRangeFilters = { from: '', to: '' };
-
-// filtro de fecha compartido por Infracciones/Incidentes - solo se muestra a quien puede filtrar
-// libremente (Encargado); Supervisor nunca lo ve, el backend ya lo acota a su dia actual solo
-function DateRangeFilter({
-  value,
-  onChange,
-  onSearch,
-}: {
-  value: DateRangeFilters;
-  onChange: (next: DateRangeFilters) => void;
-  onSearch: () => void;
-}) {
-  return (
-    <div className="sup-history-filters">
-      <input
-        type="datetime-local"
-        value={value.from}
-        onChange={(e) => onChange({ ...value, from: e.target.value })}
-      />
-      <input
-        type="datetime-local"
-        value={value.to}
-        onChange={(e) => onChange({ ...value, to: e.target.value })}
-      />
-      <button className="sup-history-btn" onClick={onSearch}>
-        Buscar
-      </button>
-    </div>
-  );
+// 1-10, ver backend/src/utils/infractionSeverity.ts - verde/amarillo/rojo como referencia visual
+// rapida, no un semaforo estricto de 3 niveles
+function SeverityBadge({ value }: { value: number }) {
+  const tone = value >= 8 ? 'danger' : value >= 5 ? 'warning' : 'info';
+  return <span className={`sup-severity-${tone}`}>{value}</span>;
 }
+
+interface HistoryFilters {
+  from: string;
+  to: string;
+  deviceId: string;
+  personName: string;
+  status: IncidentStatusFilter;
+}
+
+const EMPTY_HISTORY_FILTERS: HistoryFilters = { from: '', to: '', deviceId: '', personName: '', status: '' };
 
 export interface AlertsPanelProps {
   alerts: AlertEntry[];
@@ -71,10 +50,11 @@ export interface AlertsPanelProps {
   // sin esta prop, el boton "Marcar revisada" de Infracciones nunca se renderiza - mismo criterio
   // que onResolveIncident (project_manager es 100% solo lectura)
   canReviewInfractions?: boolean;
-  // Encargado (project_manager) unicamente - habilita la pestaña "Historial" (alert_events tecnico)
-  // y el filtro de fecha libre en Infracciones/Incidentes. Sin esta prop (Supervisor), esas dos
-  // pestañas solo muestran el dia actual, sin filtro, y "Historial" no aparece - pedido explicito:
-  // Supervisor solo ve "su turno" (por ahora, el dia calendario), nunca el historial completo.
+  // Encargado (project_manager) unicamente - cambia "Infracciones" (pestaña propia, solo hoy, sin
+  // filtros) por un "Historial" unificado (Incidentes/Infracciones, filtrable libremente por fecha/
+  // vehiculo/persona/estado) - pedido explicito: Supervisor solo ve "su turno" (hoy), sin acceso al
+  // historial completo; un incidente ya activo se ve en "Activas" (sin cambios) hasta que se
+  // resuelve, y a partir de ahi solo el Encargado puede volver a encontrarlo, en el Historial.
   canAccessHistory?: boolean;
 }
 
@@ -85,13 +65,10 @@ export function AlertsPanel({
   canReviewInfractions,
   canAccessHistory,
 }: AlertsPanelProps) {
-  const [alertsView, setAlertsView] = useState<'active' | 'incidents' | 'infractions' | 'history'>('active');
-  const [historyFilters, setHistoryFilters] = useState(EMPTY_FILTERS);
-  const [incidentRange, setIncidentRange] = useState(EMPTY_RANGE);
-  const [infractionRange, setInfractionRange] = useState(EMPTY_RANGE);
+  const [alertsView, setAlertsView] = useState<'active' | 'infractions' | 'history'>('active');
+  const [historyType, setHistoryType] = useState<HistoryType>('incidents');
+  const [historyFilters, setHistoryFilters] = useState<HistoryFilters>(EMPTY_HISTORY_FILTERS);
 
-  const { rows: historyRows, loading: historyLoading, error: historyError, search: searchHistory, exportCsv } =
-    useAlertHistory();
   const {
     rows: incidentRows,
     loading: incidentsLoading,
@@ -106,22 +83,42 @@ export function AlertsPanel({
     markReviewed,
   } = useInfractionHistory();
 
+  // Supervisor (sin canAccessHistory): pestaña propia "Infracciones", solo hoy, sin filtro alguno -
+  // el backend ya fuerza el dia actual sin importar lo que se le pida
+  function openInfractionsToday() {
+    setAlertsView('infractions');
+    searchInfractions();
+  }
+
+  // Encargado: "Historial" unificado - busca segun el tipo seleccionado (Incidentes/Infracciones)
+  // con los filtros compartidos (el filtro "Estado" solo aplica a Incidentes)
+  function runHistorySearch(type: HistoryType, filters: HistoryFilters) {
+    if (type === 'incidents') {
+      searchIncidents({
+        from: filters.from,
+        to: filters.to,
+        deviceId: filters.deviceId,
+        reportedByName: filters.personName,
+        status: filters.status || undefined,
+      });
+    } else {
+      searchInfractions({
+        from: filters.from,
+        to: filters.to,
+        deviceId: filters.deviceId,
+        operatorName: filters.personName,
+      });
+    }
+  }
+
   function openHistory() {
     setAlertsView('history');
-    searchHistory(historyFilters);
+    runHistorySearch(historyType, historyFilters);
   }
 
-  // sin canAccessHistory (Supervisor), nunca se manda from/to - el backend siempre acota al dia
-  // actual sin importar lo que se le pida, este solo evita mandar un filtro que de todos modos se
-  // ignoraria
-  function openIncidents() {
-    setAlertsView('incidents');
-    searchIncidents(canAccessHistory ? incidentRange : undefined);
-  }
-
-  function openInfractions() {
-    setAlertsView('infractions');
-    searchInfractions(canAccessHistory ? infractionRange : undefined);
+  function changeHistoryType(type: HistoryType) {
+    setHistoryType(type);
+    runHistorySearch(type, historyFilters);
   }
 
   return (
@@ -138,15 +135,13 @@ export function AlertsPanel({
           >
             Activas
           </button>
-          <button className={alertsView === 'incidents' ? 'active' : ''} onClick={openIncidents}>
-            Incidentes
-          </button>
-          <button className={alertsView === 'infractions' ? 'active' : ''} onClick={openInfractions}>
-            Infracciones
-          </button>
-          {canAccessHistory && (
+          {canAccessHistory ? (
             <button className={alertsView === 'history' ? 'active' : ''} onClick={openHistory}>
               Historial
+            </button>
+          ) : (
+            <button className={alertsView === 'infractions' ? 'active' : ''} onClick={openInfractionsToday}>
+              Infracciones
             </button>
           )}
         </div>
@@ -174,64 +169,9 @@ export function AlertsPanel({
         </div>
       )}
 
-      {alertsView === 'incidents' && (
+      {/* Supervisor - infracciones de hoy, sin filtros (el backend ya acota al dia actual) */}
+      {alertsView === 'infractions' && !canAccessHistory && (
         <div className="sup-history-panel">
-          {canAccessHistory && (
-            <DateRangeFilter
-              value={incidentRange}
-              onChange={setIncidentRange}
-              onSearch={() => searchIncidents(incidentRange)}
-            />
-          )}
-          {incidentsError && <div className="sup-alerts-empty">{incidentsError}</div>}
-          <div className="sup-history-table-wrap">
-            <table className="sup-history-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th>Reportado por</th>
-                  <th>Vehículo</th>
-                  <th>Categoría</th>
-                  <th>Mensaje</th>
-                  <th>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {incidentsLoading ? (
-                  <tr>
-                    <td colSpan={6}>Cargando…</td>
-                  </tr>
-                ) : incidentRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6}>{canAccessHistory ? 'Sin resultados' : 'Sin incidentes hoy'}</td>
-                  </tr>
-                ) : (
-                  incidentRows.map((r) => (
-                    <tr key={r.id}>
-                      <td>{new Date(r.reported_at).toLocaleString('es-MX')}</td>
-                      <td>{r.reported_by_name ?? '-'}</td>
-                      <td>{r.device_name ?? r.device_id}</td>
-                      <td>{INCIDENT_CATEGORY_LABEL[r.category]}</td>
-                      <td>{r.message ?? '-'}</td>
-                      <td>{r.status === 'open' ? 'Abierto' : `Resuelto${r.resolved_by_name ? ` - ${r.resolved_by_name}` : ''}`}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {alertsView === 'infractions' && (
-        <div className="sup-history-panel">
-          {canAccessHistory && (
-            <DateRangeFilter
-              value={infractionRange}
-              onChange={setInfractionRange}
-              onSearch={() => searchInfractions(infractionRange)}
-            />
-          )}
           {infractionsError && <div className="sup-alerts-empty">{infractionsError}</div>}
           <div className="sup-history-table-wrap">
             <table className="sup-history-table">
@@ -241,6 +181,7 @@ export function AlertsPanel({
                   <th>Operador</th>
                   <th>Vehículo</th>
                   <th>Tipo</th>
+                  <th>Gravedad</th>
                   <th>Detalle</th>
                   <th>Revisada</th>
                   {canReviewInfractions && <th></th>}
@@ -249,21 +190,20 @@ export function AlertsPanel({
               <tbody>
                 {infractionsLoading ? (
                   <tr>
-                    <td colSpan={canReviewInfractions ? 7 : 6}>Cargando…</td>
+                    <td colSpan={canReviewInfractions ? 8 : 7}>Cargando…</td>
                   </tr>
                 ) : infractionRows.length === 0 ? (
                   <tr>
-                    <td colSpan={canReviewInfractions ? 7 : 6}>
-                      {canAccessHistory ? 'Sin infracciones registradas' : 'Sin infracciones hoy'}
-                    </td>
+                    <td colSpan={canReviewInfractions ? 8 : 7}>Sin infracciones hoy</td>
                   </tr>
                 ) : (
                   infractionRows.map((r) => (
                     <tr key={r.id}>
                       <td>{new Date(r.occurred_at).toLocaleString('es-MX')}</td>
                       <td>{r.operator_name ?? '(sin turno activo)'}</td>
-                      <td>{r.device_name ?? r.device_id}</td>
-                      <td>{r.infraction_type === 'speed' ? 'Velocidad' : 'Geocerca'}</td>
+                      <td>{infractionVehicleLabel(r)}</td>
+                      <td>{INFRACTION_TYPE_LABEL[r.infraction_type]}</td>
+                      <td><SeverityBadge value={r.severity} /></td>
                       <td>{r.message}</td>
                       <td>{r.reviewed_at ? `Sí - ${new Date(r.reviewed_at).toLocaleDateString('es-MX')}` : 'No'}</td>
                       {canReviewInfractions && (
@@ -284,40 +224,46 @@ export function AlertsPanel({
         </div>
       )}
 
+      {/* Encargado - historial unificado, filtrable libremente */}
       {alertsView === 'history' && canAccessHistory && (
         <div className="sup-history-panel">
+          <div className="sup-alerts-toggle" style={{ marginBottom: 8 }}>
+            <button
+              className={historyType === 'incidents' ? 'active' : ''}
+              onClick={() => changeHistoryType('incidents')}
+            >
+              Incidentes
+            </button>
+            <button
+              className={historyType === 'infractions' ? 'active' : ''}
+              onClick={() => changeHistoryType('infractions')}
+            >
+              Infracciones
+            </button>
+          </div>
+
           <div className="sup-history-filters">
-            <select
-              value={historyFilters.type}
-              onChange={(e) =>
-                setHistoryFilters({ ...historyFilters, type: e.target.value as AlertEventType | '' })
-              }
-            >
-              <option value="">Todos los tipos</option>
-              {Object.entries(ALERT_TYPE_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <select
-              value={historyFilters.severity}
-              onChange={(e) =>
-                setHistoryFilters({
-                  ...historyFilters,
-                  severity: e.target.value as 'info' | 'warning' | 'danger' | '',
-                })
-              }
-            >
-              <option value="">Toda severidad</option>
-              <option value="danger">Peligro</option>
-              <option value="warning">Precaución</option>
-              <option value="info">Info</option>
-            </select>
+            {historyType === 'incidents' && (
+              <select
+                value={historyFilters.status}
+                onChange={(e) =>
+                  setHistoryFilters({ ...historyFilters, status: e.target.value as IncidentStatusFilter })
+                }
+              >
+                <option value="">Abiertos y resueltos</option>
+                <option value="open">Solo abiertos (activos)</option>
+                <option value="resolved">Solo resueltos</option>
+              </select>
+            )}
             <input
-              placeholder="ID dispositivo"
+              placeholder="ID vehículo"
               value={historyFilters.deviceId}
               onChange={(e) => setHistoryFilters({ ...historyFilters, deviceId: e.target.value })}
+            />
+            <input
+              placeholder={historyType === 'incidents' ? 'Reportado por' : 'Operador'}
+              value={historyFilters.personName}
+              onChange={(e) => setHistoryFilters({ ...historyFilters, personName: e.target.value })}
             />
             <input
               type="datetime-local"
@@ -329,52 +275,98 @@ export function AlertsPanel({
               value={historyFilters.to}
               onChange={(e) => setHistoryFilters({ ...historyFilters, to: e.target.value })}
             />
-            <button className="sup-history-btn" onClick={() => searchHistory(historyFilters)}>
+            <button className="sup-history-btn" onClick={() => runHistorySearch(historyType, historyFilters)}>
               Buscar
             </button>
-            <button className="sup-history-btn" onClick={() => exportCsv(historyFilters)}>
-              Exportar CSV
-            </button>
           </div>
 
-          {historyError && <div className="sup-alerts-empty">{historyError}</div>}
-
-          <div className="sup-history-table-wrap">
-            <table className="sup-history-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th>Tipo</th>
-                  <th>Severidad</th>
-                  <th>Dispositivo</th>
-                  <th>Mensaje</th>
-                  <th>Duración</th>
-                </tr>
-              </thead>
-              <tbody>
-                {historyLoading ? (
-                  <tr>
-                    <td colSpan={6}>Cargando…</td>
-                  </tr>
-                ) : historyRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6}>Sin resultados</td>
-                  </tr>
-                ) : (
-                  historyRows.map((r) => (
-                    <tr key={r.id}>
-                      <td>{new Date(r.triggered_at).toLocaleString('es-MX')}</td>
-                      <td>{ALERT_TYPE_LABEL[r.alert_type]}</td>
-                      <td className={`sup-severity-${r.severity}`}>{SEVERITY_LABEL[r.severity]}</td>
-                      <td>{[r.device_id, r.device_id_2].filter(Boolean).join(' / ') || '-'}</td>
-                      <td>{r.message ?? '-'}</td>
-                      <td>{r.resolved_at ? formatDuration(r.triggered_at, r.resolved_at) : 'Activa'}</td>
+          {historyType === 'incidents' ? (
+            <>
+              {incidentsError && <div className="sup-alerts-empty">{incidentsError}</div>}
+              <div className="sup-history-table-wrap">
+                <table className="sup-history-table">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Reportado por</th>
+                      <th>Vehículo</th>
+                      <th>Categoría</th>
+                      <th>Mensaje</th>
+                      <th>Estado</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody>
+                    {incidentsLoading ? (
+                      <tr>
+                        <td colSpan={6}>Cargando…</td>
+                      </tr>
+                    ) : incidentRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={6}>Sin resultados</td>
+                      </tr>
+                    ) : (
+                      incidentRows.map((r) => (
+                        <tr key={r.id}>
+                          <td>{new Date(r.reported_at).toLocaleString('es-MX')}</td>
+                          <td>{r.reported_by_name ?? '-'}</td>
+                          <td>{r.device_name ?? r.device_id}</td>
+                          <td>{INCIDENT_CATEGORY_LABEL[r.category]}</td>
+                          <td>{r.message ?? '-'}</td>
+                          <td>
+                            {r.status === 'open'
+                              ? 'Abierto'
+                              : `Resuelto${r.resolved_by_name ? ` - ${r.resolved_by_name}` : ''}`}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <>
+              {infractionsError && <div className="sup-alerts-empty">{infractionsError}</div>}
+              <div className="sup-history-table-wrap">
+                <table className="sup-history-table">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Operador</th>
+                      <th>Vehículo</th>
+                      <th>Tipo</th>
+                      <th>Gravedad</th>
+                      <th>Detalle</th>
+                      <th>Revisada</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {infractionsLoading ? (
+                      <tr>
+                        <td colSpan={7}>Cargando…</td>
+                      </tr>
+                    ) : infractionRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={7}>Sin resultados</td>
+                      </tr>
+                    ) : (
+                      infractionRows.map((r) => (
+                        <tr key={r.id}>
+                          <td>{new Date(r.occurred_at).toLocaleString('es-MX')}</td>
+                          <td>{r.operator_name ?? '(sin turno activo)'}</td>
+                          <td>{infractionVehicleLabel(r)}</td>
+                          <td>{INFRACTION_TYPE_LABEL[r.infraction_type]}</td>
+                          <td><SeverityBadge value={r.severity} /></td>
+                          <td>{r.message}</td>
+                          <td>{r.reviewed_at ? `Sí - ${new Date(r.reviewed_at).toLocaleDateString('es-MX')}` : 'No'}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

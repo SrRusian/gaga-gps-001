@@ -36,15 +36,18 @@ export interface GeofenceClearPayload {
   timestamp: string;
 }
 
-// aviso silencioso de proximidad a una geocerca peligrosa (rectangulo real del vehiculo, ver
-// GeofenceAlertService "tier silencioso") - canal propio, deliberadamente separado de
+// aviso silencioso de proximidad - canal propio, deliberadamente separado de
 // GeofenceAlertPayload/GeofenceClearPayload: se manda SOLO al operador afectado (sendToDevice,
 // nunca broadcastToProject), nunca se persiste (ni alert_events ni infractions), y no debe poder
-// pisar/limpiar una alerta real que ya este en pantalla (ver alert:critical/alert:warning/alert:clear)
+// pisar/limpiar una alerta real que ya este en pantalla (ver alert:critical/alert:warning/alert:clear).
+// Reusado por 2 fuentes distintas (GeofenceAlertService "tier silencioso" y CollisionRiskService
+// "tier silencioso" de vehiculo cercano en la misma ruta) - de ahi que geofenceId/geofenceName sean
+// opcionales y exista otherDeviceId, sin necesidad de dos canales/payloads casi identicos.
 export interface GeofenceProximityNoticePayload {
   deviceId: string;
-  geofenceId: number;
-  geofenceName: string;
+  geofenceId?: number;
+  geofenceName?: string;
+  otherDeviceId?: string;
   distanceMeters: number;
   message: string;
   timestamp: string;
@@ -270,18 +273,23 @@ export interface AlertHistoryRow {
   resolved_at: string | null;
 }
 
-// registro permanente de infracciones reales (velocidad/geocerca) - ver backend/db/001_init.sql
-// tabla `infractions`, generado solo por el sistema (nunca creado a mano)
-export type InfractionType = 'speed' | 'geofence';
+// registro permanente de infracciones reales (velocidad/geocerca/colision) - ver
+// backend/db/001_init.sql tabla `infractions`, generado solo por el sistema (nunca creado a mano)
+export type InfractionType = 'speed' | 'geofence' | 'collision';
 
 export interface InfractionRow {
   id: number;
   project_id: number | null;
   device_id: string;
   device_name: string | null;
+  // solo para infraction_type='collision' - el otro vehiculo involucrado
+  device_id_2: string | null;
+  device_2_name: string | null;
   operator_session_id: number | null;
   operator_name: string | null;
   infraction_type: InfractionType;
+  // 1 (leve) a 10 (grave/choque real) - ver backend/src/utils/infractionSeverity.ts
+  severity: number;
   message: string;
   latitude: number;
   longitude: number;

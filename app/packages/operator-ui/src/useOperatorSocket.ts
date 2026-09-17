@@ -43,7 +43,6 @@ export interface ThreatVehicle {
 // alert:proximity_clear no pueda borrar por accidente una alerta real (critica/warning) que ya
 // este en pantalla - ver GeofenceAlertService._evaluateSilentTier
 export interface ProximityNotice {
-  geofenceName: string;
   distanceMeters: number;
   message: string;
 }
@@ -159,7 +158,6 @@ export function useOperatorSocket(deviceId: string | null) {
     // sonido, sin tocar el slot `alert` real (ver comentario de ProximityNotice arriba)
     socket.on('alert:proximity_notice', (data) => {
       setProximityNotice({
-        geofenceName: data.geofenceName,
         distanceMeters: data.distanceMeters,
         message: data.message,
       });

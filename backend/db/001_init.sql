@@ -432,9 +432,15 @@ CREATE TABLE IF NOT EXISTS infractions (
   id BIGSERIAL PRIMARY KEY,
   project_id INTEGER REFERENCES projects(id),
   device_id VARCHAR(255) NOT NULL REFERENCES devices(unique_id),
+  -- solo para infraction_type='collision' - el otro vehiculo involucrado (mismo patron que
+  -- alert_events.device_id_2, un solo registro por evento en vez de uno duplicado por vehiculo)
+  device_id_2 VARCHAR(255) REFERENCES devices(unique_id),
   -- quien operaba el vehiculo en el momento - NULL si no habia turno activo (caso raro)
   operator_session_id BIGINT REFERENCES operator_sessions(id),
-  infraction_type VARCHAR(20) NOT NULL CHECK (infraction_type IN ('speed', 'geofence')),
+  infraction_type VARCHAR(20) NOT NULL CHECK (infraction_type IN ('speed', 'geofence', 'collision')),
+  -- 1 (leve) a 10 (grave/choque real) - ver backend/src/utils/infractionSeverity.ts para la formula
+  -- por tipo, decidida por el sistema (sin intervencion manual) al momento de crear la fila
+  severity SMALLINT NOT NULL DEFAULT 5 CHECK (severity BETWEEN 1 AND 10),
   message TEXT NOT NULL,
   latitude DOUBLE PRECISION NOT NULL,
   longitude DOUBLE PRECISION NOT NULL,

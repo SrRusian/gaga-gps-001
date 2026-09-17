@@ -349,6 +349,73 @@ describe('GeofenceRepository - PostGIS real', () => {
     expect(row?.contained).toBe(true);
   });
 
+  it('findRouteMembership: detecta la ruta y la fraccion de recorrido (0=inicio, 1=fin) de un punto dentro del corredor', async () => {
+    const route = await repo.create({
+      name: 'Ruta de prueba A-B',
+      projectId: testProjectId,
+      type: 'authorized_route',
+      shapeType: 'polyline',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [-140.0, 30.0], // A
+          [-140.0, 30.01], // B - 10 puntos al norte, ~1.1km
+        ],
+      },
+      corridorWidthMeters: 20,
+    });
+    createdGeofenceIds.push(route.id);
+
+    const nearStart = await repo.findRouteMembership({
+      projectId: testProjectId,
+      latitude: 30.0005,
+      longitude: -140.0,
+    });
+    expect(nearStart?.id).toBe(route.id);
+    expect(nearStart?.lineFraction).toBeGreaterThan(0);
+    expect(nearStart?.lineFraction).toBeLessThan(0.2);
+
+    const nearEnd = await repo.findRouteMembership({
+      projectId: testProjectId,
+      latitude: 30.0095,
+      longitude: -140.0,
+    });
+    expect(nearEnd?.lineFraction).toBeGreaterThan(0.8);
+
+    const farAway = await repo.findRouteMembership({
+      projectId: testProjectId,
+      latitude: 31.0,
+      longitude: -140.0,
+    });
+    expect(farAway).toBeNull();
+  });
+
+  it('findRouteMembership solo considera polyline tipo authorized_route, no una linea "no tocar"', async () => {
+    const keepAway = await repo.create({
+      name: 'Linea a no tocar de prueba',
+      projectId: testProjectId,
+      type: 'danger',
+      shapeType: 'polyline',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [-141.0, 30.0],
+          [-141.0, 30.01],
+        ],
+      },
+      corridorWidthMeters: 20,
+      stayInside: false,
+    });
+    createdGeofenceIds.push(keepAway.id);
+
+    const match = await repo.findRouteMembership({
+      projectId: testProjectId,
+      latitude: 30.0005,
+      longitude: -141.0,
+    });
+    expect(match).toBeNull();
+  });
+
   it('projectId null (dispositivo sin proyecto) no matchea ninguna geocerca real', async () => {
     const circle = await repo.create({
       name: 'Círculo con proyecto real',
