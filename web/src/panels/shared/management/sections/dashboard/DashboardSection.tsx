@@ -30,6 +30,7 @@ import { useMapsAdmin } from './useMapsAdmin';
 import { useProjectsAdmin } from './useProjectsAdmin';
 import { useShiftsAdmin } from './useShiftsAdmin';
 import { useUsersAdmin } from './useUsersAdmin';
+import { useVehicleTypesAdmin } from './useVehicleTypesAdmin';
 
 // Orquestador del panel de Dashboard (Admin global + Administrador de Proyecto, ver
 // panels/admin/index.tsx y panels/project-administrator/index.tsx) - conecta los hooks de cada
@@ -104,6 +105,7 @@ export function DashboardSection() {
       if (hadLinkedEquipment) equipmentAdmin.loadEquipment();
     },
   });
+  const vehicleTypesAdmin = useVehicleTypesAdmin();
 
   const mapsAdmin = useMapsAdmin({ scope, isAdmin });
 
@@ -144,6 +146,7 @@ export function DashboardSection() {
     projectsAdmin.loadProjects();
     usersAdmin.loadUsers();
     devicesAdmin.loadDevices();
+    vehicleTypesAdmin.loadVehicleTypes();
     geofencesAdmin.loadGeofences();
     equipmentAdmin.loadEquipment();
     mapsAdmin.loadMaps();
@@ -310,6 +313,7 @@ export function DashboardSection() {
         projects={projects}
         findLinkedEquipmentName={equipmentAdmin.findLinkedEquipmentName}
         admin={devicesAdmin}
+        vehicleTypesAdmin={vehicleTypesAdmin}
       />
 
       <UsersModal

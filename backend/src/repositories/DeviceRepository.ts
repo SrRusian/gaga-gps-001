@@ -8,11 +8,24 @@ export interface DeviceRow {
   status: string;
   project_id: number | null;
   group_id: number | null;
+  vehicle_type_id: number | null;
   attributes: Record<string, unknown>;
   speed_limit_kmh: number | null;
   last_update: Date | null;
   created_at: Date;
+  // solo presentes en findAll/findByProject/findById (LEFT JOIN vehicle_types) - null si el
+  // dispositivo no tiene tipo asignado, undefined nunca (siempre se seleccionan las 3 columnas)
+  vehicle_type_name?: string | null;
+  vehicle_type_length_meters?: number | null;
+  vehicle_type_width_meters?: number | null;
 }
+
+const SELECT_WITH_VEHICLE_TYPE = `
+  SELECT d.*, vt.name AS vehicle_type_name, vt.length_meters AS vehicle_type_length_meters,
+    vt.width_meters AS vehicle_type_width_meters
+  FROM devices d
+  LEFT JOIN vehicle_types vt ON vt.id = d.vehicle_type_id
+`;
 
 export class DeviceHasPositionsError extends Error {
   code = 'DEVICE_HAS_POSITIONS';
@@ -55,7 +68,7 @@ class DeviceRepository {
 
   async findById(id: number): Promise<DeviceRow | null> {
     try {
-      const { rows } = await query<DeviceRow>('SELECT * FROM devices WHERE id = $1', [id]);
+      const { rows } = await query<DeviceRow>(`${SELECT_WITH_VEHICLE_TYPE} WHERE d.id = $1`, [id]);
       return rows[0] || null;
     } catch (err) {
       console.error('DeviceRepository.findById:', (err as Error).message);
@@ -65,7 +78,7 @@ class DeviceRepository {
 
   async findAll(): Promise<DeviceRow[]> {
     try {
-      const { rows } = await query<DeviceRow>('SELECT * FROM devices ORDER BY name ASC');
+      const { rows } = await query<DeviceRow>(`${SELECT_WITH_VEHICLE_TYPE} ORDER BY d.name ASC`);
       return rows;
     } catch (err) {
       console.error('DeviceRepository.findAll:', (err as Error).message);
@@ -76,7 +89,7 @@ class DeviceRepository {
   async findByProject(projectId: number): Promise<DeviceRow[]> {
     try {
       const { rows } = await query<DeviceRow>(
-        'SELECT * FROM devices WHERE project_id = $1 ORDER BY name ASC',
+        `${SELECT_WITH_VEHICLE_TYPE} WHERE d.project_id = $1 ORDER BY d.name ASC`,
         [projectId],
       );
       return rows;
@@ -114,19 +127,21 @@ class DeviceRepository {
     name,
     type = 'vehicle',
     projectId = null,
+    vehicleTypeId = null,
     attributes = {},
   }: {
     uniqueId: string;
     name: string;
     type?: string;
     projectId?: number | null;
+    vehicleTypeId?: number | null;
     attributes?: Record<string, unknown>;
   }): Promise<DeviceRow> {
     try {
       const { rows } = await query<DeviceRow>(
-        `INSERT INTO devices (unique_id, name, type, project_id, attributes)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [uniqueId, name, type, projectId, attributes],
+        `INSERT INTO devices (unique_id, name, type, project_id, vehicle_type_id, attributes)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [uniqueId, name, type, projectId, vehicleTypeId, attributes],
       );
       return rows[0];
     } catch (err) {
@@ -142,6 +157,7 @@ class DeviceRepository {
       type,
       projectId,
       groupId,
+      vehicleTypeId,
       attributes,
       speedLimitKmh,
     }: {
@@ -149,6 +165,7 @@ class DeviceRepository {
       type?: string;
       projectId?: number | null;
       groupId?: number | null;
+      vehicleTypeId?: number | null;
       attributes?: Record<string, unknown>;
       speedLimitKmh?: number | null;
     },
@@ -171,6 +188,10 @@ class DeviceRepository {
     if (groupId !== undefined) {
       values.push(groupId);
       sets.push(`group_id = $${values.length}`);
+    }
+    if (vehicleTypeId !== undefined) {
+      values.push(vehicleTypeId);
+      sets.push(`vehicle_type_id = $${values.length}`);
     }
     if (attributes !== undefined) {
       values.push(attributes);

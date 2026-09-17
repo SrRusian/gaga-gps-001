@@ -38,6 +38,7 @@ export default function ProjectManagerPanel() {
               mapMode={s.mapMode}
               selectedVehicleId={s.selectedVehicle}
               onVehicleClick={s.selectVehicle}
+              deviceFootprints={s.deviceFootprintsById}
             />
           </div>
 

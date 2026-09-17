@@ -15,6 +15,7 @@ import { useDeviceId } from './useDeviceId';
 import { useIncidentReporter } from './useIncidentReporter';
 import { useOperatorAuth } from './useOperatorAuth';
 import { useOperatorSocket } from './useOperatorSocket';
+import { useVehicleFootprints } from './useVehicleFootprints';
 
 const AUTO_FOLLOW_STORAGE_KEY = 'gaga_operator_auto_follow';
 const THREAT_FRAME_HOLD_MS = 8000;
@@ -64,6 +65,7 @@ export default function OperatorApp() {
   const { position: localGeo, error: geoError, supported: geoSupported } = useDeviceGeolocation();
   const { level: batteryLevel, charging: batteryCharging } = useBatteryLevel();
   useDeviceSensorReporter(deviceId);
+  const vehicleFootprints = useVehicleFootprints();
 
   // posición propia: local tiene prioridad sobre servidor; alertas siguen siendo del servidor
   const displayFleet = useMemo(() => {
@@ -212,6 +214,7 @@ export default function OperatorApp() {
               }
               highlightedGeofenceId={activeGeofenceId}
               initialCenter={[myDisplay.longitude, myDisplay.latitude]}
+              deviceFootprints={vehicleFootprints}
               onUserInteraction={() => setAutoFollow(false)}
             />
 

@@ -26,6 +26,19 @@ export interface DeviceRow {
   project_id: number | null;
   last_update: string | null;
   attributes?: Record<string, unknown>;
+  vehicle_type_id: number | null;
+  // LEFT JOIN vehicle_types - null si no hay tipo asignado, undefined solo si el endpoint que
+  // devolvió esta fila no hace el join (ver DeviceRepository.SELECT_WITH_VEHICLE_TYPE)
+  vehicle_type_name?: string | null;
+  vehicle_type_length_meters?: number | null;
+  vehicle_type_width_meters?: number | null;
+}
+
+export interface VehicleTypeRow {
+  id: number;
+  name: string;
+  length_meters: number;
+  width_meters: number;
 }
 
 export interface AppReleaseRow {

@@ -5,6 +5,7 @@ import {
   realignVehicleMarkerToBearing,
   resolveVehicleCourse,
   setVehicleMarkerAccuracy,
+  setVehicleMarkerFootprint,
   setVehicleMarkerStale,
   setVehicleMarkerThreat,
   updateVehicleMarkerHeading,
@@ -73,6 +74,9 @@ export interface MapViewProps {
   initialCenter: [number, number];
   initialZoom?: number;
   onUserInteraction?: () => void;
+  // silueta real del vehiculo (largo/ancho, metros) por deviceId - ver useVehicleFootprints.ts.
+  // Sin entrada para un deviceId = sin tipo asignado, ese marcador no dibuja silueta.
+  deviceFootprints?: Record<string, { lengthMeters: number | null; widthMeters: number | null }>;
 }
 
 export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
@@ -89,6 +93,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     initialCenter,
     initialZoom = 17,
     onUserInteraction,
+    deviceFootprints = {},
   },
   ref,
 ) {
@@ -101,6 +106,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const lastFixTimeRef = useRef<Record<string, number>>({});
   const fixTimeRef = useRef<Record<string, number>>({});
   const accuracyRef = useRef<Record<string, number | undefined>>({}); // Módulo círculo de precisión del vehículo (No modificar)
+  // shadow del prop deviceFootprints, igual que accuracyRef, para que el handler de zoom (solo
+  // depende de [map]) siempre lea el valor mas reciente
+  const footprintsRef = useRef(deviceFootprints);
+  footprintsRef.current = deviceFootprints;
   const glideFrameRef = useRef<Record<string, number>>({});
 
   // ver comentario de DEAD_RECKONING_* arriba - estado del vehiculo propio unicamente
@@ -146,6 +155,9 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     // "stopped" sigue reflejando movimiento REAL (no si hay brujula) - un vehiculo detenido se ve
     // detenido aunque ahora sepamos hacia donde apunta
     arrow.style.opacity = resolved.stopped ? '0.55' : '1';
+
+    const footprint = el.querySelector<HTMLDivElement>('.vehicle-marker__footprint');
+    if (footprint) footprint.style.transform = `rotate(${resolvedCourse - mapBearing}deg)`;
   }
 
   useEffect(() => {
@@ -320,6 +332,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const previousFixAt = lastFixTimeRef.current[vehicleId];
       lastFixTimeRef.current[vehicleId] = now;
       accuracyRef.current[pos.deviceId] = pos.accuracy; // Módulo círculo de precisión del vehículo (No modificar)
+      const footprint = deviceFootprints[pos.deviceId];
 
       // fixTime real del reporte (no "cuándo lo vio este navegador") - así al recargar la
       // página un vehículo ya offline se marca de inmediato, sin esperar un umbral completo
@@ -358,6 +371,14 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         setVehicleMarkerStale(marker.getElement(), isStale);
         // Módulo círculo de precisión del vehículo (No modificar)
         setVehicleMarkerAccuracy(marker.getElement(), map, pos.latitude, pos.longitude, pos.accuracy);
+        setVehicleMarkerFootprint(
+          marker.getElement(),
+          map,
+          pos.latitude,
+          pos.longitude,
+          footprint?.lengthMeters,
+          footprint?.widthMeters,
+        );
         return;
       }
 
@@ -370,14 +391,15 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       }
       setVehicleMarkerStale(el, isStale);
       setVehicleMarkerAccuracy(el, map, pos.latitude, pos.longitude, pos.accuracy); // Módulo círculo de precisión del vehículo (No modificar)
+      setVehicleMarkerFootprint(el, map, pos.latitude, pos.longitude, footprint?.lengthMeters, footprint?.widthMeters);
 
       markersRef.current[vehicleId] = new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map);
     });
-  }, [map, loaded, fleet, myDeviceId, equipment]);
+  }, [map, loaded, fleet, myDeviceId, equipment, deviceFootprints]);
 
-  // Módulo círculo de precisión del vehículo (No modificar)
-  // el círculo es en pixeles de pantalla real (no metros) - al hacer zoom hay que recalcular
-  // el tamaño de todos aunque no haya llegado una posición nueva
+  // el círculo/la silueta son en pixeles de pantalla real (no metros) - al hacer zoom hay que
+  // recalcular el tamaño de todos aunque no haya llegado una posición nueva (círculo de precisión:
+  // Módulo, No modificar)
   useEffect(() => {
     if (!map) return;
 
@@ -386,6 +408,15 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         const deviceId = vehicleId.replace(/^vehicle-/, '');
         const lngLat = marker.getLngLat();
         setVehicleMarkerAccuracy(marker.getElement(), map, lngLat.lat, lngLat.lng, accuracyRef.current[deviceId]);
+        const footprint = footprintsRef.current[deviceId];
+        setVehicleMarkerFootprint(
+          marker.getElement(),
+          map,
+          lngLat.lat,
+          lngLat.lng,
+          footprint?.lengthMeters,
+          footprint?.widthMeters,
+        );
       });
     };
     map.on('zoom', handler);

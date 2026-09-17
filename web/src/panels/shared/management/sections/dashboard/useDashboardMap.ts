@@ -2,6 +2,7 @@ import {
   createVehicleMarkerElement,
   flyToPoint,
   setVehicleMarkerAccuracy,
+  setVehicleMarkerFootprint,
   setVehicleMarkerSelected,
   setVehicleMarkerStale,
   updateVehicleMarkerHeading,
@@ -28,6 +29,9 @@ export function useDashboardMap({ scopedDevices, historyMode, hasMaps }: UseDash
   const [mapMode, setMapMode] = useMapMode('gaga_admin_dash_map_mode', 'streets');
   const vehicleMarkersRef = useRef<Record<string, maplibregl.Marker>>({});
   const accuracyRef = useRef<Record<string, number | undefined>>({}); // Módulo círculo de precisión del vehículo (No modificar)
+  // silueta real del vehiculo (largo/ancho, metros) - null si el dispositivo no tiene tipo
+  // asignado, mismo criterio de "recalcular en cada zoom" que accuracyRef (ver handler de zoom)
+  const footprintRef = useRef<Record<string, { lengthMeters: number | null; widthMeters: number | null }>>({});
   const selectVehicleRef = useRef<(deviceId: string) => void>(() => {});
   const [livePositions, setLivePositions] = useState<Record<string, Position>>({});
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
@@ -113,11 +117,16 @@ export function useDashboardMap({ scopedDevices, historyMode, hasMaps }: UseDash
         vehicleMarkersRef.current[id].remove();
         delete vehicleMarkersRef.current[id];
         delete accuracyRef.current[id]; // Módulo círculo de precisión del vehículo (No modificar)
+        delete footprintRef.current[id];
       }
     });
     scopedLivePositions.forEach((pos) => {
       const lngLat: [number, number] = [pos.longitude, pos.latitude];
       accuracyRef.current[pos.deviceId] = pos.accuracy; // Módulo círculo de precisión del vehículo (No modificar)
+      const device = scopedDevices.find((d) => d.unique_id === pos.deviceId);
+      const lengthMeters = device?.vehicle_type_length_meters ?? null;
+      const widthMeters = device?.vehicle_type_width_meters ?? null;
+      footprintRef.current[pos.deviceId] = { lengthMeters, widthMeters };
       const existing = vehicleMarkersRef.current[pos.deviceId];
       if (existing) {
         existing.setLngLat(lngLat);
@@ -128,26 +137,37 @@ export function useDashboardMap({ scopedDevices, historyMode, hasMaps }: UseDash
         );
         // Módulo círculo de precisión del vehículo (No modificar)
         setVehicleMarkerAccuracy(existing.getElement(), map, pos.latitude, pos.longitude, pos.accuracy);
+        setVehicleMarkerFootprint(existing.getElement(), map, pos.latitude, pos.longitude, lengthMeters, widthMeters);
         return;
       }
       const el = createVehicleMarkerElement({ deviceId: pos.deviceId, isMine: false, color: 'var(--ad-accent)' });
       updateVehicleMarkerHeading(el, pos.deviceId, pos.course, pos.speed);
       setVehicleMarkerStale(el, Date.now() - new Date(pos.fixTime).getTime() > OFFLINE_THRESHOLD_MS);
       setVehicleMarkerAccuracy(el, map, pos.latitude, pos.longitude, pos.accuracy); // Módulo círculo de precisión del vehículo (No modificar)
+      setVehicleMarkerFootprint(el, map, pos.latitude, pos.longitude, lengthMeters, widthMeters);
       el.onclick = () => selectVehicleRef.current(pos.deviceId);
       vehicleMarkersRef.current[pos.deviceId] = new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map);
     });
-  }, [map, loaded, scopedLivePositions, historyMode]);
+  }, [map, loaded, scopedLivePositions, scopedDevices, historyMode]);
 
-  // Módulo círculo de precisión del vehículo (No modificar)
-  // el círculo es en pixeles de pantalla real (no metros) - al hacer zoom hay que recalcular
-  // el tamaño de todos aunque no haya llegado una posición nueva
+  // el círculo/la silueta son en pixeles de pantalla real (no metros) - al hacer zoom hay que
+  // recalcular el tamaño de todos aunque no haya llegado una posición nueva (círculo de precisión:
+  // Módulo, No modificar)
   useEffect(() => {
     if (!map) return;
     const handler = () => {
       Object.entries(vehicleMarkersRef.current).forEach(([deviceId, marker]) => {
         const lngLat = marker.getLngLat();
         setVehicleMarkerAccuracy(marker.getElement(), map, lngLat.lat, lngLat.lng, accuracyRef.current[deviceId]);
+        const dims = footprintRef.current[deviceId];
+        setVehicleMarkerFootprint(
+          marker.getElement(),
+          map,
+          lngLat.lat,
+          lngLat.lng,
+          dims?.lengthMeters,
+          dims?.widthMeters,
+        );
       });
     };
     map.on('zoom', handler);

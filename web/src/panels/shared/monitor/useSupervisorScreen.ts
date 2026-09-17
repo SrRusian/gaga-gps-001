@@ -13,6 +13,8 @@ const api = createApiClient({ getToken: getStoredToken });
 interface DeviceAttributesRow {
   unique_id: string;
   attributes?: Record<string, unknown>;
+  vehicle_type_length_meters?: number | null;
+  vehicle_type_width_meters?: number | null;
 }
 
 // Wiring compartido entre panels/supervisor/index.tsx y panels/project-manager/index.tsx - el
@@ -60,11 +62,24 @@ export function useSupervisorScreen(storageKey: string) {
   const activeSession = useActiveOperatorSession(selectedVehicle);
 
   const [deviceAttributesById, setDeviceAttributesById] = useState<Record<string, Record<string, unknown>>>({});
+  const [deviceFootprintsById, setDeviceFootprintsById] = useState<
+    Record<string, { lengthMeters: number | null; widthMeters: number | null }>
+  >({});
   const [latestAppVersionCode, setLatestAppVersionCode] = useState<number | null>(null);
   useEffect(() => {
     api
       .get<DeviceAttributesRow[]>('/api/devices')
-      .then((rows) => setDeviceAttributesById(Object.fromEntries(rows.map((d) => [d.unique_id, d.attributes ?? {}]))))
+      .then((rows) => {
+        setDeviceAttributesById(Object.fromEntries(rows.map((d) => [d.unique_id, d.attributes ?? {}])));
+        setDeviceFootprintsById(
+          Object.fromEntries(
+            rows.map((d) => [
+              d.unique_id,
+              { lengthMeters: d.vehicle_type_length_meters ?? null, widthMeters: d.vehicle_type_width_meters ?? null },
+            ]),
+          ),
+        );
+      })
       .catch(() => {});
     api
       .get<{ versionCode: number | null }>('/api/app/version-info')
@@ -99,6 +114,7 @@ export function useSupervisorScreen(storageKey: string) {
     detail,
     detailOffline,
     detailAppVersion,
+    deviceFootprintsById,
     activeSession,
     logout,
   };

@@ -28,6 +28,7 @@ import SystemSettingsRepository from './repositories/SystemSettingsRepository';
 import DeviceProjectHistoryRepository from './repositories/DeviceProjectHistoryRepository';
 import UserProjectHistoryRepository from './repositories/UserProjectHistoryRepository';
 import DeviceGroupRepository from './repositories/DeviceGroupRepository';
+import VehicleTypeRepository from './repositories/VehicleTypeRepository';
 import EquipmentVariableRepository from './repositories/EquipmentVariableRepository';
 import EquipmentActivityRepository from './repositories/EquipmentActivityRepository';
 import ProductionRecordRepository from './repositories/ProductionRecordRepository';
@@ -83,6 +84,7 @@ import buildIncidentsRouter from './api/routes/incidents.routes';
 import buildAlertsRouter from './api/routes/alerts.routes';
 import buildSettingsRouter from './api/routes/settings.routes';
 import buildDeviceGroupsRouter from './api/routes/device-groups.routes';
+import buildVehicleTypesRouter from './api/routes/vehicle-types.routes';
 import buildEquipmentVariablesRouter from './api/routes/equipment-variables.routes';
 import buildPowerEventsRouter from './api/routes/power-events.routes';
 import buildProductionRouter from './api/routes/production.routes';
@@ -139,6 +141,7 @@ const settingsRepo = new SystemSettingsRepository();
 const deviceProjectHistoryRepo = new DeviceProjectHistoryRepository();
 const userProjectHistoryRepo = new UserProjectHistoryRepository();
 const deviceGroupRepo = new DeviceGroupRepository();
+const vehicleTypeRepo = new VehicleTypeRepository();
 const equipmentVariableRepo = new EquipmentVariableRepository();
 const equipmentActivityRepo = new EquipmentActivityRepository();
 const productionRecordRepo = new ProductionRecordRepository();
@@ -350,6 +353,7 @@ app.use(
   authMiddleware,
   buildDeviceGroupsRouter({ deviceGroupRepo, requireRole }),
 );
+app.use('/api/vehicle-types', buildVehicleTypesRouter({ vehicleTypeRepo, authMiddleware, requireRole }));
 // clave compartida en POST /, no JWT - ver equipment-variables.routes.ts
 app.use(
   '/api/equipment-variables',

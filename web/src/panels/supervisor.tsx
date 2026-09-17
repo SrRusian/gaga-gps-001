@@ -48,6 +48,7 @@ export default function SupervisorPanel() {
               mapMode={s.mapMode}
               selectedVehicleId={s.selectedVehicle}
               onVehicleClick={s.selectVehicle}
+              deviceFootprints={s.deviceFootprintsById}
             />
           </div>
 

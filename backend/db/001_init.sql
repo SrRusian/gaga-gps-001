@@ -20,6 +20,19 @@ CREATE TABLE IF NOT EXISTS device_groups (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- catalogo global de tipos de vehiculo (largo/ancho reales, metros) - solo admin global lo
+-- administra, project_administrator solo asigna un tipo ya existente a sus dispositivos. Usado
+-- para dibujar la silueta real del vehiculo en el mapa (ver web/packages/map-core/vehicleMarker.ts)
+-- - con RTK a precision centimetrica el circulo de precision GPS ya no basta para saber si el
+-- vehiculo (varios metros) iba centrado en su carril/geocerca.
+CREATE TABLE IF NOT EXISTS vehicle_types (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  length_meters DOUBLE PRECISION NOT NULL,
+  width_meters DOUBLE PRECISION NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS devices (
   id SERIAL PRIMARY KEY,
   unique_id VARCHAR(255) UNIQUE NOT NULL,
@@ -28,6 +41,7 @@ CREATE TABLE IF NOT EXISTS devices (
   status VARCHAR(20) DEFAULT 'offline',
   project_id INTEGER REFERENCES projects(id),
   group_id INTEGER REFERENCES device_groups(id),
+  vehicle_type_id INTEGER REFERENCES vehicle_types(id) ON DELETE SET NULL,
   last_update TIMESTAMPTZ,
   attributes JSONB DEFAULT '{}',
   speed_limit_kmh DOUBLE PRECISION,
@@ -35,6 +49,7 @@ CREATE TABLE IF NOT EXISTS devices (
 );
 CREATE INDEX IF NOT EXISTS idx_devices_project ON devices (project_id);
 CREATE INDEX IF NOT EXISTS idx_devices_group ON devices (group_id);
+CREATE INDEX IF NOT EXISTS idx_devices_vehicle_type ON devices (vehicle_type_id);
 
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,

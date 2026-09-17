@@ -123,13 +123,13 @@ export function buildDevicesRouter({
 
   router.post('/', authMiddleware, requireRole('admin', 'project_administrator'), async (req, res) => {
     try {
-      const { uniqueId, name, type, attributes } = req.body;
+      const { uniqueId, name, type, attributes, vehicleTypeId } = req.body;
       if (!uniqueId || !name) {
         return res.status(400).json({ error: 'uniqueId y name son requeridos' });
       }
       // no-admin nunca origina un dispositivo fuera de su propio proyecto
       const projectId = req.user!.role === 'admin' ? req.body.projectId : req.user!.projectId;
-      const device = await deviceRepo.create({ uniqueId, name, type, projectId, attributes });
+      const device = await deviceRepo.create({ uniqueId, name, type, projectId, vehicleTypeId, attributes });
       if (device.project_id != null) {
         await deviceProjectHistoryRepo?.recordChange({
           deviceId: device.unique_id,
@@ -152,7 +152,7 @@ export function buildDevicesRouter({
         return res.status(404).json({ error: 'Dispositivo no encontrado' });
       }
 
-      const { name, type, attributes, groupId, speedLimitKmh } = req.body;
+      const { name, type, attributes, groupId, vehicleTypeId, speedLimitKmh } = req.body;
       const projectId = req.user!.role === 'admin' ? req.body.projectId : undefined;
       const device = await deviceRepo.update(Number(req.params.id), {
         name,
@@ -160,6 +160,7 @@ export function buildDevicesRouter({
         projectId,
         attributes,
         groupId,
+        vehicleTypeId,
         speedLimitKmh,
       });
       if (
