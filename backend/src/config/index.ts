@@ -23,6 +23,9 @@ export interface Env {
   releasesDir: string;
   maxApkUploadMb: number;
   telemetrySharedSecret: string | null;
+  // JSON completo de la cuenta de servicio de Firebase Admin (una sola linea) - null si no se
+  // configuro, ver FirebasePushService.ts (no-op gracioso sin esto, deliberado)
+  firebaseServiceAccountJson: string | null;
   defaultAdminEmail: string;
   defaultAdminPassword: string;
   positionFilter: PositionFilterConfig;
@@ -39,6 +42,7 @@ export const env: Env = {
   releasesDir: process.env.RELEASES_DIR || 'releases',
   maxApkUploadMb: parseInt(process.env.MAX_APK_UPLOAD_MB || '200', 10),
   telemetrySharedSecret: process.env.TELEMETRY_SHARED_SECRET || null,
+  firebaseServiceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT_JSON || null,
 
   defaultAdminEmail: process.env.DEFAULT_ADMIN_EMAIL || 'admin@gaga.com',
   defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || 'admin',

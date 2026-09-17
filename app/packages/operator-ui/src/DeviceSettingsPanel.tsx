@@ -147,6 +147,7 @@ const EMPTY_RTK_STATUS: RtkStatus = {
   ntripDataRateBps: 0,
   ntripTotalBytes: 0,
   mockLocationActive: false,
+  mockLocationAllowed: false,
   swMapsOutputRunning: false,
   swMapsPort: 11123,
   correctionMode: 'ntrip',
@@ -194,7 +195,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   const [usbDevices, setUsbDevices] = useState<{ deviceId: number; name: string | null }[]>([]);
   const [selectedUsbDeviceId, setSelectedUsbDeviceId] = useState<number | null>(null);
   const [baudRate, setBaudRateInput] = useState(460800);
-  const [swMapsPortInput, setSwMapsPortInput] = useState(11123);
   const [gnssBusy, setGnssBusy] = useState(false);
   const [rtkStatus, setRtkStatus] = useState<RtkStatus>(EMPTY_RTK_STATUS);
   const [mountpoints, setMountpoints] = useState<NtripMountpoint[]>([]);
@@ -207,6 +207,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     active: false,
     developerOptionsEnabled: false,
     wasQrProvisioned: false,
+    exactAlarmsGranted: false,
   });
   const [kioskBusy, setKioskBusy] = useState(false);
   const [kioskError, setKioskError] = useState('');
@@ -325,10 +326,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     AppUpdate.getStatus().then(setUpdateStatus);
     RtkNtrip.getBaudRate().then((r) => setBaudRateInput(r.baudRate));
     RtkNtrip.listUsbDevices().then((r) => setUsbDevices(r.devices));
-    RtkNtrip.getStatus().then((s) => {
-      setRtkStatus(s);
-      setSwMapsPortInput(s.swMapsPort);
-    });
+    RtkNtrip.getStatus().then(setRtkStatus);
 
     const rtkListenerPromise = RtkNtrip.addListener('rtkStatus', (status) => setRtkStatus(status));
     const usbListenerPromise = RtkNtrip.addListener('usbDevicesChanged', (data) => setUsbDevices(data.devices));
@@ -582,34 +580,11 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     await RtkNtrip.startNtrip();
   }
 
-  async function toggleMockLocation() {
-    try {
-      if (rtkStatus.mockLocationActive) {
-        await RtkNtrip.stopMockLocation();
-      } else {
-        await RtkNtrip.startMockLocation();
-      }
-      refreshRtkStatus();
-    } catch (e) {
-      setRtkStatus((prev) => ({
-        ...prev,
-        ntripError: e instanceof Error ? e.message : 'No se pudo cambiar la ubicacion simulada',
-      }));
-    }
-  }
-
-  async function toggleSwMapsOutput() {
-    if (rtkStatus.swMapsOutputRunning) {
-      await RtkNtrip.stopSwMapsOutput();
-    } else {
-      await RtkNtrip.startSwMapsOutput({ port: swMapsPortInput });
-    }
-    refreshRtkStatus();
-  }
-
   // "Servicio GNSS" agrupa las 4 piezas (USB, NTRIP, ubicacion simulada, salida SW Maps) en un
   // solo control - cada pieza sigue siendo un plugin nativo independiente, esto solo orquesta
-  // el orden de arranque/apagado desde el front
+  // el orden de arranque/apagado desde el front. Salida SW Maps sin UI propia (sin uso real
+  // confirmado por el equipo) - se sigue arrancando en el puerto fijo de siempre para no perder
+  // la funcion nativa, solo se quito el control manual del panel de Ajustes.
   async function activateGnssService() {
     setGnssBusy(true);
     try {
@@ -620,7 +595,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
       if (activeNtripProfile) await applyNtripConfig(activeNtripProfile);
       await RtkNtrip.startNtrip().catch(() => {});
       await RtkNtrip.startMockLocation().catch(() => {});
-      await RtkNtrip.startSwMapsOutput({ port: swMapsPortInput }).catch(() => {});
+      await RtkNtrip.startSwMapsOutput({ port: 11123 }).catch(() => {});
     } finally {
       await refreshRtkStatus();
       setGnssBusy(false);
@@ -687,7 +662,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     setNtripProfiles(listNtripProfiles());
 
     await updateBaudRate(460800);
-    setSwMapsPortInput(11123);
     await RtkNtrip.startSwMapsOutput({ port: 11123 }).catch(() => {});
     await refreshRtkStatus();
   }
@@ -740,8 +714,10 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     }
     const confirmed = confirm(
       'Esto activa el Modo Kiosko: la tableta va a quedar bloqueada dentro de esta app - sin ' +
-        'barra de estado, sin boton de inicio/recientes. Solo se puede salir desde aqui mismo ' +
-        '(Ajustes), con la contrasena de ajustes.\n\n¿Continuar?',
+        'barra de estado, sin boton de inicio/recientes/encendido/volumen. Configura RTK y ' +
+        '"Alarmas y recordatorios" antes de activar esto si todavia no lo hiciste - una vez ' +
+        'activo, Lock Task Mode impide llegar a cualquier Ajuste de Android. Solo se puede salir ' +
+        'desde aqui mismo (Ajustes), con la contrasena de ajustes.\n\n¿Continuar?',
     );
     if (!confirmed) return;
     setKioskBusy(true);
@@ -785,6 +761,14 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   // cualquier tableta (use RTK o no), rompiendole el GPS real sin que nadie lo pidiera.
   async function openDeveloperOptionsSettings() {
     await Kiosk.openDeveloperOptions().catch(() => {});
+  }
+
+  // bug real confirmado en hardware: Device Owner NO recibe SCHEDULE_EXACT_ALARM otorgado solo
+  // (contrario a lo que se asumia antes) - sin esto, la suspension por perdida de corriente tarda
+  // varios segundos/minutos mas de lo configurado. refreshState() (poll cada 4s) ya recoge el
+  // cambio solo despues de concederlo en Ajustes, no hace falta un boton de "verificar" aparte.
+  async function openExactAlarmSettings() {
+    await Kiosk.openExactAlarmSettings().catch(() => {});
   }
 
   async function retryMockLocationCheck() {
@@ -883,10 +867,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
       <div className="ds-overlay">
         <div className="ds-card">
           <h2>Configurando tableta…</h2>
-          <p className="ds-hint">
-            Esta tableta se aprovisionó por código QR - configurando servidor, envío de posición y
-            NTRIP de fábrica sola. Esto tarda unos segundos, no cierres la app.
-          </p>
+          <p className="ds-hint">Configurando servidor, NTRIP y envío de posición - no cierres la app.</p>
         </div>
       </div>
     );
@@ -1034,11 +1015,9 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
 
         <section className="ds-section">
           <h3>Receptor RTK y correccion NTRIP</h3>
-          <p className="ds-hint">
-            Modo de correccion: NTRIP Client (unico disponible - PointPerfect y USB Serial vendran despues).
-          </p>
+          <p className="ds-hint">Modo de correccion: NTRIP Client.</p>
 
-          {!rtkStatus.mockLocationActive && (
+          {!rtkStatus.mockLocationAllowed && (
             <div className="ds-hint" style={{ border: '1px solid #d29922', borderRadius: 6, padding: 10 }}>
               <p>
                 <strong>Pendiente:</strong> esta tableta todavia no esta configurada como app de
@@ -1062,12 +1041,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
               </div>
             </div>
           )}
-          {rtkStatus.mockLocationActive && (
-            <p className="ds-hint" style={{ color: '#3fb950' }}>
-              ✓ Ubicacion simulada configurada - lista para el receptor RTK.
-            </p>
-          )}
-
           <div className="ds-actions">
             <button onClick={openCreateNtripProfileModal}>+ Nueva configuracion NTRIP</button>
             {ntripProfileMessage && <span className="ds-saved">{ntripProfileMessage}</span>}
@@ -1149,12 +1122,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
               {rtkStatus.usbConnected ? 'Desconectar' : 'Conectar'}
             </button>
           </div>
-          <p className="ds-hint">
-            El receptor se conecta solo al enchufarlo - siempre, sin excepcion, sin pedir
-            confirmacion. Al conectar arranca tambien NTRIP (con la configuracion activa de
-            arriba, si ya tiene mount point) y la ubicacion simulada; al desconectarlo, todo se
-            apaga solo y la tableta vuelve a su GPS normal.
-          </p>
         </section>
 
         {showNtripProfileModal && ntripProfileForm && (
@@ -1233,12 +1200,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
                 <option value="v1">V1</option>
                 <option value="v2">V2</option>
               </select>
-              <p className="ds-hint">
-                V2 (default) usa el protocolo NTRIP moderno sobre HTTP/1.1 - funciona con la
-                mayoria de casters actuales, incluido EarthScope. V1 manda el formato minimo
-                original sin esos headers - usalo solo si el proveedor del caster pide
-                compatibilidad antigua.
-              </p>
+              <p className="ds-hint">V2 es el default (recomendado) - usa V1 solo si el caster lo pide.</p>
               {ntripProfileFormError && <div className="ds-error-block">{ntripProfileFormError}</div>}
               <div className="ds-actions">
                 <button onClick={saveNtripProfileModal}>Guardar</button>
@@ -1274,22 +1236,9 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
         <section className="ds-section">
           <h3>Salidas</h3>
           <label className="ds-toggle-row">
-            <input type="checkbox" checked={rtkStatus.mockLocationActive} onChange={toggleMockLocation} />
-            Ubicacion simulada (mock location) - alimenta el fix RTK al sistema
+            <input type="checkbox" checked={rtkStatus.mockLocationActive} disabled readOnly />
+            Ubicacion simulada (mock location)
           </label>
-          <label className="ds-toggle-row">
-            <input type="checkbox" checked={rtkStatus.swMapsOutputRunning} onChange={toggleSwMapsOutput} />
-            Output to SW Maps - retransmite el NMEA por TCP local
-          </label>
-          <label className="ds-label">Puerto SW Maps</label>
-          <input
-            type="number"
-            value={swMapsPortInput}
-            onChange={(e) => setSwMapsPortInput(Number(e.target.value))}
-          />
-          <p className="ds-hint">
-            En SW Maps: External GNSS &gt; TCP &gt; 127.0.0.1:{swMapsPortInput || rtkStatus.swMapsPort}
-          </p>
         </section>
 
         <section className="ds-section">
@@ -1317,14 +1266,11 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
           <h3>Modo Kiosko</h3>
           <p className="ds-hint">
             {kioskStatus.isDeviceOwner
-              ? 'Esta tableta ya esta aprovisionada (Device Owner) - el Modo Kiosko esta disponible.'
-              : 'Esta tableta todavia NO esta aprovisionada - hace falta el comando adb de una sola vez, o resetear de fabrica y escanear el QR de aprovisionamiento del panel de Admin (Sistema > Actualizacion de la app), antes de poder activar el Modo Kiosko. Esto no se puede arreglar desde aqui mismo, hay que reiniciar el proceso de instalacion.'}
+              ? 'Tableta aprovisionada (Device Owner) - Modo Kiosko disponible.'
+              : 'Tableta sin aprovisionar - hace falta el comando adb (o QR) antes de activar el Modo Kiosko.'}
           </p>
           {!hasSettingsPassword() && (
-            <p className="ds-hint">
-              Sin contrasena de ajustes todavia - ponle una arriba en "Bloqueo de ajustes" antes de
-              activar el kiosko, es la unica forma de volver a salir despues.
-            </p>
+            <p className="ds-hint">Ponle contrasena en "Bloqueo de ajustes" antes de activar el kiosko.</p>
           )}
           <div className="ds-switch-row">
             <label className="ds-switch">
@@ -1342,22 +1288,29 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
           </div>
           {kioskError && <div className="ds-error-block">{kioskError}</div>}
           <p className="ds-hint">
-            Con esto activado: la app se abre sola al encender la tableta, sin barra de estado ni
-            boton de inicio/recientes - nadie puede salir de la app desde fuera de aqui. Para
-            salir (mantenimiento, actualizar la app, etc.) hay que volver a este mismo panel de
-            Ajustes y apagar el switch - por eso necesita contrasena de ajustes puesta.
+            Bloquea la tableta dentro de la app. Para salir: vuelve aqui con la contrasena y apaga
+            el switch.
           </p>
+          {!kioskStatus.exactAlarmsGranted && (
+            <div className="ds-hint" style={{ border: '1px solid #d29922', borderRadius: 6, padding: 10 }}>
+              <p>
+                <strong>Pendiente:</strong> falta conceder "Alarmas y recordatorios" - sin esto, la
+                suspension por perdida de corriente y la actualizacion automatica pueden tardar
+                varios segundos/minutos mas de lo configurado.
+              </p>
+              <div className="ds-actions">
+                <button onClick={openExactAlarmSettings}>Abrir Ajustes de Android</button>
+              </div>
+            </div>
+          )}
           {kioskStatus.isDeviceOwner && (
             <div className="ds-actions" style={{ marginTop: 10 }}>
               <button onClick={releaseDeviceOwner} disabled={kioskBusy}>
                 Liberar Device Owner (para desinstalar)
               </button>
               <p className="ds-hint">
-                Solo hace falta si necesitas desinstalar esta app por completo desde Ajustes de
-                Android - normalmente bloqueado mientras es Device Owner, y "adb shell dpm
-                remove-active-admin"/"pm clear" estan bloqueados por el shell en builds de
-                produccion. Apaga el Modo Kiosko y las actualizaciones automaticas silenciosas -
-                hay que reaprovisionar (comando adb) para recuperarlos despues.
+                Solo si necesitas desinstalar la app - hay que reaprovisionar con adb para
+                recuperar Kiosko/actualizaciones despues.
               </p>
             </div>
           )}
@@ -1398,15 +1351,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
           {(updateError || updateStatus.lastError) && (
             <div className="ds-error-block">{updateError || updateStatus.lastError}</div>
           )}
-          <p className="ds-hint">
-            Con esto activado: la tableta revisa el servidor cada cierto tiempo, y si hay una
-            version mas nueva la descarga, confirma que el archivo llego completo e integro
-            (hash), y la instala sola - sin ningun dialogo en pantalla, aprovechando que esta
-            tableta ya es Device Owner. Si el archivo no pasa la verificacion, se descarta y no
-            se instala nada. Pensado para tabletas fuera de alcance fisico (montadas en un
-            vehiculo) - publicar una version nueva se hace subiendo el APK a
-            POST /api/app/release desde una cuenta de admin.
-          </p>
+          <p className="ds-hint">Revisa el servidor y se actualiza sola, sin avisos en pantalla.</p>
         </section>
 
         <section className="ds-section">
@@ -1422,30 +1367,19 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
               Reiniciar
             </button>
           </div>
-          <p className="ds-hint">
-            Activa/apaga USB + NTRIP + ubicacion simulada + salida SW Maps juntos, en el orden
-            correcto. El receptor ya se conecta y arranca todo esto solo al enchufarlo (ver
-            arriba) - este boton es para forzarlo a mano si hace falta.
-          </p>
+          <p className="ds-hint">Activa/apaga USB + NTRIP + ubicacion simulada juntos.</p>
           <div className="ds-actions">
             <button className="ds-remove" onClick={handleRestoreDefaults}>
               Restaurar valores por defecto
             </button>
           </div>
-          <p className="ds-hint">
-            Regresa servidor, NTRIP, envio continuo, baud rate y salida SW Maps a los mismos
-            valores de fabrica que se aplican solos al activar Modo Operador la primera vez.
-          </p>
+          <p className="ds-hint">Regresa servidor, NTRIP y envio a los valores de fabrica.</p>
         </section>
           </>
         ) : (
           <section className="ds-section">
             <h3>Modo operador</h3>
-            <p className="ds-hint">
-              Este dispositivo esta en modo basico - solo inicio de sesion, sin permisos ni
-              envio de datos adicionales. Si esta tableta se va a instalar en un vehiculo,
-              activa el modo operador con el codigo interno del equipo.
-            </p>
+            <p className="ds-hint">Modo basico - sin envio de datos. Activa el modo operador con el codigo del equipo.</p>
             <input
               placeholder="Codigo de 4 digitos"
               value={operatorModeCodeInput}

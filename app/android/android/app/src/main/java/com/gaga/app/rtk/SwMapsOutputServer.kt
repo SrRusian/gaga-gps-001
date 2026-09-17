@@ -8,6 +8,10 @@ import kotlin.concurrent.thread
 // Replica "Output to SW Maps" de GNSS Master: un servidor TCP local que retransmite el NMEA crudo
 // del receptor (GGA/RMC/etc, tal cual llega) a cualquier app que se conecte como cliente - SW Maps
 // y apps similares de GIS aceptan un "GNSS externo por TCP" apuntando a 127.0.0.1:<puerto>.
+// Sin uso real confirmado por el equipo (GAGA no usa SW Maps hoy) - se quito el control manual del
+// panel de Ajustes (DeviceSettingsPanel.tsx) a proposito, pero la pieza nativa se deja intacta y
+// arrancando en el puerto fijo de siempre (11123) via activateGnssService()/applyDefaultProvisioning()
+// - listo para usarse de nuevo con solo agregar UI, sin tocar nada de este archivo.
 class SwMapsOutputServer {
     private var serverSocket: ServerSocket? = null
     private val clients = mutableListOf<Socket>()

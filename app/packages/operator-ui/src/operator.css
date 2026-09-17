@@ -239,6 +239,19 @@
 .op-info-value--offline {
   color: var(--op-text-muted);
 }
+.op-battery-charging {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #3fb950;
+}
+.op-battery-charging-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3fb950;
+  flex-shrink: 0;
+}
 #op-nearest-stale {
   font-size: 10px;
   color: var(--op-warning);

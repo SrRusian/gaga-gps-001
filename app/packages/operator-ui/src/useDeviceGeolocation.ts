@@ -1,5 +1,5 @@
 import { PositionFilterService } from '@gaga-gps/map-core';
-import { RtkNtrip } from '@gaga-gps/android-bridge';
+import { Power, RtkNtrip } from '@gaga-gps/android-bridge';
 import { useEffect, useRef, useState } from 'react';
 
 export interface DeviceGeolocation {
@@ -59,7 +59,9 @@ export function useDeviceGeolocation() {
     // solo cada cuánto entrega un fix nuevo (en la práctica, ~1/seg en Android sin importar qué
     // tan rápido produzca datos el GPS/receptor RTK real) - eso es justo lo que rtkFix evita abajo.
     let watchId: number | null = null;
-    if (supported) {
+
+    function startWatching() {
+      if (watchId !== null || !supported) return;
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
           setError(null);
@@ -81,6 +83,19 @@ export function useDeviceGeolocation() {
       );
     }
 
+    // navigator.geolocation.watchPosition sigue pidiendo el chip GPS real aunque RTK ya se haya
+    // desconectado - es independiente del GPS nativo, que power/PowerSuspendAlarmReceiver.kt ya
+    // apaga por su cuenta. Sin esto, la suspension por perdida de corriente no era total: el
+    // navegador seguia pidiendo posicion aunque la pantalla estuviera apagada.
+    function stopWatching() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+    }
+
+    startWatching();
+
     // fuente rápida opcional: solo emite mientras el receptor RTK está conectado y entregando
     // fixes reales (ver RtkNtripPlugin.emitFix, Kotlin) - al ritmo real del receptor (5-10Hz
     // típico), sin pasar por el límite de ~1/seg de arriba. Fuera de la app nativa o sin RTK
@@ -100,9 +115,18 @@ export function useDeviceGeolocation() {
       removeRtkListener = () => handle.remove();
     });
 
+    Power.getStatus().then((status) => {
+      if (status.suspended) stopWatching();
+    });
+    const powerListenerPromise = Power.addListener('powerStatus', (status) => {
+      if (status.suspended) stopWatching();
+      else startWatching();
+    });
+
     return () => {
-      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      stopWatching();
       removeRtkListener?.();
+      powerListenerPromise.then((h) => h.remove());
     };
   }, [supported]);
 

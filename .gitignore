@@ -6,3 +6,4 @@ CLAUDE.md
 .claude/
 files/
 app/android/www/
+app/android/android/app/google-services.json

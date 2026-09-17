@@ -1,0 +1,200 @@
+/* Barra superior compartida por los shells de Admin y Supervisor/Encargado - colores fijos,
+   no variables de tema (ad-app / sup-app), a proposito: este componente vive fuera de
+   management/ y monitor/, y los dos paneles ya usan la misma paleta oscura con los mismos
+   valores */
+
+.gg-topbar {
+  flex-shrink: 0;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 18px;
+  background: #14171c;
+  border-bottom: 1px solid #262b33;
+  z-index: 30;
+}
+
+.gg-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.gg-topbar-brand-pin {
+  color: #4f8ff0;
+}
+.gg-topbar-brand-text {
+  display: flex;
+  gap: 0.28em;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: 0.4px;
+  line-height: 1;
+}
+.gg-topbar-brand-text b {
+  color: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #cfd6dd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.gg-topbar-brand-text span {
+  color: #008cff;
+  background: linear-gradient(180deg, #00c6ff 0%, #008cff 50%, #0066ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gg-topbar-nav {
+  display: flex;
+  gap: 4px;
+}
+.gg-topbar-nav button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: #8b949e;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.gg-topbar-nav button:hover {
+  background: #1a1e24;
+  color: #e8eaed;
+}
+.gg-topbar-nav button.active {
+  background: #1a1e24;
+  color: #4f8ff0;
+  font-weight: 600;
+}
+
+.gg-topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.gg-topbar-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.25;
+}
+.gg-topbar-clock-time {
+  font-size: 13px;
+  color: #e8eaed;
+  font-variant-numeric: tabular-nums;
+}
+.gg-topbar-clock-date {
+  font-size: 11px;
+  color: #8b949e;
+  text-transform: capitalize;
+}
+.gg-topbar-conn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #8b949e;
+  white-space: nowrap;
+}
+
+.gg-topbar-user {
+  position: relative;
+}
+.gg-topbar-user-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: #e8eaed;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.gg-topbar-user-btn:hover,
+.gg-topbar-user-btn.open {
+  background: #1a1e24;
+  border-color: #262b33;
+}
+.gg-topbar-user-avatar {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid #262b33;
+  background: #1a1e24;
+  display: grid;
+  place-items: center;
+  color: #8b949e;
+}
+.gg-topbar-user-name {
+  white-space: nowrap;
+}
+.gg-topbar-user-role {
+  color: #8b949e;
+  font-size: 12px;
+}
+.gg-topbar-user-caret {
+  color: #8b949e;
+  transition: transform 0.15s ease;
+}
+.gg-topbar-user-btn.open .gg-topbar-user-caret {
+  transform: rotate(180deg);
+}
+.gg-topbar-user-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 168px;
+  padding: 4px;
+  background: #14171c;
+  border: 1px solid #262b33;
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  z-index: 40;
+}
+.gg-topbar-user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: #e8eaed;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.gg-topbar-user-menu-item:hover {
+  background: #1a1e24;
+  color: #e5484d;
+}
+
+@media (max-width: 860px) {
+  .gg-topbar {
+    height: auto;
+    min-height: 52px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .gg-topbar-clock {
+    display: none;
+  }
+  .gg-topbar-user-name {
+    display: none;
+  }
+}

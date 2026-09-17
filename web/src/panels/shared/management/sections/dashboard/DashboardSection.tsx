@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { toGeofence } from '../../geofenceMapper';
 import { useAdminAuth } from '../../useAdminAuth';
 import { DashboardStats } from './components/DashboardStats';
-import { DashboardToolbar, type Overlay } from './components/DashboardToolbar';
+import { DashboardSidebar, type Overlay } from './components/DashboardSidebar';
 import { DevicesModal } from './components/DevicesModal';
 import { EquipmentModal } from './components/EquipmentModal';
 import { EquipmentPlacePanel } from './components/EquipmentPlacePanel';
@@ -44,6 +44,25 @@ export function DashboardSection() {
   const [selectedProjectId, setSelectedProjectId] = useState<string>('global');
   const [activeOverlay, setActiveOverlay] = useState<Overlay>(null);
   const [historyMode, setHistoryMode] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('gaga_admin_sidebar') === 'collapsed';
+    } catch {
+      return false;
+    }
+  });
+
+  function toggleSidebar() {
+    setSidebarCollapsed((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem('gaga_admin_sidebar', next ? 'collapsed' : 'expanded');
+      } catch {
+        // localStorage no disponible - se queda solo en memoria
+      }
+      return next;
+    });
+  }
 
   const scope: Scope = isAdmin
     ? selectedProjectId === 'global' || selectedProjectId === ''
@@ -188,12 +207,8 @@ export function DashboardSection() {
   }
 
   return (
-    <>
-      <div className="dash-map-bg">
-        <div ref={dashboardMap.containerRef} style={{ width: '100%', height: '100%' }} />
-      </div>
-
-      <DashboardToolbar
+    <div className="dash-layout">
+      <DashboardSidebar
         isAdmin={isAdmin}
         scope={scope}
         scopeLabel={scopeLabel}
@@ -206,56 +221,64 @@ export function DashboardSection() {
         historyMode={historyMode}
         onEnterHistoryMode={history.enterHistoryMode}
         onExitHistoryMode={history.exitHistoryMode}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebar}
       />
 
-      {historyMode && (
-        <HistoryFilterBar
-          scopedDevices={devicesAdmin.scopedDevices}
-          historyDeviceId={history.historyDeviceId}
-          setHistoryDeviceId={history.setHistoryDeviceId}
-          historyFrom={history.historyFrom}
-          setHistoryFrom={history.setHistoryFrom}
-          historyTo={history.historyTo}
-          setHistoryTo={history.setHistoryTo}
-          onSearch={history.loadHistoryPoints}
-          onExportCsv={history.exportHistoryCsv}
-          csvExporting={history.csvExporting}
-        />
-      )}
+      <div className="dash-map-area">
+        <div className="dash-map-bg">
+          <div ref={dashboardMap.containerRef} style={{ width: '100%', height: '100%' }} />
+        </div>
 
-      <DashboardStats
-        deviceCount={devicesAdmin.scopedDevices.length}
-        onlineCount={onlineCount}
-        geofenceCount={geofencesAdmin.scopedGeofences.length}
-        equipmentCount={equipmentAdmin.scopedEquipment.length}
-      />
-
-      <div className="dash-right-stack">
-        <MapModeSelector mode={dashboardMap.mapMode} onChange={dashboardMap.setMapMode} satelliteAvailable={hasMaps} />
-
-        {!hasMaps && (
-          <div className="gg-no-maps-banner">
-            <span>
-              No hay ningún mapa satelital importado todavía para {scopeLabel} - los modos
-              Satelital/Mixto no mostrarán nada (Calles sigue disponible).
-            </span>
-          </div>
+        {historyMode && (
+          <HistoryFilterBar
+            scopedDevices={devicesAdmin.scopedDevices}
+            historyDeviceId={history.historyDeviceId}
+            setHistoryDeviceId={history.setHistoryDeviceId}
+            historyFrom={history.historyFrom}
+            setHistoryFrom={history.setHistoryFrom}
+            historyTo={history.historyTo}
+            setHistoryTo={history.setHistoryTo}
+            onSearch={history.loadHistoryPoints}
+            onExportCsv={history.exportHistoryCsv}
+            csvExporting={history.csvExporting}
+          />
         )}
 
-        <GeofenceDrawPanel scope={scope} projects={projects} geofence={geofencesAdmin} />
-        <EquipmentPlacePanel scope={scope} projects={projects} equipment={equipmentAdmin} />
-      </div>
+        <DashboardStats
+          deviceCount={devicesAdmin.scopedDevices.length}
+          onlineCount={onlineCount}
+          geofenceCount={geofencesAdmin.scopedGeofences.length}
+          equipmentCount={equipmentAdmin.scopedEquipment.length}
+        />
 
-      <HistoryPlayback
-        historyMode={historyMode}
-        historyPoints={history.historyPoints}
-        historySliderIndex={history.historySliderIndex}
-        setHistorySliderIndex={history.setHistorySliderIndex}
-        historyPlaying={history.historyPlaying}
-        onTogglePlayback={history.toggleHistoryPlayback}
-        showHistoryPanel={history.showHistoryPanel}
-        setShowHistoryPanel={history.setShowHistoryPanel}
-      />
+        <div className="dash-right-stack">
+          <MapModeSelector mode={dashboardMap.mapMode} onChange={dashboardMap.setMapMode} satelliteAvailable={hasMaps} />
+
+          {!hasMaps && (
+            <div className="gg-no-maps-banner">
+              <span>
+                No hay ningún mapa satelital importado todavía para {scopeLabel} - los modos
+                Satelital/Mixto no mostrarán nada (Calles sigue disponible).
+              </span>
+            </div>
+          )}
+
+          <GeofenceDrawPanel scope={scope} projects={projects} geofence={geofencesAdmin} />
+          <EquipmentPlacePanel scope={scope} projects={projects} equipment={equipmentAdmin} />
+        </div>
+
+        <HistoryPlayback
+          historyMode={historyMode}
+          historyPoints={history.historyPoints}
+          historySliderIndex={history.historySliderIndex}
+          setHistorySliderIndex={history.setHistorySliderIndex}
+          historyPlaying={history.historyPlaying}
+          onTogglePlayback={history.toggleHistoryPlayback}
+          showHistoryPanel={history.showHistoryPanel}
+          setShowHistoryPanel={history.setShowHistoryPanel}
+        />
+      </div>
 
       <ProjectsModal
         open={activeOverlay === 'projects'}
@@ -334,6 +357,6 @@ export function DashboardSection() {
           onClose={() => dashboardMap.setSelectedVehicle(null)}
         />
       )}
-    </>
+    </div>
   );
 }

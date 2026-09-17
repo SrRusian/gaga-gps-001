@@ -6,8 +6,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.wifi.WifiManager
 import android.os.Build
 import com.gaga.app.BuildConfig
+import com.gaga.app.power.PowerPrefs
 import com.gaga.app.traccar.TraccarPrefs
 import org.json.JSONObject
 import java.io.File
@@ -15,12 +21,19 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 // revisa el servidor por una version nueva del APK (ver backend/src/api/routes/app-update.routes.ts),
 // la descarga a almacenamiento privado, verifica su integridad (sha256 contra lo publicado) y solo
 // entonces la instala en silencio via PackageInstaller - requiere que la app ya sea Device Owner
 // (mismo aprovisionamiento que el kiosko, ver kiosk/KioskManager.kt); sin eso, Android puede pedir
-// confirmacion en pantalla para instalar, o directamente rechazar el commit
+// confirmacion en pantalla para instalar, o directamente rechazar el commit.
+//
+// Funciona tambien con la tableta suspendida por perdida de corriente (pedido explicito) -
+// checkAndInstall() enciende WiFi solo, espera a tener red de verdad, revisa/descarga/instala, y
+// lo vuelve a apagar al terminar (ver ensureNetworkForSuspendedCheck/PowerPrefs.
+// disableWifiIfStillSuspended) - pantalla/GPS/RTK nunca se tocan, la suspension sigue intacta.
 object AppUpdateManager {
     @Volatile var isChecking: Boolean = false
         private set
@@ -34,9 +47,64 @@ object AppUpdateManager {
         if (isChecking) return
         isChecking = true
         try {
-            runCheck(context)
+            val turnedOnWifiForThisCheck = ensureNetworkForSuspendedCheck(context)
+            try {
+                runCheck(context)
+            } finally {
+                // solo re-apaga si esta funcion fue quien lo encendio - si la tableta ya tenia
+                // WiFi por su cuenta (no suspendida), nunca se toca aqui
+                if (turnedOnWifiForThisCheck) PowerPrefs.disableWifiIfStillSuspended(context)
+            }
         } finally {
             isChecking = false
+        }
+    }
+
+    // pedido explicito: la revision diaria de las 2 AM debe funcionar tambien con la tableta
+    // suspendida por perdida de corriente (WiFi apagado a proposito, ver
+    // power/PowerSuspendAlarmReceiver.kt) - sin esto, esa revision fallaria en silencio por falta
+    // de red cada dia hasta que volviera la corriente. Enciende WiFi solo el tiempo necesario para
+    // esta revision (checkAndInstall() la re-apaga en su finally, mas el respaldo en
+    // BootReceiver.kt por si el proceso muere a mitad de una instalacion real) - pantalla/GPS/RTK
+    // NUNCA se tocan aqui, solo la red, lo minimo necesario.
+    private fun ensureNetworkForSuspendedCheck(context: Context): Boolean {
+        if (!PowerPrefs.getSuspended(context)) return false
+        try {
+            val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            wifiManager.isWifiEnabled = true
+        } catch (_: Exception) {
+            return false
+        }
+        waitForNetwork(context, timeoutMs = 25_000L)
+        return true
+    }
+
+    // bloquea (con tope de tiempo) hasta que WiFi tenga de verdad conectividad a internet - prender
+    // el radio no significa que ya este asociado/con IP; sin esto, fetchLatest()/downloadApk()
+    // fallarian con la red todavia negociando. Seguro bloquear aqui - checkAndInstall() ya corre en
+    // el hilo de fondo de UpdateCheckReceiver/AppUpdatePlugin, nunca en el hilo principal.
+    private fun waitForNetwork(context: Context, timeoutMs: Long) {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val latch = CountDownLatch(1)
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                latch.countDown()
+            }
+        }
+        try {
+            connectivityManager.registerNetworkCallback(request, callback)
+            latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+        } catch (_: Exception) {
+        } finally {
+            try {
+                connectivityManager.unregisterNetworkCallback(callback)
+            } catch (_: Exception) {
+            }
         }
     }
 

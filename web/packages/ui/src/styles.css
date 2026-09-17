@@ -169,6 +169,13 @@
   padding: 12px;
   text-align: center;
 }
+.gg-stat-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 6px;
+  color: #8b949e;
+}
 .gg-stat-card__label {
   font-size: 10px;
   color: #8b949e;
@@ -301,76 +308,6 @@
 }
 .gg-connection-dot.connected {
   background: #4f8ff0;
-}
-
-.gg-panel-header {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
-  height: 52px;
-  background: rgba(20, 23, 28, 0.92);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid #262b33;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-}
-.gg-panel-header-left {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-}
-.gg-panel-header h1 {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  color: #e8eaed;
-  white-space: nowrap;
-}
-@media (max-width: 860px) {
-  .gg-panel-header {
-    height: 92px;
-    flex-direction: column;
-    align-items: stretch;
-    padding: 8px 12px;
-    gap: 6px;
-  }
-  .gg-panel-header-left {
-    justify-content: space-between;
-  }
-}
-
-.gg-panel-header-status {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  color: #8b949e;
-}
-.gg-panel-header-connection {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.gg-panel-header-role {
-  color: #8b949e;
-}
-.gg-panel-header-logout {
-  background: none;
-  border: 1px solid #262b33;
-  color: #8b949e;
-  padding: 6px 14px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-}
-.gg-panel-header-logout:hover {
-  border-color: #e5484d;
-  color: #e5484d;
 }
 
 .gg-vehicle-detail {
