@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 39,
-      "versionName": "1.0.35-lazy-mock-location",
+      "versionCode": 47,
+      "versionName": "1.0.43-battery-report",
       "outputFile": "app-release.apk"
     }
   ],

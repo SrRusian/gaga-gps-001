@@ -190,6 +190,10 @@ export default function OperatorApp() {
         </div>
       </header>
 
+      <div id="op-alert-message" className={alert.severity ?? ''}>
+        {alert.message}
+      </div>
+
       {!checking && myDisplay && (
         <>
           <div className="op-map-area">
@@ -292,9 +296,6 @@ export default function OperatorApp() {
         id="op-alert-overlay"
         className={alert.severity === 'info' ? '' : (alert.severity ?? '')}
       />
-      <div id="op-alert-message" className={alert.severity ?? ''}>
-        {alert.message}
-      </div>
 
       {!deviceId && (
         <div className="op-full-overlay active">

@@ -26,6 +26,10 @@ const ERROR_CODE_LABEL: Record<number, string> = {
 
 const LOCAL_FILTER_DEVICE_KEY = 'local-device';
 
+// mientras haya llegado un fix nativo (rtkFix o gpsFix) hace menos de esto, navigator.geolocation
+// se ignora por completo - ver comentario junto a lastNativeFixAtRef
+const NATIVE_PRIORITY_WINDOW_MS = 3000;
+
 export function useDeviceGeolocation() {
   const supported = typeof navigator !== 'undefined' && 'geolocation' in navigator;
   const [position, setPosition] = useState<DeviceGeolocation | null>(null);
@@ -33,10 +37,23 @@ export function useDeviceGeolocation() {
   const filterRef = useRef<PositionFilterService | null>(null);
   if (!filterRef.current) filterRef.current = new PositionFilterService();
 
-  // ultimo timestamp aceptado, de cualquiera de las 2 fuentes - evita que un fix mas lento en
+  // ultimo timestamp aceptado, de cualquiera de las fuentes - evita que un fix mas lento en
   // llegar (ej. navigator.geolocation, que el navegador entrega ~1/seg) pise uno mas fresco que ya
   // se mostro (ej. rtkFix nativo, hasta 5-10/seg con el receptor RTK conectado - ver mas abajo)
   const lastAcceptedAtRef = useRef<number>(0);
+
+  // reloj real (Date.now(), no el timestamp del propio fix) de la ultima vez que llego un fix
+  // nativo - bug real reportado en campo: con RTK conectado pero sin fix todavia (buscando
+  // satelites), GPS_PROVIDER nunca se secuestra (ver MockLocationFeeder), asi que gpsFix entrega
+  // el GPS crudo real de la tableta MIENTRAS navigator.geolocation sigue entregando su propia
+  // lectura (normalmente Fused Location de Play Services, GPS+red combinados) - dos fuentes con
+  // sesgo ligeramente distinto entre si, compitiendo por timestamp mas reciente cada segundo, se
+  // veia como el marcador "teletransportandose" unos metros y regresando con el vehiculo detenido,
+  // y el circulo de precision creciendo/achicandose al alternar entre la exactitud reportada por
+  // cada una. Fix: mientras haya un fix nativo reciente, navigator.geolocation se ignora del todo
+  // - solo compite consigo mismo cuando el nativo lleva mas de NATIVE_PRIORITY_WINDOW_MS callado
+  // (servicio de envio continuo apagado, o fuera de la app nativa).
+  const lastNativeFixAtRef = useRef<number>(0);
 
   useEffect(() => {
     function tryAccept(candidate: DeviceGeolocation) {
@@ -65,6 +82,7 @@ export function useDeviceGeolocation() {
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
           setError(null);
+          if (Date.now() - lastNativeFixAtRef.current < NATIVE_PRIORITY_WINDOW_MS) return;
           tryAccept({
             latitude: pos.coords.latitude,
             longitude: pos.coords.longitude,
@@ -102,6 +120,7 @@ export function useDeviceGeolocation() {
     // conectado, sencillamente nunca dispara y el hook sigue funcionando solo con la fuente base.
     let removeRtkListener: (() => void) | null = null;
     RtkNtrip.addListener('rtkFix', (fix) => {
+      lastNativeFixAtRef.current = Date.now();
       tryAccept({
         latitude: fix.latitude,
         longitude: fix.longitude,
@@ -115,6 +134,30 @@ export function useDeviceGeolocation() {
       removeRtkListener = () => handle.remove();
     });
 
+    // mismo fix exacto que TraccarSenderService ya mando al servidor (ver RtkNtripPlugin.
+    // emitGpsFix, Kotlin) - bug real reportado en campo: el marcador propio del Operador (via
+    // navigator.geolocation, que en Android normalmente resuelve por Fused Location de Play
+    // Services - GPS+red combinados) se veia en un punto distinto al que Admin/Supervisor ven
+    // desde el servidor (que recibe el GPS_PROVIDER crudo). Se trata como una fuente mas, por
+    // timestamp (mismo tryAccept de arriba) - si rtkFix ya entrego algo mas reciente, esto se
+    // descarta solo sin pisar nada. Fuera de la app nativa, o si el envio continuo esta apagado,
+    // simplemente nunca dispara y el hook sigue funcionando solo con navigator.geolocation.
+    let removeGpsListener: (() => void) | null = null;
+    RtkNtrip.addListener('gpsFix', (fix) => {
+      lastNativeFixAtRef.current = Date.now();
+      tryAccept({
+        latitude: fix.latitude,
+        longitude: fix.longitude,
+        speed: fix.speedMps ?? null,
+        heading: fix.courseDeg ?? null,
+        accuracy: fix.accuracyMeters,
+        altitude: null,
+        timestamp: fix.timestamp,
+      });
+    }).then((handle) => {
+      removeGpsListener = () => handle.remove();
+    });
+
     Power.getStatus().then((status) => {
       if (status.suspended) stopWatching();
     });
@@ -126,6 +169,7 @@ export function useDeviceGeolocation() {
     return () => {
       stopWatching();
       removeRtkListener?.();
+      removeGpsListener?.();
       powerListenerPromise.then((h) => h.remove());
     };
   }, [supported]);

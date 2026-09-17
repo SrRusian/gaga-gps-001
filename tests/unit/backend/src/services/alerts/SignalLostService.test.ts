@@ -15,7 +15,9 @@ describe('SignalLostService', () => {
   };
   let preventiveStopService: {
     isActive: boolean;
+    activatedBy: 'auto' | 'supervisor' | null;
     activate: ReturnType<typeof vi.fn<(reason: string, triggeredBy?: string) => void>>;
+    deactivate: ReturnType<typeof vi.fn<(triggeredBy?: string) => void>>;
   };
   let service: InstanceType<typeof SignalLostService>;
 
@@ -29,7 +31,15 @@ describe('SignalLostService', () => {
     };
     preventiveStopService = {
       isActive: false,
-      activate: vi.fn<(reason: string, triggeredBy?: string) => void>(),
+      activatedBy: null,
+      activate: vi.fn<(reason: string, triggeredBy?: string) => void>((_reason, triggeredBy) => {
+        preventiveStopService.isActive = true;
+        preventiveStopService.activatedBy = (triggeredBy as 'auto' | 'supervisor' | undefined) ?? 'auto';
+      }),
+      deactivate: vi.fn<(triggeredBy?: string) => void>(() => {
+        preventiveStopService.isActive = false;
+        preventiveStopService.activatedBy = null;
+      }),
     };
     service = new SignalLostService({ socketServer, preventiveStopService });
   });
@@ -117,6 +127,45 @@ describe('SignalLostService', () => {
     vi.advanceTimersByTime(20000);
     service.checkAllDevices();
     expect(preventiveStopService.activate).not.toHaveBeenCalled();
+  });
+
+  it('auto-desactiva la parada preventiva cuando el único vehículo en nivel 2 recupera señal', () => {
+    service.recordPosition('T1');
+    vi.advanceTimersByTime(20000);
+    service.checkAllDevices();
+    expect(preventiveStopService.isActive).toBe(true);
+
+    service.recordPosition('T1');
+    expect(preventiveStopService.deactivate).toHaveBeenCalledWith('auto');
+    expect(preventiveStopService.isActive).toBe(false);
+  });
+
+  it('NO auto-desactiva mientras otro vehículo siga en nivel 2', () => {
+    service.recordPosition('T1');
+    service.recordPosition('T2');
+    vi.advanceTimersByTime(20000);
+    service.checkAllDevices();
+    expect(preventiveStopService.isActive).toBe(true);
+
+    service.recordPosition('T1');
+    expect(preventiveStopService.deactivate).not.toHaveBeenCalled();
+    expect(preventiveStopService.isActive).toBe(true);
+
+    service.recordPosition('T2');
+    expect(preventiveStopService.deactivate).toHaveBeenCalledWith('auto');
+    expect(preventiveStopService.isActive).toBe(false);
+  });
+
+  it('NO auto-desactiva una parada preventiva activada manualmente por un supervisor', () => {
+    preventiveStopService.isActive = true;
+    preventiveStopService.activatedBy = 'supervisor';
+    service.recordPosition('T1');
+    vi.advanceTimersByTime(20000);
+    service.checkAllDevices();
+
+    service.recordPosition('T1');
+    expect(preventiveStopService.deactivate).not.toHaveBeenCalled();
+    expect(preventiveStopService.isActive).toBe(true);
   });
 
   it('recordPosition emite signal:recovered (a ambas audiencias) si el dispositivo estaba en alerta', () => {

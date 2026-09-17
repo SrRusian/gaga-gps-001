@@ -108,7 +108,6 @@ export function DashboardSection() {
   const mapsAdmin = useMapsAdmin({ scope, isAdmin });
 
   const dashboardMap = useDashboardMap({
-    scope,
     scopedDevices: devicesAdmin.scopedDevices,
     historyMode,
     hasMaps: mapsAdmin.scopedActiveMaps.length > 0,
@@ -154,6 +153,10 @@ export function DashboardSection() {
   useEffect(() => {
     const socket = createSocket();
     socket.on('maps:active_update', () => mapsAdmin.loadMaps());
+    // reemplaza el poll REST de 7s que useDashboardMap tenía antes - bug real reportado: la
+    // "última actualización" del detalle de vehículo se sentía cada ~8s en vez de cada 1s real
+    // como ya funcionaba en Supervisor (que ya usa este mismo mecanismo de socket)
+    socket.on('fleet:update', (data) => dashboardMap.applyFleetUpdate(data.positions));
     return () => {
       socket.disconnect();
     };
@@ -182,7 +185,11 @@ export function DashboardSection() {
 
   function openCreateGeofence() {
     geofencesAdmin.resetGeofenceForm();
-    geofencesAdmin.setGeoShape('polygon');
+    // onShapeChange (no setGeoShape crudo) - tambien entra a draw_polygon en MapboxDraw. Bug real
+    // reportado: como 'polygon' ya es el shape default, el <select> de Forma nunca disparaba su
+    // onChange al abrir el panel, así que el mapa se quedaba en simple_select y los clics no
+    // creaban vertices - solo cambiar a Línea/corredor (que sí dispara onShapeChange) funcionaba.
+    geofencesAdmin.onShapeChange('polygon');
     setActiveOverlay(null);
     geofencesAdmin.setShowGeoPanel(true);
   }

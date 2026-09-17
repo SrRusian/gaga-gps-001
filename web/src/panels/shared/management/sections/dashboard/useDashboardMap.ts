@@ -10,22 +10,19 @@ import {
 } from '@gaga-gps/map-core';
 import type { Position } from '@gaga-gps/shared-types';
 import maplibregl from 'maplibre-gl';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveOperatorSession } from '../../../hooks/useActiveOperatorSession';
 import { adminApi } from '../../api';
 import type { DeviceRow } from '../../types';
-import type { Scope } from './scope';
-
 const OFFLINE_THRESHOLD_MS = 45000;
 
 export interface UseDashboardMapOptions {
-  scope: Scope;
   scopedDevices: DeviceRow[];
   historyMode: boolean;
   hasMaps: boolean;
 }
 
-export function useDashboardMap({ scope, scopedDevices, historyMode, hasMaps }: UseDashboardMapOptions) {
+export function useDashboardMap({ scopedDevices, historyMode, hasMaps }: UseDashboardMapOptions) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { map, loaded } = useMapLibreMap(containerRef, { center: [-103.7247, 19.2433], zoom: 12 });
   const [mapMode, setMapMode] = useMapMode('gaga_admin_dash_map_mode', 'streets');
@@ -35,25 +32,38 @@ export function useDashboardMap({ scope, scopedDevices, historyMode, hasMaps }: 
   const [livePositions, setLivePositions] = useState<Record<string, Position>>({});
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
 
+  // fetch inicial una sola vez (no por scope - la respuesta trae la flota completa visible para
+  // este usuario, el filtro por proyecto ya lo hace scopedLivePositions más abajo contra
+  // scopedDevices) - de ahí en adelante las actualizaciones llegan en vivo por socket
+  // (applyFleetUpdate, cableado por DashboardSection.tsx al mismo socket que ya usa para
+  // maps:active_update) en vez de seguir haciendo poll. Bug real reportado: con el poll de 7s la
+  // "última actualización" del detalle de vehículo se sentía cada ~8s, mientras Supervisor (que
+  // ya usa socket) se actualiza cada 1s real.
   useEffect(() => {
     let cancelled = false;
-    async function poll() {
-      try {
-        const res = await fetch('/api/fleet/state');
-        const data = (await res.json()) as { positions: Position[] };
+    fetch('/api/fleet/state')
+      .then((res) => res.json())
+      .then((data: { positions: Position[] }) => {
         if (cancelled) return;
         setLivePositions(Object.fromEntries(data.positions.map((p) => [p.deviceId, p])));
-      } catch {
+      })
+      .catch(() => {
         // Silencioso - es solo un realce visual del mapa.
-      }
-    }
-    poll();
-    const interval = setInterval(poll, 7000);
+      });
     return () => {
       cancelled = true;
-      clearInterval(interval);
     };
-  }, [scope]);
+  }, []);
+
+  const applyFleetUpdate = useCallback((positions: Position[]) => {
+    setLivePositions((prev) => {
+      const next = { ...prev };
+      positions.forEach((p) => {
+        next[p.deviceId] = p;
+      });
+      return next;
+    });
+  }, []);
 
   const scopedLivePositions = useMemo(() => {
     const ids = new Set(scopedDevices.map((d) => d.unique_id));
@@ -166,6 +176,7 @@ export function useDashboardMap({ scope, scopedDevices, historyMode, hasMaps }: 
     mapMode,
     setMapMode,
     livePositions,
+    applyFleetUpdate,
     scopedLivePositions,
     selectedVehicle,
     setSelectedVehicle,

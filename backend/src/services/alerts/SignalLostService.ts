@@ -13,7 +13,9 @@ interface SocketServerLike {
 
 interface PreventiveStopServiceLike {
   isActive: boolean;
+  activatedBy: PreventiveStopTriggeredBy | null;
   activate(reason: string, triggeredBy?: PreventiveStopTriggeredBy): void;
+  deactivate(triggeredBy?: string): void;
 }
 
 interface DeviceManagerLike {
@@ -240,6 +242,21 @@ class SignalLostService {
     }
 
     this._resolveAlertEvent(deviceId);
+    this._maybeAutoClearPreventiveStop(deviceId);
+  }
+
+  // el ALTO TOTAL solo se auto-desactiva si lo disparo esta misma clase (nunca pisa una activacion
+  // manual del supervisor) y si ya no queda NINGUN otro dispositivo en nivel 2 (danger real) - antes
+  // de esto quedaba encendido para siempre hasta que un supervisor lo apagara a mano, aunque el
+  // vehiculo que lo disparo ya hubiera recuperado señal
+  _maybeAutoClearPreventiveStop(recoveredDeviceId: string): void {
+    if (!this.preventiveStopService.isActive) return;
+    if (this.preventiveStopService.activatedBy !== 'auto') return;
+    const stillDown = Object.entries(this.alertLevel).some(
+      ([deviceId, level]) => deviceId !== recoveredDeviceId && level === 'level2',
+    );
+    if (stillDown) return;
+    this.preventiveStopService.deactivate('auto');
   }
 
   _recordAlertEvent(
