@@ -52,6 +52,11 @@ class TraccarSenderService : Service() {
         // opera con RTK centimetrico - vale mas no mandar nada que mandar un punto a 500m de error
         private const val NETWORK_FALLBACK_MAX_ACCURACY_M = 150f
 
+        // margen para aceptar un fix que llega apenas antes de cumplirse el intervalo - ver
+        // sendLocation(). Mas chico que el jitter tipico del chip y muy lejos de permitir un envio
+        // de mas: con el intervalo por default (1s) el espaciado minimo real queda en 850ms.
+        private const val SEND_INTERVAL_TOLERANCE_MS = 150L
+
         @Volatile var isRunning: Boolean = false
             private set
 
@@ -298,7 +303,14 @@ class TraccarSenderService : Service() {
     }
 
     private fun sendLocation(location: Location, now: Long) {
-        if (now - lastSentAtMs < TraccarPrefs.getIntervalMs(applicationContext)) return
+        // La tolerancia NO es cosmetica: sin ella se perdia ~35% de la telemetria. El chip entrega
+        // un fix cada ~1000ms con jitter, y comparar contra el intervalo exacto hacia que un fix
+        // llegado a los 999ms se descartara - el siguiente ya caia a los ~2000ms del ultimo envio.
+        // Medido en produccion con datos reales: 48% de los envios a 1s y 52% a 2s, nada
+        // intermedio (firma inconfundible de un throttle, no del GPS), o sea ~39 posiciones/min en
+        // vez de 60. Con margen, un fix que llega un pelo antes de tiempo si se manda.
+        val intervalMs = TraccarPrefs.getIntervalMs(applicationContext)
+        if (now - lastSentAtMs < intervalMs - SEND_INTERVAL_TOLERANCE_MS) return
         lastSentAtMs = now
         // mismo fix exacto que se manda al servidor, reflejado de inmediato al propio WebView (ver
         // RtkNtripPlugin.emitGpsFix) - bug real reportado en campo: el marcador propio del Operador
