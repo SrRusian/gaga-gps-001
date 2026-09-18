@@ -8,6 +8,14 @@ import { useEffect, useState } from 'react';
 // interferencia del metal/electronica del vehiculo). Aqui el uso es mucho mas tolerante (orientar
 // el mapa/la flecha aproximadamente, no distinguir sentidos opuestos), así que el mismo sensor con
 // ruido de +-10 grados sigue siendo util.
+// cuanto esta girada la pantalla respecto a la orientacion natural del dispositivo. 0 si el sistema
+// no lo expone - ante la duda no se corrige nada, que es el comportamiento de antes.
+function screenAngle(): number {
+  if (typeof window === 'undefined') return 0;
+  const angle = window.screen?.orientation?.angle;
+  return typeof angle === 'number' ? angle : 0;
+}
+
 export function useDeviceOrientation(): number | null {
   const [heading, setHeading] = useState<number | null>(null);
 
@@ -21,7 +29,14 @@ export function useDeviceOrientation(): number | null {
       // navegador) - se invierte para que coincida con 'course'/bearing de este proyecto (grados
       // en sentido horario desde el norte, igual que GPS/MapLibre). Sin verificar en hardware real
       // todavia - si al apuntar la tableta al norte esto no marca ~0, invertir el signo aqui.
-      setHeading((360 - event.alpha) % 360);
+      //
+      // alpha SIEMPRE se mide contra la orientacion NATURAL del dispositivo, no contra como se ve
+      // la pantalla: el navegador no lo remapea al rotar (esto corrige la suposicion contraria que
+      // estaba documentada antes, sin verificar). La tableta va montada acostada, girada 90 grados,
+      // asi que el "arriba" que ve el operador es otro eje del dispositivo - screen.orientation
+      // .angle es exactamente ese giro. Si la orientacion natural de la tableta YA es horizontal,
+      // el angulo vale 0 y esto no cambia nada: solo suma cuando de verdad hace falta.
+      setHeading((360 - event.alpha + screenAngle()) % 360);
     }
 
     // 'deviceorientationabsolute' (Chrome/WebView Android, no Safari) siempre viene marcado
