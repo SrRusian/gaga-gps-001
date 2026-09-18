@@ -9,7 +9,8 @@ export type AlertType =
   | 'incident'
   | 'equipment_variable'
   | 'speed'
-  | 'power_loss';
+  | 'power_loss'
+  | 'restricted_zone';
 
 export type AlertSeverity = 'info' | 'warning' | 'danger';
 

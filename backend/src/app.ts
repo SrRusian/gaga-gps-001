@@ -502,7 +502,7 @@ async function loadPersistedState(): Promise<void> {
     // queda "activa" para siempre aunque el vehiculo ya lleve horas bien. Los detectores re-abren de
     // inmediato si el problema sigue siendo real (checkAllDevices cada 5s, colision/proximity en la
     // siguiente posicion real).
-    for (const alertType of ['signal_lost', 'collision', 'proximity'] as const) {
+    for (const alertType of ['signal_lost', 'collision', 'proximity', 'restricted_zone'] as const) {
       const closed = await alertEventRepo.resolveAllOpenOfType(alertType);
       if (closed > 0) {
         console.log(`${closed} alerta(s) '${alertType}' abierta(s) antes del reinicio, cerrada(s) al arrancar`);

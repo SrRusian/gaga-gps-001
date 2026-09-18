@@ -6,14 +6,18 @@ type Severity = 'warning' | 'danger' | 'info' | null;
 // la severidad SIEMPRE la decide el `type`, nunca la forma/distancia - la forma (circulo, poligono
 // con/sin relleno, linea "debe quedarse dentro"/"no tocar") solo decide CUANDO se dispara esa
 // severidad (ver el WHERE de GeofenceRepository.findMatchingSpatial). Ausente = sin alerta
-// (allowed/discharge/carga son puramente informativas).
+// (allowed/discharge/carga son puramente informativas). 'authorized_route' quedo fuera a proposito
+// (pedido explicito del usuario, corrigiendo el diseño anterior): salir de una ruta autorizada YA NO
+// genera ninguna alerta - su unico proposito ahora es aportar speed_limit_kmh mientras el vehiculo
+// va sobre ella (ver findMatchingSpatial) y servir de referencia para el sistema de distancia entre
+// vehiculos de la misma ruta (CollisionRiskService, via GeofenceRepository.findRouteMembership,
+// consulta completamente aparte que nunca dependio de esta severidad).
 const AREA_SEVERITY: Partial<Record<GeofenceType, 'warning' | 'danger' | 'info'>> = {
   danger: 'danger',
   forbidden: 'danger',
   warning: 'warning',
   maintenance: 'warning',
   parking: 'info',
-  authorized_route: 'warning',
 };
 
 // mensaje/identidad de alerta por tipo - cada tipo alertable tiene su propio texto, no comparte
@@ -27,11 +31,12 @@ const AREA_ALERT_TEXT: Partial<Record<GeofenceType, { message: string; alertType
   warning: { message: 'PRECAUCIÓN - ZONA DE RIESGO - REDUCIR VELOCIDAD', alertType: 'geofence_yellow' },
   maintenance: { message: 'ZONA EN MANTENIMIENTO - PRECAUCIÓN', alertType: 'geofence_maintenance' },
   parking: { message: 'ZONA DE ESTACIONAMIENTO', alertType: 'geofence_parking' },
-  authorized_route: {
-    message: 'FUERA DE RUTA AUTORIZADA - REGRESE AL CAMINO DESIGNADO',
-    alertType: 'geofence_route',
-  },
 };
+
+// gravedad fija para la infraccion de "salio de zona permitida siendo un dispositivo restringido" -
+// no depende de tipo/proximidad como geofenceInfractionSeverity (no es una zona de peligro real, es
+// un limite operativo), ajustable sin tocar arquitectura
+const RESTRICTED_ZONE_INFRACTION_SEVERITY = 7;
 
 // tipos con severidad real (no 'info') - fuente unica de verdad para el buffer de proximidad SQL.
 // 'parking' (severidad 'info') queda fuera a proposito - puramente informativa, nunca genera aviso
@@ -76,6 +81,10 @@ interface EvaluatedPosition {
   // asignado o rumbo confiable todavia (cae al punto crudo de siempre, sin buffer, cero regresion)
   footprintWkt?: string | null;
   accuracy?: number;
+  // TRUE = este dispositivo debe permanecer dentro de cualquier geocerca tipo 'allowed' - salir
+  // genera infraccion + alerta. FALSE (default) = puede entrar/salir libremente, solo queda
+  // registrado en geofence_events. Ver devices.restricted_to_allowed_zone.
+  restrictedToAllowedZone?: boolean;
 }
 
 export interface GeofenceMatchRow {
@@ -126,13 +135,13 @@ interface GeofenceEventRepoLike {
 
 interface AlertEventRepoLike {
   recordOrEscalate(event: {
-    alertType: 'geofence';
+    alertType: 'geofence' | 'restricted_zone';
     severity: 'info' | 'warning' | 'danger';
     deviceId: string;
     message?: string | null;
     metadata?: Record<string, unknown> | null;
   }): Promise<unknown>;
-  resolveOpen(event: { alertType: 'geofence'; deviceId: string }): Promise<unknown>;
+  resolveOpen(event: { alertType: 'geofence' | 'restricted_zone'; deviceId: string }): Promise<unknown>;
 }
 
 interface SocketServerLike {
@@ -148,7 +157,9 @@ class GeofenceAlertService {
   socketServer: SocketServerLike | null;
   activeGeofences: Geofence[];
   activeAlerts: Record<string, Severity>;
-  activeAllowedZones: Record<string, boolean>;
+  // boolean | undefined explicito (no solo Record<string, boolean>) - undefined distingue "nunca se
+  // evaluo este dispositivo todavia" de "ya se evaluo y esta afuera", ver evaluate()
+  activeAllowedZones: Record<string, boolean | undefined>;
   geofenceEventRepo: GeofenceEventRepoLike | null;
   alertEventRepo: AlertEventRepoLike | null;
   infractionRepo: InfractionRepoLike | null;
@@ -215,10 +226,20 @@ class GeofenceAlertService {
       proximityLookaheadMeters: PROXIMITY_LOOKAHEAD_MAX_METERS,
     });
 
-    const wasInAllowed = this.activeAllowedZones[deviceId] ?? false;
-    const inAllowed = matches.some((g) => g.type === 'allowed');
-    if (wasInAllowed && !inAllowed) {
-      this.triggerLeftAllowedZone(deviceId, projectId);
+    // undefined (nunca se evaluo antes) en vez de defaultear a false/true - evita un falso "salio"/
+    // "entro" en la primera posicion real de un dispositivo solo por no conocer su estado anterior
+    const previousInAllowed = this.activeAllowedZones[deviceId];
+    const matchedAllowedZone = matches.find((g) => g.type === 'allowed') ?? null;
+    const inAllowed = matchedAllowedZone !== null;
+    if (previousInAllowed !== undefined && previousInAllowed !== inAllowed) {
+      this._persistEvent(deviceId, inAllowed ? matchedAllowedZone!.id : null, inAllowed ? 'enter' : 'exit', null);
+      if (position.restrictedToAllowedZone) {
+        if (inAllowed) {
+          this._clearRestrictedZoneViolation(deviceId, projectId);
+        } else {
+          this._triggerRestrictedZoneViolation(deviceId, projectId, latitude, longitude);
+        }
+      }
     }
     this.activeAllowedZones[deviceId] = inAllowed;
 
@@ -335,29 +356,90 @@ class GeofenceAlertService {
     }
   }
 
-  // evento puntual de transicion (no un estado sostenido como danger/warning) - "fuera de zona"
-  // segun el cliente significa salir de una zona 'allowed' (verde), severidad info, sin "clear"
-  triggerLeftAllowedZone(deviceId: string, projectId: number | null): void {
-    const message = 'Vehículo salió de zona permitida';
+  // "zona permitida" (verde) es ahora el limite operativo real (ej. contorno completo de la mina) -
+  // solo dispara algo si el DISPOSITIVO esta marcado como restringido (devices.restricted_to_allowed_
+  // zone); uno sin restriccion entra/sale libre, sin ningun aviso, solo queda el registro en
+  // geofence_events (ver evaluate()). Estado independiente de `activeAlerts` a proposito (alert_type
+  // propio 'restricted_zone') - no comparte el mismo slot que danger/warning/info de otras geocercas,
+  // para no repetir el bug real de produccion de esta misma sesion (una severidad enmascarando a otra).
+  _triggerRestrictedZoneViolation(
+    deviceId: string,
+    projectId: number | null,
+    latitude: number,
+    longitude: number,
+  ): void {
+    const message = 'FUERA DE ZONA PERMITIDA - REGRESE DE INMEDIATO';
     const payload = {
-      type: 'geofence_left_allowed',
+      type: 'restricted_zone_violation',
       deviceId,
       message,
-      loop: false,
+      loop: true,
       timestamp: new Date().toISOString(),
     };
 
-    console.log(`Device ${deviceId} salió de una zona permitida`);
+    console.log(`ALERTA ZONA RESTRINGIDA - Device: ${deviceId} salió de la zona permitida`);
 
     if (this.socketServer) {
-      this.socketServer.broadcastToProject(projectId, 'alert:info', payload);
+      this.socketServer.broadcastToProject(projectId, 'alert:critical', payload);
+      this.socketServer.broadcastToProject(projectId, 'supervisor:alert', { ...payload, action: 'entered' });
+    }
+
+    this._recordRestrictedZoneAlertEvent(deviceId, message);
+    this._recordRestrictedZoneInfraction(deviceId, projectId, message, latitude, longitude);
+  }
+
+  _clearRestrictedZoneViolation(deviceId: string, projectId: number | null): void {
+    console.log(`Device ${deviceId} regresó a la zona permitida`);
+
+    if (this.socketServer) {
+      this.socketServer.broadcastToProject(projectId, 'alert:clear', {
+        deviceId,
+        timestamp: new Date().toISOString(),
+      });
       this.socketServer.broadcastToProject(projectId, 'supervisor:alert', {
-        ...payload,
-        action: 'exited_allowed',
+        deviceId,
+        action: 'exited',
+        timestamp: new Date().toISOString(),
       });
     }
 
-    this._recordAlertEvent(deviceId, 'info', message, {});
+    this._resolveRestrictedZoneAlertEvent(deviceId);
+  }
+
+  _recordRestrictedZoneInfraction(
+    deviceId: string,
+    projectId: number | null,
+    message: string,
+    latitude: number,
+    longitude: number,
+  ): void {
+    if (!this.infractionRepo) return;
+    this.infractionRepo
+      .create({
+        projectId,
+        deviceId,
+        infractionType: 'geofence',
+        severity: RESTRICTED_ZONE_INFRACTION_SEVERITY,
+        message,
+        latitude,
+        longitude,
+        metadata: { reason: 'restricted_zone_exit' },
+      })
+      .catch((err: Error) => console.error('GeofenceAlertService._recordRestrictedZoneInfraction:', err.message));
+  }
+
+  _recordRestrictedZoneAlertEvent(deviceId: string, message: string): void {
+    if (!this.alertEventRepo) return;
+    this.alertEventRepo
+      .recordOrEscalate({ alertType: 'restricted_zone', severity: 'danger', deviceId, message, metadata: {} })
+      .catch((err: Error) => console.error('GeofenceAlertService._recordRestrictedZoneAlertEvent:', err.message));
+  }
+
+  _resolveRestrictedZoneAlertEvent(deviceId: string): void {
+    if (!this.alertEventRepo) return;
+    this.alertEventRepo
+      .resolveOpen({ alertType: 'restricted_zone', deviceId })
+      .catch((err: Error) => console.error('GeofenceAlertService._resolveRestrictedZoneAlertEvent:', err.message));
   }
 
   triggerAlert(
@@ -497,6 +579,9 @@ class GeofenceAlertService {
       this.clearAlert(deviceId, previousAlert, projectId);
     }
     delete this.activeAlerts[deviceId];
+    // idempotente (resolveOpen/alert:clear sin nada abierto es un no-op seguro) - mas simple que
+    // rastrear aparte si el dispositivo era restringido y tenia una violacion activa en este momento
+    this._clearRestrictedZoneViolation(deviceId, projectId);
     delete this.activeAllowedZones[deviceId];
 
     if (this.activeSilentNotices[deviceId] && this.socketServer?.sendToDevice) {

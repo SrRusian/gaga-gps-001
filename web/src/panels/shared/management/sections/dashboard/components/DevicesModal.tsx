@@ -125,6 +125,23 @@ export function DevicesModal({
             ))}
           </select>
         </div>
+        {admin.deviceModal?.device && (
+          // sin .gg-modal-field envolviendo el <input> a proposito - ese selector estiliza inputs de
+          // texto (fondo oscuro, padding, border-radius), se ve roto aplicado a un checkbox
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0' }}>
+            <input
+              type="checkbox"
+              id="device-restricted-zone"
+              checked={admin.deviceForm.restrictedToAllowedZone}
+              onChange={(e) =>
+                admin.setDeviceForm({ ...admin.deviceForm, restrictedToAllowedZone: e.target.checked })
+              }
+            />
+            <label htmlFor="device-restricted-zone" style={{ fontSize: 12, color: '#8b949e' }}>
+              Restringido a zona permitida (debe quedarse dentro - salir genera infracción)
+            </label>
+          </div>
+        )}
         {isAdmin && (admin.deviceModal?.device || scope === 'global') && (
           <div className="gg-modal-field">
             <label>Proyecto</label>

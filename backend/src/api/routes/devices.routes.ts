@@ -155,7 +155,7 @@ export function buildDevicesRouter({
         return res.status(404).json({ error: 'Dispositivo no encontrado' });
       }
 
-      const { name, type, attributes, groupId, vehicleTypeId, speedLimitKmh } = req.body;
+      const { name, type, attributes, groupId, vehicleTypeId, speedLimitKmh, restrictedToAllowedZone } = req.body;
       const projectId = req.user!.role === 'admin' ? req.body.projectId : undefined;
       const device = await deviceRepo.update(Number(req.params.id), {
         name,
@@ -165,6 +165,7 @@ export function buildDevicesRouter({
         groupId,
         vehicleTypeId,
         speedLimitKmh,
+        restrictedToAllowedZone,
       });
       if (
         req.user!.role === 'admin' &&

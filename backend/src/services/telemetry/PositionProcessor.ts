@@ -18,6 +18,7 @@ interface DeviceFootprintRepoLike {
   findAlertContext(deviceId: string): Promise<{
     lengthMeters: number | null;
     widthMeters: number | null;
+    restrictedToAllowedZone: boolean;
   }>;
 }
 
@@ -179,24 +180,24 @@ class PositionProcessor {
       // reciente - si cualquiera de los dos falta, footprintWkt queda null y el resto del flujo
       // sigue exactamente igual que antes de esta feature (punto crudo, sin buffer)
       let footprintWkt: string | null = null;
+      let restrictedToAllowedZone = false;
       if (this.deviceFootprintRepo) {
         try {
-          const { lengthMeters, widthMeters } = await this.deviceFootprintRepo.findAlertContext(
-            position.deviceId,
-          );
+          const context = await this.deviceFootprintRepo.findAlertContext(position.deviceId);
+          restrictedToAllowedZone = context.restrictedToAllowedZone;
           const speedKmhForHeading = (position.speed ?? 0) * 3.6;
           const trustedCourse = this.headingTracker.resolveTrustedCourse(
             position.deviceId,
             position.course,
             speedKmhForHeading,
           );
-          if (lengthMeters != null && widthMeters != null && trustedCourse != null) {
+          if (context.lengthMeters != null && context.widthMeters != null && trustedCourse != null) {
             footprintWkt = buildVehicleFootprintWkt(
               position.latitude,
               position.longitude,
               trustedCourse,
-              lengthMeters,
-              widthMeters,
+              context.lengthMeters,
+              context.widthMeters,
             );
           }
         } catch (err) {
@@ -211,6 +212,7 @@ class PositionProcessor {
           projectId: position.projectId ?? null,
           footprintWkt,
           accuracy: position.accuracy ?? 0,
+          restrictedToAllowedZone,
         });
       }
 

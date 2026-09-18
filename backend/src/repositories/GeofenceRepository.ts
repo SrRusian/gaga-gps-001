@@ -128,8 +128,14 @@ class GeofenceRepository {
       //  - circle: dentro del radio (ST_DWithin) + buffer de proximidad si el tipo es alertable
       //  - polygon filled=true: toca/adentro (ST_Intersects) + buffer de proximidad si es alertable
       //  - polygon filled=false: cerca del borde (ST_DWithin contra ST_Boundary, un solo umbral)
-      //  - polyline stay_inside=true ("debe quedarse dentro"): FUERA del ancho de la linea
+      //  - polyline stay_inside=true, tipo != authorized_route ("debe quedarse dentro"): FUERA del
+      //    ancho de la linea
       //  - polyline stay_inside=false ("no tocar"): cerca de la linea (ST_DWithin, un solo umbral)
+      //  - polyline type=authorized_route (sin importar stay_inside - nunca alerta, no tiene entrada
+      //    en AREA_SEVERITY): DENTRO del corredor - el unico proposito de que "matchee" es que su
+      //    speed_limit_kmh llegue a SpeedAlertService mientras el vehiculo va sobre la ruta. La
+      //    membresia de ruta para el sistema de colision/distancia entre vehiculos es una consulta
+      //    aparte (findRouteMembership), no depende de este WHERE.
       // `contained` distingue "ya toca" (circle/polygon filled dentro del umbral base, sin el buffer
       // extra) de "cerca pero todavia no" (solo alcanzable via el buffer de proximidad) - polyline y
       // polygon sin relleno siempre contained=true, conservan su severidad fija de siempre.
@@ -167,9 +173,11 @@ class GeofenceRepository {
                  ))
              OR (g.shape_type = 'polygon' AND g.filled = FALSE
                  AND ST_DWithin(ST_Boundary(g.geog::geometry)::geography, fp.g, g.corridor_width_meters))
-             OR (g.shape_type = 'polyline' AND g.stay_inside = TRUE
+             OR (g.shape_type = 'polyline' AND g.stay_inside = TRUE AND g.type <> 'authorized_route'
                  AND NOT ST_DWithin(g.geog, fp.g, g.corridor_width_meters))
              OR (g.shape_type = 'polyline' AND g.stay_inside = FALSE
+                 AND ST_DWithin(g.geog, fp.g, g.corridor_width_meters))
+             OR (g.shape_type = 'polyline' AND g.type = 'authorized_route'
                  AND ST_DWithin(g.geog, fp.g, g.corridor_width_meters))
            )`,
         [

@@ -104,11 +104,14 @@ describe('GeofenceRepository - PostGIS real', () => {
     expect(outside.map((g) => g.id)).not.toContain(polygon.id);
   });
 
-  it('línea "debe quedarse dentro" (stayInside=true, default): matchea lejos del eje, no cerca', async () => {
+  // 'authorized_route' quedo fuera a proposito de este mecanismo generico (ver test dedicado mas
+  // abajo) - se usa 'danger' aqui para seguir cubriendo el mecanismo "debe quedarse dentro" para
+  // cualquier OTRO tipo de linea que lo use (ej. un limite que de verdad debe alertar al salirse)
+  it('línea "debe quedarse dentro" (stayInside=true, default, tipo != authorized_route): matchea lejos del eje, no cerca', async () => {
     const route = await repo.create({
-      name: 'Ruta de prueba',
+      name: 'Línea de prueba',
       projectId: testProjectId,
-      type: 'authorized_route',
+      type: 'danger',
       shapeType: 'polyline',
       geometry: {
         type: 'LineString',
@@ -134,6 +137,44 @@ describe('GeofenceRepository - PostGIS real', () => {
       longitude: -103.55,
     });
     expect(farFromAxis.map((g) => g.id)).toContain(route.id);
+  });
+
+  // authorized_route nunca alerta (fuera de AREA_SEVERITY en GeofenceAlertService) - su unico
+  // proposito en este WHERE es aportar speed_limit_kmh mientras el vehiculo va SOBRE la ruta, sin
+  // importar stay_inside. Bug real encontrado y corregido en esta misma ronda: antes matcheaba al
+  // reves (lejos del eje), asi que el limite de velocidad de una ruta nunca aplicaba yendo sobre ella.
+  it('línea "authorized_route" matchea DENTRO del corredor (para el límite de velocidad), no lejos', async () => {
+    const route = await repo.create({
+      name: 'Ruta de prueba',
+      projectId: testProjectId,
+      type: 'authorized_route',
+      shapeType: 'polyline',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [-103.6, 19.37],
+          [-103.5, 19.37],
+        ],
+      },
+      corridorWidthMeters: 20,
+      speedLimitKmh: 30,
+    });
+    createdGeofenceIds.push(route.id);
+
+    const onAxis = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 19.37,
+      longitude: -103.55,
+    });
+    expect(onAxis.map((g) => g.id)).toContain(route.id);
+    expect(onAxis.find((g) => g.id === route.id)?.speed_limit_kmh).toBe(30);
+
+    const farFromAxis = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 19.4,
+      longitude: -103.55,
+    });
+    expect(farFromAxis.map((g) => g.id)).not.toContain(route.id);
   });
 
   it('línea "no tocar" (stayInside=false): matchea cerca del eje, no lejos', async () => {

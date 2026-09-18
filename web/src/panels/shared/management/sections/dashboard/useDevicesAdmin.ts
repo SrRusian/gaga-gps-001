@@ -8,6 +8,9 @@ export interface DeviceFormState {
   name: string;
   projectId: string;
   vehicleTypeId: string;
+  // solo aplica al editar (igual que speedLimitKmh) - un dispositivo nuevo siempre arranca sin
+  // restriccion (default del backend), no tiene sentido pedirlo al crear
+  restrictedToAllowedZone: boolean;
 }
 
 export interface UseDevicesAdminOptions {
@@ -25,6 +28,7 @@ export function useDevicesAdmin({ scope, isAdmin, onDeviceDeleted }: UseDevicesA
     name: '',
     projectId: '',
     vehicleTypeId: '',
+    restrictedToAllowedZone: false,
   });
 
   async function loadDevices() {
@@ -43,7 +47,7 @@ export function useDevicesAdmin({ scope, isAdmin, onDeviceDeleted }: UseDevicesA
   }, [allDevices, scope, deviceSearch]);
 
   function openCreateDevice() {
-    setDeviceForm({ uniqueId: '', name: '', projectId: '', vehicleTypeId: '' });
+    setDeviceForm({ uniqueId: '', name: '', projectId: '', vehicleTypeId: '', restrictedToAllowedZone: false });
     setDeviceModal({});
   }
 
@@ -53,6 +57,7 @@ export function useDevicesAdmin({ scope, isAdmin, onDeviceDeleted }: UseDevicesA
       name: d.name,
       projectId: d.project_id != null ? String(d.project_id) : '',
       vehicleTypeId: d.vehicle_type_id != null ? String(d.vehicle_type_id) : '',
+      restrictedToAllowedZone: d.restricted_to_allowed_zone,
     });
     setDeviceModal({ device: d });
   }
@@ -68,6 +73,7 @@ export function useDevicesAdmin({ scope, isAdmin, onDeviceDeleted }: UseDevicesA
         await adminApi.patch(`/api/devices/${deviceModal.device.id}`, {
           name: deviceForm.name,
           vehicleTypeId,
+          restrictedToAllowedZone: deviceForm.restrictedToAllowedZone,
           ...(isAdmin
             ? { projectId: deviceForm.projectId ? Number(deviceForm.projectId) : null }
             : {}),

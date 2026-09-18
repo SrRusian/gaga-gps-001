@@ -11,6 +11,7 @@ export interface DeviceRow {
   vehicle_type_id: number | null;
   attributes: Record<string, unknown>;
   speed_limit_kmh: number | null;
+  restricted_to_allowed_zone: boolean;
   last_update: Date | null;
   created_at: Date;
   // solo presentes en findAll/findByProject/findById (LEFT JOIN vehicle_types) - null si el
@@ -160,6 +161,7 @@ class DeviceRepository {
       vehicleTypeId,
       attributes,
       speedLimitKmh,
+      restrictedToAllowedZone,
     }: {
       name?: string;
       type?: string;
@@ -168,6 +170,7 @@ class DeviceRepository {
       vehicleTypeId?: number | null;
       attributes?: Record<string, unknown>;
       speedLimitKmh?: number | null;
+      restrictedToAllowedZone?: boolean;
     },
   ): Promise<DeviceRow | null> {
     // SET armado a mano - COALESCE no distingue null intencional de "no vino en el body"
@@ -201,6 +204,10 @@ class DeviceRepository {
       values.push(speedLimitKmh);
       sets.push(`speed_limit_kmh = $${values.length}`);
     }
+    if (restrictedToAllowedZone !== undefined) {
+      values.push(restrictedToAllowedZone);
+      sets.push(`restricted_to_allowed_zone = $${values.length}`);
+    }
     if (sets.length === 0) return this.findById(id);
 
     try {
@@ -226,6 +233,7 @@ class DeviceRepository {
     vehicleTypeLimit: number | null;
     lengthMeters: number | null;
     widthMeters: number | null;
+    restrictedToAllowedZone: boolean;
   }> {
     try {
       const { rows } = await query<{
@@ -234,9 +242,11 @@ class DeviceRepository {
         vehicle_type_limit: number | null;
         length_meters: number | null;
         width_meters: number | null;
+        restricted_to_allowed_zone: boolean;
       }>(
         `SELECT d.speed_limit_kmh AS device_limit, g.speed_limit_kmh AS group_limit,
-                vt.max_speed_kmh AS vehicle_type_limit, vt.length_meters, vt.width_meters
+                vt.max_speed_kmh AS vehicle_type_limit, vt.length_meters, vt.width_meters,
+                d.restricted_to_allowed_zone
          FROM devices d
          LEFT JOIN device_groups g ON g.id = d.group_id
          LEFT JOIN vehicle_types vt ON vt.id = d.vehicle_type_id
@@ -250,6 +260,7 @@ class DeviceRepository {
           vehicleTypeLimit: null,
           lengthMeters: null,
           widthMeters: null,
+          restrictedToAllowedZone: false,
         };
       }
       return {
@@ -258,6 +269,7 @@ class DeviceRepository {
         vehicleTypeLimit: rows[0].vehicle_type_limit,
         lengthMeters: rows[0].length_meters,
         widthMeters: rows[0].width_meters,
+        restrictedToAllowedZone: rows[0].restricted_to_allowed_zone,
       };
     } catch (err) {
       console.error('DeviceRepository.findAlertContext:', (err as Error).message);

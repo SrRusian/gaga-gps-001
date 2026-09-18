@@ -49,6 +49,11 @@ CREATE TABLE IF NOT EXISTS devices (
   last_update TIMESTAMPTZ,
   attributes JSONB DEFAULT '{}',
   speed_limit_kmh DOUBLE PRECISION,
+  -- FALSE (default) = puede entrar/salir de una geocerca tipo 'allowed' libremente, sin infraccion,
+  -- solo queda el registro en geofence_events. TRUE = debe permanecer dentro, salir genera una
+  -- infraccion + alerta al operador. Default FALSE a proposito - un dispositivo existente nunca
+  -- empieza a generar infracciones solo porque se dibujo una zona permitida nueva
+  restricted_to_allowed_zone BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_devices_project ON devices (project_id);
@@ -278,7 +283,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
   id BIGSERIAL PRIMARY KEY,
   project_id INTEGER REFERENCES projects(id),
   alert_type VARCHAR(20) NOT NULL
-    CHECK (alert_type IN ('geofence', 'signal_lost', 'collision', 'proximity', 'preventive_stop', 'incident', 'equipment_variable', 'speed', 'power_loss')),
+    CHECK (alert_type IN ('geofence', 'signal_lost', 'collision', 'proximity', 'preventive_stop', 'incident', 'equipment_variable', 'speed', 'power_loss', 'restricted_zone')),
   severity VARCHAR(10) NOT NULL CHECK (severity IN ('info', 'warning', 'danger')),
   device_id VARCHAR(255),
   device_id_2 VARCHAR(255),

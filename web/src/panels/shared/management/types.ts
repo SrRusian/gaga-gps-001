@@ -32,6 +32,9 @@ export interface DeviceRow {
   vehicle_type_name?: string | null;
   vehicle_type_length_meters?: number | null;
   vehicle_type_width_meters?: number | null;
+  // FALSE (default) = puede entrar/salir de una geocerca 'allowed' libremente. TRUE = debe
+  // permanecer dentro, salir genera infraccion (ver GeofenceAlertService)
+  restricted_to_allowed_zone: boolean;
 }
 
 export interface VehicleTypeRow {

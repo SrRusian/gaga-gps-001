@@ -159,7 +159,7 @@ describe('GeofenceAlertService', () => {
       longitude: -103.56,
       footprintWkt: null,
       accuracyMeters: 0,
-      alertableTypes: expect.arrayContaining(['danger', 'forbidden', 'warning', 'maintenance', 'authorized_route']),
+      alertableTypes: expect.arrayContaining(['danger', 'forbidden', 'warning', 'maintenance']),
       proximityLookaheadMeters: expect.any(Number),
     });
   });
@@ -168,6 +168,12 @@ describe('GeofenceAlertService', () => {
     await service.evaluate(pos('V1', 7));
     const call = findMatchingSpatial.mock.calls[0][0];
     expect(call.alertableTypes).not.toContain('parking');
+  });
+
+  it('el buffer de proximidad nunca incluye "authorized_route" (ya no genera alerta alguna)', async () => {
+    await service.evaluate(pos('V1', 7));
+    const call = findMatchingSpatial.mock.calls[0][0];
+    expect(call.alertableTypes).not.toContain('authorized_route');
   });
 
   it('pasa el footprintWkt/accuracy de la posicion cuando vienen presentes', async () => {
@@ -254,23 +260,13 @@ describe('GeofenceAlertService', () => {
     );
   });
 
-  it('"authorized_route" tiene severidad y mensaje propios, fijos (sin escalada por distancia)', async () => {
+  // fuera de AREA_SEVERITY a proposito - salir de una ruta autorizada ya no es un problema, solo
+  // aporta limite de velocidad (findMatchingSpatial) y sirve de referencia para el sistema de
+  // distancia entre vehiculos (findRouteMembership, consulta completamente aparte)
+  it('"authorized_route" nunca genera ninguna alerta', async () => {
     findMatchingSpatial.mockResolvedValue([authorizedRouteRow]);
     await service.evaluate(pos());
-
-    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
-      7,
-      'alert:warning',
-      expect.objectContaining({
-        type: 'geofence_route',
-        message: expect.stringContaining('FUERA DE RUTA AUTORIZADA'),
-      }),
-    );
-    expect(socketServer.broadcastToProject).not.toHaveBeenCalledWith(
-      7,
-      'alert:critical',
-      expect.anything(),
-    );
+    expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
   });
 
   it('_persistEvent es fire-and-forget vía geofenceEventRepo si se provee', async () => {
@@ -419,44 +415,100 @@ describe('GeofenceAlertService', () => {
     expect(matches).toEqual([warningCircleRow]);
   });
 
-  it('emite alert:info al salir de una zona "allowed" (evento puntual, no un estado sostenido)', async () => {
-    findMatchingSpatial.mockResolvedValue([allowedPolygonRow]);
-    await service.evaluate(pos());
-    socketServer.broadcastToProject.mockClear();
+  // "zona permitida" (allowed) ahora es el limite operativo real (ej. contorno de la mina) - solo
+  // dispara algo si el DISPOSITIVO esta marcado restringido (devices.restricted_to_allowed_zone,
+  // ver PositionProcessor). Uno sin restriccion (default) entra/sale libre, sin ningun aviso.
+  describe('zona permitida restringida (devices.restricted_to_allowed_zone)', () => {
+    it('un dispositivo SIN restriccion no genera ninguna alerta al salir de "allowed"', async () => {
+      findMatchingSpatial.mockResolvedValue([allowedPolygonRow]);
+      await service.evaluate(pos());
+      socketServer.broadcastToProject.mockClear();
 
-    findMatchingSpatial.mockResolvedValue([]);
-    await service.evaluate(pos());
+      findMatchingSpatial.mockResolvedValue([]);
+      await service.evaluate(pos());
 
-    expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
-      7,
-      'alert:info',
-      expect.objectContaining({ type: 'geofence_left_allowed', deviceId: 'V1' }),
-    );
-  });
+      expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
+    });
 
-  it('no emite el evento de salida de "allowed" si nunca estuvo dentro', async () => {
-    findMatchingSpatial.mockResolvedValue([]);
-    await service.evaluate(pos());
-    expect(socketServer.broadcastToProject).not.toHaveBeenCalledWith(
-      7,
-      'alert:info',
-      expect.objectContaining({ type: 'geofence_left_allowed' }),
-    );
-  });
+    it('un dispositivo RESTRINGIDO genera alert:critical + infraccion al salir de "allowed"', async () => {
+      const create = vi.fn().mockResolvedValue(undefined);
+      const withRepo = new GeofenceAlertService({
+        geofenceRepo: {
+          findMatchingSpatial: vi
+            .fn()
+            .mockResolvedValueOnce([allowedPolygonRow])
+            .mockResolvedValueOnce([]),
+        },
+        socketServer,
+        infractionRepo: { create },
+      });
+      await withRepo.evaluate({ ...pos(), restrictedToAllowedZone: true });
+      await withRepo.evaluate({ ...pos(), restrictedToAllowedZone: true });
 
-  it('no re-emite el evento de salida de "allowed" en cada tick posterior fuera de la zona', async () => {
-    findMatchingSpatial.mockResolvedValue([allowedPolygonRow]);
-    await service.evaluate(pos());
-    findMatchingSpatial.mockResolvedValue([]);
-    await service.evaluate(pos());
-    socketServer.broadcastToProject.mockClear();
+      expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+        7,
+        'alert:critical',
+        expect.objectContaining({
+          type: 'restricted_zone_violation',
+          message: expect.stringContaining('FUERA DE ZONA PERMITIDA'),
+          loop: true,
+        }),
+      );
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ deviceId: 'V1', infractionType: 'geofence' }),
+      );
+    });
 
-    await service.evaluate(pos());
-    expect(socketServer.broadcastToProject).not.toHaveBeenCalledWith(
-      7,
-      'alert:info',
-      expect.objectContaining({ type: 'geofence_left_allowed' }),
-    );
+    it('un dispositivo RESTRINGIDO recibe alert:clear al regresar a "allowed"', async () => {
+      const withRepo = new GeofenceAlertService({
+        geofenceRepo: {
+          findMatchingSpatial: vi
+            .fn()
+            .mockResolvedValueOnce([allowedPolygonRow])
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([allowedPolygonRow]),
+        },
+        socketServer,
+        infractionRepo: { create: vi.fn().mockResolvedValue(undefined) },
+      });
+      await withRepo.evaluate({ ...pos(), restrictedToAllowedZone: true });
+      await withRepo.evaluate({ ...pos(), restrictedToAllowedZone: true });
+      socketServer.broadcastToProject.mockClear();
+
+      await withRepo.evaluate({ ...pos(), restrictedToAllowedZone: true });
+
+      expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+        7,
+        'alert:clear',
+        expect.objectContaining({ deviceId: 'V1' }),
+      );
+    });
+
+    it('no dispara nada si nunca estuvo dentro de "allowed" (sin importar restriccion)', async () => {
+      findMatchingSpatial.mockResolvedValue([]);
+      await service.evaluate({ ...pos(), restrictedToAllowedZone: true });
+      expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
+    });
+
+    it('no re-emite la alerta en cada tick posterior fuera de la zona (restringido)', async () => {
+      const withRepo = new GeofenceAlertService({
+        geofenceRepo: {
+          findMatchingSpatial: vi
+            .fn()
+            .mockResolvedValueOnce([allowedPolygonRow])
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([]),
+        },
+        socketServer,
+        infractionRepo: { create: vi.fn().mockResolvedValue(undefined) },
+      });
+      await withRepo.evaluate({ ...pos(), restrictedToAllowedZone: true });
+      await withRepo.evaluate({ ...pos(), restrictedToAllowedZone: true });
+      socketServer.broadcastToProject.mockClear();
+
+      await withRepo.evaluate({ ...pos(), restrictedToAllowedZone: true });
+      expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
+    });
   });
 
   it('"forbidden" tiene la misma prioridad que "danger" - gana sobre "maintenance" (nivel advertencia)', async () => {
