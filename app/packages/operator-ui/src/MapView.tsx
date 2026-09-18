@@ -22,7 +22,8 @@ import maplibregl from 'maplibre-gl';
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import {
   applyHeadingOffset,
-  INITIAL_HEADING_OFFSET_STATE,
+  loadHeadingOffset,
+  persistHeadingOffset,
   updateHeadingOffset,
   type HeadingOffsetState,
 } from './headingCalibration';
@@ -165,7 +166,9 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // GPS real contra lo que reporta la brujula en ese momento, y se aplica encima de la brujula solo
   // cuando el vehiculo esta detenido - sin esto, un soporte girado 30° hace que el mapa "brinque"
   // ese angulo justo al frenar.
-  const headingOffsetRef = useRef<HeadingOffsetState>(INITIAL_HEADING_OFFSET_STATE);
+  // arranca con el desfase que ya se aprendio en turnos anteriores - el soporte no cambia de angulo
+  // entre aperturas de la app, asi que la flecha apunta bien desde el primer segundo
+  const headingOffsetRef = useRef<HeadingOffsetState>(loadHeadingOffset());
 
   // envuelve resolveVehicleCourse (map-core, compartido con Admin/Supervisor - no se toca) solo
   // para el vehiculo propio: si esta detenido y hay lectura de brujula, la usa (corregida por el
@@ -417,6 +420,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             compassHeadingRef.current,
             pos.speed ?? 0,
           );
+          persistHeadingOffset(headingOffsetRef.current); // se guarda acotado, ver el propio metodo
         }
 
         const { course: resolvedCourse } = resolveVehicleCourse(pos.deviceId, pos.course, pos.speed);

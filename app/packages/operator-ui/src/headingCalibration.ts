@@ -61,3 +61,40 @@ export function applyHeadingOffset(compassHeadingDeg: number, offsetDeg: number 
   if (offsetDeg === null) return compassHeadingDeg;
   return (compassHeadingDeg + offsetDeg + 360) % 360;
 }
+
+// El desfase aprendido se guarda en la tableta: el soporte no cambia de angulo entre turnos, asi
+// que re-aprenderlo en cada apertura solo servia para que la flecha apuntara mal hasta el primer
+// tramo recto del dia. Guardado, la tableta arranca ya calibrada desde el primer segundo, aunque
+// nunca se haya movido. Tambien absorbe cualquier giro fijo del montaje que la correccion por
+// orientacion de pantalla no alcance a cubrir (ver useDeviceOrientation.ts).
+const STORAGE_KEY = 'gaga_heading_offset';
+// no se escribe en cada lectura: el offset se refina por EMA muchas veces por minuto mientras se
+// conduce, y no tiene sentido tocar el almacenamiento a ese ritmo
+const PERSIST_INTERVAL_MS = 10000;
+let lastPersistedAt = 0;
+let lastPersistedValue: number | null = null;
+
+export function loadHeadingOffset(): HeadingOffsetState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw === null) return INITIAL_HEADING_OFFSET_STATE;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? { offsetDeg: parsed } : INITIAL_HEADING_OFFSET_STATE;
+  } catch {
+    return INITIAL_HEADING_OFFSET_STATE;
+  }
+}
+
+export function persistHeadingOffset(state: HeadingOffsetState): void {
+  if (state.offsetDeg === null) return;
+  const now = Date.now();
+  if (now - lastPersistedAt < PERSIST_INTERVAL_MS) return;
+  if (lastPersistedValue !== null && Math.abs(angleDiff(state.offsetDeg, lastPersistedValue)) < 1) return;
+  lastPersistedAt = now;
+  lastPersistedValue = state.offsetDeg;
+  try {
+    localStorage.setItem(STORAGE_KEY, String(state.offsetDeg));
+  } catch {
+    // almacenamiento lleno o bloqueado - se sigue calibrando en memoria como antes
+  }
+}
