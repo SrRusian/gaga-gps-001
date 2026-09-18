@@ -37,12 +37,19 @@ export function buildTelemetryRouter({
 
       const fixTime = parseTimestamp(params.timestamp);
 
+      // OsmAnd manda speed en NUDOS (asi lo emite TraccarUplink.kt y asi lo decodifica Traccar) -
+      // el resto del sistema trabaja en m/s. Sin esta conversion toda velocidad del dispositivo se
+      // inflaba x1.94384; medido en datos reales de produccion: razon 1.9153 contra la geometrica
+      const speedKnots = parseFloatOrUndefined(params.speed);
+
       const position = {
         deviceId: String(id),
         latitude,
         longitude,
         altitude: parseFloatOrDefault(params.altitude, 0),
-        speed: parseFloatOrDefault(params.speed, 0),
+        // undefined (no 0) si el dispositivo no reporto velocidad - una posicion de antena celular
+        // no trae Doppler, y el estimador tiene que poder distinguir "detenido" de "no lo se"
+        speed: speedKnots != null ? speedKnots * KNOTS_TO_MS : undefined,
         course: parseFloatOrDefault(params.bearing, 0),
         accuracy: parseFloatOrDefault(params.accuracy, 0),
         battery: params.batt !== undefined ? parseFloatOrDefault(params.batt, null) : null,
@@ -67,10 +74,18 @@ export function buildTelemetryRouter({
   return router;
 }
 
+const KNOTS_TO_MS = 0.514444;
+
 function parseFloatOrDefault<T extends number | null>(value: unknown, fallback: T): number | T {
   if (value === undefined || value === null || value === '') return fallback;
   const parsed = parseFloat(String(value));
   return Number.isNaN(parsed) ? fallback : parsed;
+}
+
+function parseFloatOrUndefined(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parsed = parseFloat(String(value));
+  return Number.isNaN(parsed) ? undefined : parsed;
 }
 
 function parseTimestamp(raw: unknown): Date {

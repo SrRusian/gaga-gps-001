@@ -58,6 +58,39 @@ describe('SpeedEstimationService', () => {
     expect(estimate.speedMs).toBe(0);
   });
 
+  // caso real de produccion (17 sep): posiciones de antena celular con accuracy ~100m saltaban
+  // ~800m de golpe y sin Doppler; la velocidad derivada daba 1039 km/h y quedaba guardada como
+  // 393 km/h, generando alertas e infracciones falsas contra el operador
+  it('no deriva velocidad de posiciones imprecisas: sostiene la ultima conocida en vez de inventar un pico', () => {
+    service.estimate('V1', LAT, LON, 0, 40 / 3.6, 2);
+    service.estimate('V1', north(11), LON, 1000, 40 / 3.6, 2);
+    const before = service.estimate('V1', north(22), LON, 2000, 40 / 3.6, 2);
+    // salto de 800m con precision de antena celular y sin velocidad reportada por el dispositivo
+    const spike = service.estimate('V1', north(822), LON, 3000, undefined, 100);
+    expect(spike.derivedKmh).toBeNull();
+    expect(spike.speedMs * 3.6).toBeCloseTo(before.speedMs * 3.6, 1);
+  });
+
+  it('no deriva velocidad cuando el desplazamiento cabe dentro de la propia incertidumbre', () => {
+    service.estimate('V1', LAT, LON, 0, undefined, 12);
+    const estimate = service.estimate('V1', north(15), LON, 1000, undefined, 12);
+    expect(estimate.derivedKmh).toBeNull();
+  });
+
+  it('nunca reporta por encima del techo de cordura', () => {
+    const service2 = new SpeedEstimationService({ emaAlpha: 1, absoluteCeilingKmh: 200 });
+    service2.estimate('V1', LAT, LON, 0, 500 / 3.6, 1);
+    const estimate = service2.estimate('V1', north(5), LON, 1000, 500 / 3.6, 1);
+    expect(estimate.speedMs * 3.6).toBeLessThanOrEqual(200);
+  });
+
+  it('resetTrack corta la derivada a traves de una discontinuidad (resync del filtro)', () => {
+    service.estimate('V1', LAT, LON, 0, undefined, 2);
+    service.resetTrack('V1');
+    const estimate = service.estimate('V1', north(900), LON, 1000, undefined, 2);
+    expect(estimate.derivedKmh).toBeNull();
+  });
+
   it('respeta un umbral personalizado de zona muerta (minSpeedKmh)', () => {
     const strict = new SpeedEstimationService({ minSpeedKmh: 0 });
     strict.estimate('V1', LAT, LON, 0, 0);

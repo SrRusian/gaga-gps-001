@@ -2,12 +2,14 @@ package com.gaga.app.traccar
 
 import android.content.Context
 import android.location.Location
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
-import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class TraccarLogEntry(
     val timestamp: Long,
@@ -24,18 +26,19 @@ data class TraccarLogEntry(
 object TraccarUplink {
     private const val MAX_LOG_ENTRIES = 50
     private const val DRAIN_BATCH_SIZE = 40
-    private const val DRAIN_PARALLELISM = 8
 
     private val log = ArrayDeque<TraccarLogEntry>()
     private var bufferStore: OfflineBufferStore? = null
 
-    // pool aparte para el drenado del historico - varias peticiones HTTP en paralelo (el rate
-    // limit del backend es 6000/min por dispositivo, con margen de sobra) para que un backlog de
-    // horas se ponga al dia en minutos, no en un envio secuencial de uno por uno
-    private val drainWorkers = Executors.newFixedThreadPool(DRAIN_PARALLELISM)
+    // hilo aparte para el drenado del historico, para que un backlog de horas nunca retrase el
+    // envio de la posicion en vivo. Se envia de uno en uno y en orden de id (cronologico): antes
+    // iban 8 en paralelo y llegaban desordenados y duplicados al servidor - confirmado en
+    // produccion, el mismo punto de las 21:56:59 aparece dos veces y el de las 21:57:01 tres veces
     private val drainCoordinator = Executors.newSingleThreadExecutor()
 
-    @Volatile private var draining = false
+    // AtomicBoolean y no @Volatile: el "if (draining) return; draining = true" anterior no era
+    // atomico y dejaba arrancar dos drenados a la vez, reenviando los mismos puntos
+    private val draining = AtomicBoolean(false)
 
     @Volatile var lastSentAt: Long = 0L
         private set
@@ -84,6 +87,16 @@ object TraccarUplink {
 
         val batteryPercent = readBatteryPercent(context)
 
+        // sin red no se intenta el HTTP: con los datos apagados cada intento tarda hasta 5-20s en
+        // fallar (la resolucion DNS no respeta connectTimeout) y la cola del executor de un solo
+        // hilo crecia mas rapido de lo que drenaba, asi que la mayoria de las posiciones nunca
+        // alcanzaba a escribirse en el buffer. Bug real confirmado en produccion: de ~430
+        // posiciones de un corte de 7 minutos solo 38 quedaron guardadas. Encolar es instantaneo.
+        if (!hasNetwork(context)) {
+            servers.forEach { store(context).add(it.url, deviceId, password, location) }
+            return
+        }
+
         servers.forEach { server ->
             try {
                 sendOsmAnd(server.url, deviceId, password, location, batteryPercent)
@@ -100,14 +113,22 @@ object TraccarUplink {
         if (anySuccess) triggerDrain(context)
     }
 
+    // true si no se puede determinar - ante la duda se intenta enviar, nunca se encola de mas
+    private fun hasNetwork(context: Context): Boolean {
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return true
+        val network = manager.activeNetwork ?: return false
+        val caps = manager.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
     private fun triggerDrain(context: Context) {
-        if (draining) return // ya hay un drenado en curso, no lances otro en paralelo
-        draining = true
+        if (!draining.compareAndSet(false, true)) return // ya hay un drenado en curso
         drainCoordinator.execute {
             try {
                 drainLoop(context)
             } finally {
-                draining = false
+                draining.set(false)
             }
         }
     }
@@ -130,29 +151,23 @@ object TraccarUplink {
             // aproximacion, sin necesitar cambiar el schema de OfflineBufferStore por esto
             val batteryPercent = readBatteryPercent(context)
 
-            val futures = batch.map { item ->
-                drainWorkers.submit(
-                    Callable {
-                        val ok = servers.all { server ->
-                            try {
-                                sendOsmAnd(server.url, item.deviceId, item.password, item.location, batteryPercent)
-                                true
-                            } catch (e: Exception) {
-                                false
-                            }
-                        }
-                        if (ok) {
-                            db.delete(item.rowId)
-                            addLog(TraccarLogEntry(System.currentTimeMillis(), servers.first().url, true, "OK (buffer)"))
-                        }
-                        ok
-                    },
-                )
+            // uno por uno y en orden cronologico (peekOldest ya ordena por id ASC): el servidor
+            // reconstruye el recorrido tal cual ocurrio, sin puntos adelantandose entre si
+            batch.forEach { item ->
+                val ok = servers.all { server ->
+                    try {
+                        sendOsmAnd(server.url, item.deviceId, item.password, item.location, batteryPercent)
+                        true
+                    } catch (e: Exception) {
+                        false
+                    }
+                }
+                // si algo fallo, la conexion probablemente se volvio a caer - se detiene aqui sin
+                // borrar el punto y se reintenta solo, en el siguiente envio en vivo exitoso
+                if (!ok) return
+                db.delete(item.rowId)
             }
-            val allOk = futures.map { it.get() }.all { it }
-            // si algo fallo, la conexion probablemente se volvio a caer - se detiene aqui y se
-            // reintenta solo, en el siguiente envio en vivo exitoso
-            if (!allOk) return
+            addLog(TraccarLogEntry(System.currentTimeMillis(), servers.first().url, true, "OK (buffer x${batch.size})"))
         }
     }
 

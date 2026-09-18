@@ -7,6 +7,7 @@ export interface PositionFilterOptions {
   jitterRadiusMeters?: number;
   historyWindow?: number;
   maxConsecutiveRejects?: number;
+  backfillMinAgeSeconds?: number;
 }
 
 export interface FilterablePosition {
@@ -23,6 +24,9 @@ export interface FilterResult {
   allowedMaxKmh: number | null;
   distanceMeters: number | null;
   resynced: boolean;
+  // recorrido historico re-enviado desde el buffer sin conexion de la tableta - se acepta y se
+  // guarda, pero nunca alimenta estado en vivo ni alertas (ver PositionProcessor)
+  backfill: boolean;
 }
 
 interface DeviceFilterState {
@@ -39,6 +43,7 @@ class PositionFilterService {
   jitterRadiusMeters: number;
   historyWindow: number;
   maxConsecutiveRejects: number;
+  backfillMinAgeSeconds: number;
   deviceState: Record<string, DeviceFilterState>;
 
   constructor({
@@ -48,6 +53,7 @@ class PositionFilterService {
     jitterRadiusMeters = 5,
     historyWindow = 8,
     maxConsecutiveRejects = 3,
+    backfillMinAgeSeconds = 5,
   }: PositionFilterOptions = {}) {
     this.toleranceFactor = toleranceFactor;
     this.minFloorKmh = minFloorKmh;
@@ -55,6 +61,7 @@ class PositionFilterService {
     this.jitterRadiusMeters = jitterRadiusMeters;
     this.historyWindow = historyWindow;
     this.maxConsecutiveRejects = maxConsecutiveRejects;
+    this.backfillMinAgeSeconds = backfillMinAgeSeconds;
 
     this.deviceState = {};
   }
@@ -73,6 +80,15 @@ class PositionFilterService {
 
     const dtSeconds = (fixTime.getTime() - state.lastAccepted.fixTime.getTime()) / 1000;
 
+    // claramente mas vieja que lo ultimo aceptado: es relleno del buffer sin conexion de la
+    // tableta, no un teletransporte. Antes caia en out_of_order -> valid=false -> invisible en el
+    // historial (findHistory filtra valid=TRUE), y el recorrido sin senal se perdia entero.
+    // No toca el estado del filtro: ese describe el presente en vivo, no el hueco que se rellena.
+    if (dtSeconds < -this.backfillMinAgeSeconds) {
+      return this._result(true, 'backfill', null, null, null, false, true);
+    }
+
+    // duplicado o desorden de unos segundos dentro del flujo en vivo - sigue descartandose
     if (dtSeconds <= 0) {
       return this._result(false, 'out_of_order', null, null, null, false);
     }
@@ -164,8 +180,9 @@ class PositionFilterService {
     allowedMaxKmh: number | null,
     distanceMeters: number | null,
     resynced: boolean,
+    backfill = false,
   ): FilterResult {
-    return { accepted, reason, impliedSpeedKmh, allowedMaxKmh, distanceMeters, resynced };
+    return { accepted, reason, impliedSpeedKmh, allowedMaxKmh, distanceMeters, resynced, backfill };
   }
 }
 
