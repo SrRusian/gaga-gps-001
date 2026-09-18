@@ -27,6 +27,7 @@ import {
   type HeadingOffsetState,
 } from './headingCalibration';
 import { useDeviceOrientation } from './useDeviceOrientation';
+import { RtkNtrip } from '@gaga-gps/android-bridge';
 
 const STALE_THRESHOLD_MS = 3000;
 const STALE_CHECK_INTERVAL_MS = 1000;
@@ -129,6 +130,23 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const compassHeading = useDeviceOrientation();
   const compassHeadingRef = useRef<number | null>(compassHeading);
   compassHeadingRef.current = compassHeading;
+
+  // el rumbo ya calibrado se empuja al nativo 1/seg (no a la tasa del sensor, ~100-200ms - al
+  // servidor se manda 1/seg de todos modos): asi Admin y Supervisor ven hacia donde APUNTA el
+  // vehiculo detenido, igual que el operador, en vez del ultimo rumbo GPS congelado. Ver
+  // TraccarUplink.resolveBearing - solo se usa cuando el rumbo GPS no es confiable.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const heading = compassHeadingRef.current;
+      if (heading === null) return;
+      RtkNtrip.setCompassHeading({
+        headingDeg: applyHeadingOffset(heading, headingOffsetRef.current.offsetDeg),
+      }).catch(() => {
+        // fuera de la app nativa el plugin no existe - el mapa local sigue igual
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // desfase de montaje de la tablet (soporte girado/chueco en la cabina) - se aprende solo
   // mientras el vehiculo va a velocidad confiable (ver headingCalibration.ts) comparando el rumbo

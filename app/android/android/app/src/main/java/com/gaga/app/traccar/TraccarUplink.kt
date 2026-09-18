@@ -5,6 +5,9 @@ import android.location.Location
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
+import com.gaga.app.rtk.CompassHeadingHolder
+import org.json.JSONArray
+import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -151,22 +154,32 @@ object TraccarUplink {
             // aproximacion, sin necesitar cambiar el schema de OfflineBufferStore por esto
             val batteryPercent = readBatteryPercent(context)
 
-            // uno por uno y en orden cronologico (peekOldest ya ordena por id ASC): el servidor
-            // reconstruye el recorrido tal cual ocurrio, sin puntos adelantandose entre si
-            batch.forEach { item ->
-                val ok = servers.all { server ->
-                    try {
-                        sendOsmAnd(server.url, item.deviceId, item.password, item.location, batteryPercent)
-                        true
-                    } catch (e: Exception) {
-                        false
+            // en lote y en orden cronologico (peekOldest ya ordena por id ASC): el servidor
+            // reconstruye el recorrido tal cual ocurrio, sin puntos adelantandose entre si. Una
+            // hora de respaldo son ~3600 puntos: de a uno serian 3600 handshakes HTTP sobre una
+            // red que acaba de volver, en lotes de 40 son 90 - y el envio EN VIVO nunca espera a
+            // esto, corre en su propio hilo (ver drainCoordinator).
+            val ok = servers.all { server ->
+                try {
+                    sendOsmAndBatch(server.url, batch, batteryPercent)
+                    true
+                } catch (e: Exception) {
+                    // servidor viejo sin /gps/batch, o fallo puntual: se reintenta de a uno para no
+                    // quedarse atorado sin poder drenar nunca
+                    batch.all { item ->
+                        try {
+                            sendOsmAnd(server.url, item.deviceId, item.password, item.location, batteryPercent)
+                            true
+                        } catch (e2: Exception) {
+                            false
+                        }
                     }
                 }
-                // si algo fallo, la conexion probablemente se volvio a caer - se detiene aqui sin
-                // borrar el punto y se reintenta solo, en el siguiente envio en vivo exitoso
-                if (!ok) return
-                db.delete(item.rowId)
             }
+            // si algo fallo, la conexion probablemente se volvio a caer - se detiene aqui sin
+            // borrar nada y se reintenta solo, en el siguiente envio en vivo exitoso
+            if (!ok) return
+            batch.forEach { db.delete(it.rowId) }
             addLog(TraccarLogEntry(System.currentTimeMillis(), servers.first().url, true, "OK (buffer x${batch.size})"))
         }
     }
@@ -178,6 +191,68 @@ object TraccarUplink {
         val manager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
         val level = manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         return if (level in 0..100) level else null
+    }
+
+    // por debajo de esta velocidad el rumbo GPS es ruido - mismo numero que COURSE_TRUST_MIN_KMH
+    // del backend y MIN_SPEED_MPS_FOR_CALIBRATION del Operador (criterio compartido, no acoplamiento)
+    private const val COURSE_TRUST_MIN_MPS = 3f / 3.6f
+
+    // un punto reenviado del buffer puede ser de hace una hora - la brujula de AHORA no dice nada
+    // de hacia donde apuntaba el vehiculo entonces, asi que solo se aplica a un fix en vivo
+    private const val LIVE_FIX_MAX_AGE_MS = 5_000L
+
+    private fun resolveBearing(location: Location): Float? {
+        val moving = location.hasSpeed() && location.speed >= COURSE_TRUST_MIN_MPS
+        if (moving && location.hasBearing()) return location.bearing
+        val isLive = System.currentTimeMillis() - location.time <= LIVE_FIX_MAX_AGE_MS
+        if (isLive) CompassHeadingHolder.recent()?.let { return it }
+        return if (location.hasBearing()) location.bearing else null
+    }
+
+    // el servidor guardado apunta al endpoint OsmAnd de un solo punto (.../gps?key=...) - el de
+    // lote vive en .../gps/batch con la misma clave, asi que se inserta el segmento antes del query
+    private fun batchUrlFor(baseUrl: String): String {
+        val queryAt = baseUrl.indexOf('?')
+        val path = if (queryAt >= 0) baseUrl.substring(0, queryAt) else baseUrl
+        val query = if (queryAt >= 0) baseUrl.substring(queryAt) else ""
+        return path.trimEnd('/') + "/batch" + query
+    }
+
+    private fun sendOsmAndBatch(
+        baseUrl: String,
+        items: List<BufferedPosition>,
+        batteryPercent: Int?,
+    ) {
+        val positions = JSONArray()
+        items.forEach { item ->
+            val location = item.location
+            val obj = JSONObject()
+            obj.put("id", item.deviceId)
+            obj.put("timestamp", location.time / 1000)
+            obj.put("lat", location.latitude)
+            obj.put("lon", location.longitude)
+            if (location.hasSpeed()) obj.put("speed", location.speed * 1.94384) // m/s a nudos
+            if (location.hasBearing()) obj.put("bearing", location.bearing)
+            if (location.hasAltitude()) obj.put("altitude", location.altitude)
+            if (location.hasAccuracy()) obj.put("accuracy", location.accuracy)
+            batteryPercent?.let { obj.put("batt", it) }
+            positions.put(obj)
+        }
+        val body = JSONObject().put("positions", positions).toString().toByteArray(Charsets.UTF_8)
+
+        val conn = URL(batchUrlFor(baseUrl)).openConnection() as HttpURLConnection
+        conn.connectTimeout = 10000
+        conn.readTimeout = 20000
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json")
+        try {
+            conn.outputStream.use { it.write(body) }
+            val code = conn.responseCode
+            if (code !in 200..299) throw Exception("HTTP $code")
+        } finally {
+            conn.disconnect()
+        }
     }
 
     private fun sendOsmAnd(
@@ -195,7 +270,12 @@ object TraccarUplink {
             append("&lat=").append(location.latitude)
             append("&lon=").append(location.longitude)
             if (location.hasSpeed()) append("&speed=").append(location.speed * 1.94384) // m/s a nudos
-            if (location.hasBearing()) append("&bearing=").append(location.bearing)
+            // el rumbo GPS no es confiable a baja velocidad (mismo criterio que usa el mapa del
+            // Operador y VehicleHeadingTracker del backend) - detenido se manda la brujula ya
+            // calibrada, para que el servidor vea hacia donde apunta el vehiculo y no un rumbo
+            // congelado de hace minutos. Si no hay brujula fresca se cae al comportamiento de antes.
+            val bearing = resolveBearing(location)
+            if (bearing != null) append("&bearing=").append(bearing)
             if (location.hasAltitude()) append("&altitude=").append(location.altitude)
             if (location.hasAccuracy()) append("&accuracy=").append(location.accuracy)
             batteryPercent?.let { append("&batt=").append(it) }

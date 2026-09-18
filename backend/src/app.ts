@@ -350,7 +350,7 @@ app.use(
 app.use(
   '/api/alerts',
   authMiddleware,
-  buildAlertsRouter({ alertEventRepo, requireRole }),
+  buildAlertsRouter({ alertEventRepo, requireRole, geofenceEventRepo }),
 );
 app.use('/api/infractions', buildInfractionsRouter({ infractionRepo, authMiddleware, requireRole }));
 // chequeo de rol por-ruta dentro del router, no aquí - ver users.routes.ts

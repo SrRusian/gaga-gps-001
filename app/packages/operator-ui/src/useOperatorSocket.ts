@@ -10,6 +10,21 @@ import type {
 import type { EquipmentMarkerData } from '@gaga-gps/map-core';
 import { useEffect, useRef, useState } from 'react';
 import { useAlertSound } from './useAlertSound';
+import { evaluateGeofencesOffline, type OfflineGeofenceMatch } from './offlineGeofences';
+import {
+  cacheGeofences,
+  dropSentAlerts,
+  loadCachedGeofences,
+  loadQueuedAlerts,
+  queueOfflineAlert,
+} from './offlineStore';
+import { createApiClient, getStoredToken } from '@gaga-gps/client';
+
+const api = createApiClient({ getToken: getStoredToken });
+
+// cuantas alertas sin conexion se mandan por peticion - debe coincidir con MAX_OFFLINE_BATCH del
+// backend (alerts.routes.ts). No limita el total: se repite hasta vaciar la cola entera.
+const OFFLINE_ALERT_BATCH = 500;
 
 function toMarkerData(eq: StaticEquipment): EquipmentMarkerData {
   return {
@@ -59,10 +74,18 @@ export interface ProximityNotice {
 const LOCAL_DISCONNECT_LEVEL1_MS = 10000;
 const LOCAL_DISCONNECT_LEVEL2_MS = 20000;
 
-export function useOperatorSocket(deviceId: string | null) {
+export interface LocalFix {
+  latitude: number;
+  longitude: number;
+}
+
+export function useOperatorSocket(deviceId: string | null, localFix?: LocalFix | null) {
   const [connected, setConnected] = useState(false);
   const [fleet, setFleet] = useState<Record<string, Position>>({});
-  const [geofences, setGeofences] = useState<Geofence[]>([]);
+  // se hidrata del cache local antes de que exista socket - asi la tableta abre con sus geocercas
+  // ya dibujadas y evaluables aunque arranque sin red (pedido explicito: el Operador debe poder
+  // operar sin restricciones sin conexion)
+  const [geofences, setGeofences] = useState<Geofence[]>(() => loadCachedGeofences());
   const [equipment, setEquipment] = useState<EquipmentMarkerData[]>([]);
   const [activeMaps, setActiveMaps] = useState<ActiveMap[]>([]);
   const [myPosition, setMyPosition] = useState<Position | null>(null);
@@ -81,6 +104,9 @@ export function useOperatorSocket(deviceId: string | null) {
   const disconnectedAtRef = useRef<number | null>(null);
   const localSignalLevelRef = useRef<'none' | 'level1' | 'level2'>('none');
   const powerSuspendedRef = useRef(false);
+  // geocerca que el motor local tiene activa ahora mismo (solo sin conexion) - declarada aqui
+  // arriba porque el vigilante de desconexion, mas abajo, no debe pisar una alerta de zona real
+  const offlineMatchRef = useRef<OfflineGeofenceMatch | null>(null);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -117,7 +143,10 @@ export function useOperatorSocket(deviceId: string | null) {
     });
 
     socket.on('maps:active_update', ({ maps }) => setActiveMaps(maps));
-    socket.on('geofences:update', (gs) => setGeofences(gs));
+    socket.on('geofences:update', (gs) => {
+      setGeofences(gs);
+      cacheGeofences(gs); // sobreviven a cerrar la app y a quedarse sin red
+    });
     socket.on('equipment:update', (eqs: StaticEquipment[]) => setEquipment(eqs.map(toMarkerData)));
 
     socket.on('fleet:update', (data) => {
@@ -331,10 +360,14 @@ export function useOperatorSocket(deviceId: string | null) {
       // mientras dure (bug real: "sin conexion prolongada" sonando de fondo tras la suspension)
       if (powerSuspendedRef.current) return;
       if (disconnectedAtRef.current === null) return;
+      // una zona de riesgo real detectada en local pesa mas que el aviso de "sin conexion" - el
+      // nivel se sigue actualizando abajo, solo no se pisa lo que se ve en pantalla
+      const holdForGeofence = offlineMatchRef.current !== null;
       const elapsed = Date.now() - disconnectedAtRef.current;
 
       if (elapsed >= LOCAL_DISCONNECT_LEVEL2_MS && localSignalLevelRef.current !== 'level2') {
         localSignalLevelRef.current = 'level2';
+        if (holdForGeofence) return;
         setAlert({
           severity: 'danger',
           message: 'SIN CONEXIÓN PROLONGADA - DETÉNGASE Y REPORTE POR RADIO',
@@ -342,6 +375,7 @@ export function useOperatorSocket(deviceId: string | null) {
         playDangerSound(true);
       } else if (elapsed >= LOCAL_DISCONNECT_LEVEL1_MS && localSignalLevelRef.current === 'none') {
         localSignalLevelRef.current = 'level1';
+        if (holdForGeofence) return;
         setAlert({ severity: 'warning', message: 'SIN CONEXIÓN - REDUZCA VELOCIDAD' });
         playWarningSound();
       }
@@ -350,6 +384,112 @@ export function useOperatorSocket(deviceId: string | null) {
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
+
+  // Evaluacion local de geocercas: SOLO mientras no hay socket. Con conexion manda el backend sin
+  // excepcion (regla ya documentada: la alerta la decide el servidor para que el HUD del operador y
+  // el panel del supervisor nunca disientan) - esto existe para que perder la red no deje al
+  // operador sin avisos de zona, y para no perder el registro de lo que ocurrio mientras tanto.
+  const geofencesRef = useRef<Geofence[]>(geofences);
+  geofencesRef.current = geofences;
+  const lastOfflineEvalAtRef = useRef(0);
+
+  useEffect(() => {
+    if (!deviceId) return;
+
+    if (connected) {
+      // el servidor retoma el mando: se suelta cualquier alerta que hubiera puesto el motor local,
+      // para no dejar en pantalla un estado que el backend ya no respalda
+      if (offlineMatchRef.current) {
+        offlineMatchRef.current = null;
+        setAlert({ severity: null, message: '' });
+        soundsRef.current.stopSound();
+      }
+      return;
+    }
+
+    if (!localFix) return;
+    // el fix propio puede llegar a 10Hz - una transicion de geocerca no necesita esa frecuencia, y
+    // evaluar cada poligono 10 veces por segundo gastaria bateria sin aportar nada
+    const now = Date.now();
+    if (now - lastOfflineEvalAtRef.current < 500) return;
+    lastOfflineEvalAtRef.current = now;
+
+    const match = evaluateGeofencesOffline(
+      localFix.latitude,
+      localFix.longitude,
+      geofencesRef.current,
+    );
+    const previous = offlineMatchRef.current;
+    if ((match?.geofenceId ?? null) === (previous?.geofenceId ?? null)) return;
+
+    const base = {
+      deviceId,
+      latitude: localFix.latitude,
+      longitude: localFix.longitude,
+      occurredAt: new Date().toISOString(),
+    };
+
+    if (previous) {
+      queueOfflineAlert({
+        ...base,
+        geofenceId: previous.geofenceId,
+        geofenceName: previous.geofenceName,
+        severity: previous.severity,
+        message: `SALIO DE "${previous.geofenceName}"`,
+        event: 'exit',
+      });
+    }
+
+    offlineMatchRef.current = match;
+
+    if (match) {
+      queueOfflineAlert({
+        ...base,
+        geofenceId: match.geofenceId,
+        geofenceName: match.geofenceName,
+        severity: match.severity,
+        message: match.message,
+        event: 'enter',
+      });
+      setAlert({ severity: match.severity, message: match.message });
+      if (match.severity === 'danger') soundsRef.current.playDangerSound(true);
+      else if (match.severity === 'warning') soundsRef.current.playWarningSound();
+    } else {
+      setAlert({ severity: null, message: '' });
+      soundsRef.current.stopSound();
+      // seguimos sin red: el aviso de desconexion vuelve a ser lo relevante en pantalla
+      if (localSignalLevelRef.current === 'level2') {
+        setAlert({ severity: 'danger', message: 'SIN CONEXIÓN PROLONGADA - DETÉNGASE Y REPORTE POR RADIO' });
+      } else if (localSignalLevelRef.current === 'level1') {
+        setAlert({ severity: 'warning', message: 'SIN CONEXIÓN - REDUZCA VELOCIDAD' });
+      }
+    }
+  }, [connected, localFix, deviceId]);
+
+  // al recuperar red se vacia la cola entera, en tandas, sin limite de cuantas - lo que se genero
+  // sin conexion tiene que quedar registrado en el servidor si o si (pedido explicito)
+  useEffect(() => {
+    if (!connected) return;
+    let cancelled = false;
+
+    (async () => {
+      while (!cancelled) {
+        const queued = loadQueuedAlerts();
+        if (queued.length === 0) return;
+        const batch = queued.slice(0, OFFLINE_ALERT_BATCH);
+        try {
+          await api.post('/api/alerts/offline-batch', { alerts: batch });
+          dropSentAlerts(batch.length);
+        } catch {
+          return; // se reintenta solo en la proxima reconexion, sin perder nada
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connected]);
 
   const activeCount = Object.keys(fleet).length;
 

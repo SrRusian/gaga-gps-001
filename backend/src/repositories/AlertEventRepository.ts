@@ -119,6 +119,45 @@ class AlertEventRepository {
     }
   }
 
+  // inserta un hecho YA OCURRIDO y ya terminado, con su fecha real - para las alertas que el
+  // Operador genero sin conexion y recien pudo mandar (ver alerts.routes.ts /offline-batch).
+  // Deliberadamente NO pasa por recordOrEscalate: esa deduplica contra la fila abierta del mismo
+  // (tipo, dispositivo) porque modela un estado EN VIVO, y colapsaria todo un turno sin red en una
+  // sola fila. Aqui cada transicion es su propio registro historico, cerrado de entrada.
+  async recordHistorical({
+    alertType,
+    severity,
+    deviceId,
+    message,
+    metadata = null,
+    occurredAt,
+    projectId,
+  }: {
+    alertType: AlertType;
+    severity: AlertSeverity;
+    deviceId: string;
+    message: string | null;
+    metadata?: Record<string, unknown> | null;
+    occurredAt: Date;
+    projectId?: number | null;
+  }): Promise<AlertEventRow> {
+    try {
+      const resolvedProjectId =
+        projectId !== undefined ? projectId : await this._resolveProjectId(deviceId);
+      const { rows } = await query<AlertEventRow>(
+        `INSERT INTO alert_events
+           (project_id, alert_type, severity, device_id, message, metadata, triggered_at, resolved_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
+         RETURNING *`,
+        [resolvedProjectId, alertType, severity, deviceId, message, metadata, occurredAt],
+      );
+      return rows[0];
+    } catch (err) {
+      console.error('AlertEventRepository.recordHistorical:', (err as Error).message);
+      throw err;
+    }
+  }
+
   async findActive(projectId: number | null): Promise<AlertEventRow[]> {
     try {
       const { rows } = await query<AlertEventRow>(
