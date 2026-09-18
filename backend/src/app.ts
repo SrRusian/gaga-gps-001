@@ -24,10 +24,12 @@ import MapRepository from './repositories/MapRepository';
 import ShiftRepository from './repositories/ShiftRepository';
 import IncidentReportRepository from './repositories/IncidentReportRepository';
 import AlertEventRepository from './repositories/AlertEventRepository';
+import InfractionRepository from './repositories/InfractionRepository';
 import SystemSettingsRepository from './repositories/SystemSettingsRepository';
 import DeviceProjectHistoryRepository from './repositories/DeviceProjectHistoryRepository';
 import UserProjectHistoryRepository from './repositories/UserProjectHistoryRepository';
 import DeviceGroupRepository from './repositories/DeviceGroupRepository';
+import VehicleTypeRepository from './repositories/VehicleTypeRepository';
 import EquipmentVariableRepository from './repositories/EquipmentVariableRepository';
 import EquipmentActivityRepository from './repositories/EquipmentActivityRepository';
 import ProductionRecordRepository from './repositories/ProductionRecordRepository';
@@ -81,8 +83,10 @@ import buildProjectsRouter from './api/routes/projects.routes';
 import buildShiftsRouter from './api/routes/shifts.routes';
 import buildIncidentsRouter from './api/routes/incidents.routes';
 import buildAlertsRouter from './api/routes/alerts.routes';
+import buildInfractionsRouter from './api/routes/infractions.routes';
 import buildSettingsRouter from './api/routes/settings.routes';
 import buildDeviceGroupsRouter from './api/routes/device-groups.routes';
+import buildVehicleTypesRouter from './api/routes/vehicle-types.routes';
 import buildEquipmentVariablesRouter from './api/routes/equipment-variables.routes';
 import buildPowerEventsRouter from './api/routes/power-events.routes';
 import buildProductionRouter from './api/routes/production.routes';
@@ -139,11 +143,13 @@ const settingsRepo = new SystemSettingsRepository();
 const deviceProjectHistoryRepo = new DeviceProjectHistoryRepository();
 const userProjectHistoryRepo = new UserProjectHistoryRepository();
 const deviceGroupRepo = new DeviceGroupRepository();
+const vehicleTypeRepo = new VehicleTypeRepository();
 const equipmentVariableRepo = new EquipmentVariableRepository();
 const equipmentActivityRepo = new EquipmentActivityRepository();
 const productionRecordRepo = new ProductionRecordRepository();
 const payRateRepo = new PayRateRepository();
 const alertEventRepo = new AlertEventRepository();
+const infractionRepo = new InfractionRepository();
 
 const authMiddleware = buildAuthMiddleware({ userRepo });
 const downloadAuthMiddleware = buildDownloadAuthMiddleware({ userRepo });
@@ -154,7 +160,12 @@ const deviceManager = new DeviceManager({ deviceRepo });
 
 // ── Servicios de seguridad ──────────────────────────────────────
 // socketServer se asigna después - evita ciclo con FleetSocketServer (mismo patrón que incidentAlertService abajo)
-const geofenceService = new GeofenceAlertService({ geofenceRepo, geofenceEventRepo, alertEventRepo });
+const geofenceService = new GeofenceAlertService({
+  geofenceRepo,
+  geofenceEventRepo,
+  alertEventRepo,
+  infractionRepo,
+});
 const preventiveStopService = new PreventiveStopService({ io, alertEventRepo });
 // socketServer se asigna después - evita ciclo con FleetSocketServer (mismo patrón que geofenceService abajo)
 const signalLostService = new SignalLostService({
@@ -162,10 +173,10 @@ const signalLostService = new SignalLostService({
   deviceManager,
   alertEventRepo,
 });
-const collisionService = new CollisionRiskService({ io, alertEventRepo });
+const collisionService = new CollisionRiskService({ io, alertEventRepo, infractionRepo, geofenceRepo });
 const proximityService = new VehicleProximityService({ io, alertEventRepo });
 // socketServer se asigna después, mismo patrón que geofenceService (evita ciclo con FleetSocketServer)
-const speedAlertService = new SpeedAlertService({ deviceRepo, alertEventRepo });
+const speedAlertService = new SpeedAlertService({ deviceRepo, alertEventRepo, infractionRepo });
 const equipmentManager = new StaticEquipmentManager({ io });
 
 // ── Telemetría propia ───────────────────────────────────────────
@@ -183,6 +194,7 @@ const socketServer = new FleetSocketServer({
 geofenceService.socketServer = socketServer;
 speedAlertService.socketServer = socketServer;
 signalLostService.socketServer = socketServer;
+collisionService.socketServer = socketServer;
 
 const positionFilter = new PositionFilterService(env.positionFilter);
 const speedEstimator = new SpeedEstimationService();
@@ -211,6 +223,7 @@ const positionProcessor = new PositionProcessor({
   speedEstimator,
   speedAlertService,
   activityClassificationService,
+  deviceFootprintRepo: deviceRepo,
 });
 
 // ── UI estática ──────────────────────────────────────────────────
@@ -299,6 +312,7 @@ app.use(
     equipmentManager,
     deviceProjectHistoryRepo,
     socketServer,
+    headingTracker: positionProcessor.headingTracker,
   }),
 );
 app.use(
@@ -336,8 +350,9 @@ app.use(
 app.use(
   '/api/alerts',
   authMiddleware,
-  buildAlertsRouter({ alertEventRepo, requireRole, shiftResolver }),
+  buildAlertsRouter({ alertEventRepo, requireRole }),
 );
+app.use('/api/infractions', buildInfractionsRouter({ infractionRepo, authMiddleware, requireRole }));
 // chequeo de rol por-ruta dentro del router, no aquí - ver users.routes.ts
 app.use(
   '/api/users',
@@ -350,6 +365,7 @@ app.use(
   authMiddleware,
   buildDeviceGroupsRouter({ deviceGroupRepo, requireRole }),
 );
+app.use('/api/vehicle-types', buildVehicleTypesRouter({ vehicleTypeRepo, authMiddleware, requireRole }));
 // clave compartida en POST /, no JWT - ver equipment-variables.routes.ts
 app.use(
   '/api/equipment-variables',
@@ -480,6 +496,18 @@ async function loadPersistedState(): Promise<void> {
     console.log(
       `${staleTrackedDevices.length} dispositivo(s) "online" recuperado(s) para monitoreo de señal`,
     );
+
+    // signal_lost/collision/proximity dependen 100% de estado en memoria (alertLevel/collisionAlerts/
+    // proximityAlerts) que un reinicio del proceso borra - sin esto una fila abierta antes del reinicio
+    // queda "activa" para siempre aunque el vehiculo ya lleve horas bien. Los detectores re-abren de
+    // inmediato si el problema sigue siendo real (checkAllDevices cada 5s, colision/proximity en la
+    // siguiente posicion real).
+    for (const alertType of ['signal_lost', 'collision', 'proximity', 'restricted_zone'] as const) {
+      const closed = await alertEventRepo.resolveAllOpenOfType(alertType);
+      if (closed > 0) {
+        console.log(`${closed} alerta(s) '${alertType}' abierta(s) antes del reinicio, cerrada(s) al arrancar`);
+      }
+    }
 
     const equipment = await equipmentRepo.findAll();
     equipment.forEach((eq) =>

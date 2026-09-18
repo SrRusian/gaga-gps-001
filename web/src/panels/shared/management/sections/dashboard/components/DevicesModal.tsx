@@ -1,7 +1,9 @@
 import { Modal } from '@gaga-gps/ui';
 import type { ProjectRow } from '../../../types';
 import type { DevicesAdmin } from '../useDevicesAdmin';
+import type { VehicleTypesAdmin } from '../useVehicleTypesAdmin';
 import type { Scope } from '../scope';
+import { VehicleTypesModal } from './VehicleTypesModal';
 
 export interface DevicesModalProps {
   open: boolean;
@@ -12,6 +14,7 @@ export interface DevicesModalProps {
   projects: ProjectRow[];
   findLinkedEquipmentName: (deviceUniqueId: string) => string | undefined;
   admin: DevicesAdmin;
+  vehicleTypesAdmin: VehicleTypesAdmin;
 }
 
 export function DevicesModal({
@@ -23,6 +26,7 @@ export function DevicesModal({
   projects,
   findLinkedEquipmentName,
   admin,
+  vehicleTypesAdmin,
 }: DevicesModalProps) {
   return (
     <>
@@ -36,6 +40,11 @@ export function DevicesModal({
           <button className="btn btn-sm" onClick={admin.openCreateDevice}>
             + Nuevo
           </button>
+          {isAdmin && (
+            <button className="btn btn-sm" onClick={() => vehicleTypesAdmin.setVehicleTypesModalOpen(true)}>
+              Administrar tipos de vehículo
+            </button>
+          )}
         </div>
         {admin.scopedDevices.length === 0 ? (
           <div className="org-empty">Sin dispositivos todavía.</div>
@@ -45,7 +54,7 @@ export function DevicesModal({
               <tr>
                 <th>ID</th>
                 <th>Nombre</th>
-                <th>Tipo</th>
+                <th>Tipo de vehículo</th>
                 {scope === 'global' && <th>Proyecto</th>}
                 <th>Estado</th>
                 <th>Equipo estático</th>
@@ -57,7 +66,7 @@ export function DevicesModal({
                 <tr key={d.id}>
                   <td>{d.unique_id}</td>
                   <td>{d.name}</td>
-                  <td>{d.type}</td>
+                  <td>{d.vehicle_type_name ?? '-'}</td>
                   {scope === 'global' && (
                     <td>{projects.find((p) => p.id === d.project_id)?.name ?? 'Sin asignar'}</td>
                   )}
@@ -103,13 +112,36 @@ export function DevicesModal({
           />
         </div>
         <div className="gg-modal-field">
-          <label>Tipo</label>
-          <input
-            placeholder="vehicle"
-            value={admin.deviceForm.type}
-            onChange={(e) => admin.setDeviceForm({ ...admin.deviceForm, type: e.target.value })}
-          />
+          <label>Tipo de vehículo (silueta a escala real en el mapa)</label>
+          <select
+            value={admin.deviceForm.vehicleTypeId}
+            onChange={(e) => admin.setDeviceForm({ ...admin.deviceForm, vehicleTypeId: e.target.value })}
+          >
+            <option value="">Sin asignar</option>
+            {vehicleTypesAdmin.vehicleTypes.map((vt) => (
+              <option key={vt.id} value={vt.id}>
+                {vt.name} ({vt.length_meters.toFixed(2)}m x {vt.width_meters.toFixed(2)}m)
+              </option>
+            ))}
+          </select>
         </div>
+        {admin.deviceModal?.device && (
+          // sin .gg-modal-field envolviendo el <input> a proposito - ese selector estiliza inputs de
+          // texto (fondo oscuro, padding, border-radius), se ve roto aplicado a un checkbox
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0' }}>
+            <input
+              type="checkbox"
+              id="device-restricted-zone"
+              checked={admin.deviceForm.restrictedToAllowedZone}
+              onChange={(e) =>
+                admin.setDeviceForm({ ...admin.deviceForm, restrictedToAllowedZone: e.target.checked })
+              }
+            />
+            <label htmlFor="device-restricted-zone" style={{ fontSize: 12, color: '#8b949e' }}>
+              Restringido a zona permitida (debe quedarse dentro - salir genera infracción)
+            </label>
+          </div>
+        )}
         {isAdmin && (admin.deviceModal?.device || scope === 'global') && (
           <div className="gg-modal-field">
             <label>Proyecto</label>
@@ -135,6 +167,14 @@ export function DevicesModal({
           </button>
         </div>
       </Modal>
+
+      {isAdmin && (
+        <VehicleTypesModal
+          open={vehicleTypesAdmin.vehicleTypesModalOpen}
+          onClose={() => vehicleTypesAdmin.setVehicleTypesModalOpen(false)}
+          admin={vehicleTypesAdmin}
+        />
+      )}
     </>
   );
 }

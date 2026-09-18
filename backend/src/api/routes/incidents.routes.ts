@@ -5,6 +5,7 @@ import type { IncidentCategory } from '../../repositories/IncidentReportReposito
 import type IncidentReportRepository from '../../repositories/IncidentReportRepository';
 import type IncidentAlertService from '../../services/alerts/IncidentAlertService';
 import type { UserRole } from '../../repositories/UserRepository';
+import { startOfTodayIso } from '../../utils/dateScope';
 
 const VALID_CATEGORIES: IncidentCategory[] = ['obstacle', 'accident', 'traffic', 'other'];
 
@@ -35,6 +36,36 @@ export function buildIncidentsRouter({
     } catch (err) {
       console.error('incidents.routes GET /:', (err as Error).message);
       res.status(500).json({ error: 'Error obteniendo incidentes' });
+    }
+  });
+
+  // abiertos + resueltos - pestaña "Incidentes" de Supervisor/Encargado (distinta de GET / arriba,
+  // que solo trae abiertos y alimenta la hidratación en vivo del socket). Mismo criterio de alcance
+  // por rol que infractions.routes.ts: Supervisor solo su día actual, Encargado filtra libre.
+  router.get('/history', authMiddleware, requireRole('admin', 'project_administrator', 'project_supervisor', 'project_manager'), async (req, res) => {
+    try {
+      if (req.user!.projectId == null) {
+        return res.status(400).json({ error: 'projectId es requerido (admin: use el panel del proyecto)' });
+      }
+      const isSupervisor = req.user!.role === 'project_supervisor';
+      const from = isSupervisor ? startOfTodayIso() : (req.query.from ? String(req.query.from) : undefined);
+      const to = isSupervisor ? undefined : (req.query.to ? String(req.query.to) : undefined);
+      const status =
+        req.query.status === 'open' || req.query.status === 'resolved' ? req.query.status : undefined;
+      const deviceId = req.query.deviceId ? String(req.query.deviceId) : undefined;
+      const reportedByName = req.query.reportedByName ? String(req.query.reportedByName) : undefined;
+
+      const incidents = await incidentRepo.findHistory(req.user!.projectId, {
+        from,
+        to,
+        status,
+        deviceId,
+        reportedByName,
+      });
+      res.json(incidents);
+    } catch (err) {
+      console.error('incidents.routes GET /history:', (err as Error).message);
+      res.status(500).json({ error: 'Error obteniendo historial de incidentes' });
     }
   });
 

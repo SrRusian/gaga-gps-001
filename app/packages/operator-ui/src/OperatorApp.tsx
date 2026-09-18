@@ -15,6 +15,7 @@ import { useDeviceId } from './useDeviceId';
 import { useIncidentReporter } from './useIncidentReporter';
 import { useOperatorAuth } from './useOperatorAuth';
 import { useOperatorSocket } from './useOperatorSocket';
+import { useVehicleFootprints } from './useVehicleFootprints';
 
 const AUTO_FOLLOW_STORAGE_KEY = 'gaga_operator_auto_follow';
 const THREAT_FRAME_HOLD_MS = 8000;
@@ -49,9 +50,11 @@ export default function OperatorApp() {
     fleet,
     alert,
     nearestVehicle,
+    nearestOnRoute,
     threat,
     activeGeofenceId,
     incidents,
+    proximityNotice,
   } = useOperatorSocket(deviceId);
   const [mapMode, setMapMode] = useMapMode('gaga_operator_map_mode');
   const [autoFollow, setAutoFollow] = useAutoFollow();
@@ -64,6 +67,7 @@ export default function OperatorApp() {
   const { position: localGeo, error: geoError, supported: geoSupported } = useDeviceGeolocation();
   const { level: batteryLevel, charging: batteryCharging } = useBatteryLevel();
   useDeviceSensorReporter(deviceId);
+  const vehicleFootprints = useVehicleFootprints();
 
   // posición propia: local tiene prioridad sobre servidor; alertas siguen siendo del servidor
   const displayFleet = useMemo(() => {
@@ -79,7 +83,6 @@ export default function OperatorApp() {
       altitude: localGeo.altitude ?? base?.altitude,
       fixTime: new Date(localGeo.timestamp).toISOString(),
       deviceName: base?.deviceName,
-      deviceType: base?.deviceType,
     };
     return { ...fleet, [deviceId]: merged };
   }, [fleet, deviceId, localGeo]);
@@ -144,8 +147,9 @@ export default function OperatorApp() {
     navigate('/', { replace: true });
   }
 
+  const myVehicleTypeName = deviceId ? (vehicleFootprints[deviceId]?.vehicleTypeName ?? null) : null;
   const deviceName = myDisplay?.deviceName
-    ? `${myDisplay.deviceName}${myDisplay.deviceType ? ` (${myDisplay.deviceType})` : ''}`
+    ? `${myDisplay.deviceName}${myVehicleTypeName ? ` (${myVehicleTypeName})` : ''}`
     : (deviceId ?? 'Sin vehículo asignado');
 
   return (
@@ -212,12 +216,20 @@ export default function OperatorApp() {
               }
               highlightedGeofenceId={activeGeofenceId}
               initialCenter={[myDisplay.longitude, myDisplay.latitude]}
+              deviceFootprints={vehicleFootprints}
               onUserInteraction={() => setAutoFollow(false)}
             />
 
             <div className="op-map-mode-selector-wrap">
               <MapModeSelector mode={mapMode} onChange={setMapMode} />
             </div>
+
+            {proximityNotice && (
+              <div className="op-proximity-notice">
+                <span className="op-proximity-notice-dot" />
+                {proximityNotice.message} ({Math.round(proximityNotice.distanceMeters)} m)
+              </div>
+            )}
 
             {}
             {deviceId && (
@@ -262,12 +274,18 @@ export default function OperatorApp() {
                 </span>
               </div>
               <div className="op-info-item">
-                <span className="op-info-label">Más cercano</span>
+                <span className="op-info-label">Vehículo más cercano</span>
                 <span className="op-info-value">
                   {liveNearest ? `${Math.round(liveNearest.distanceM)} m` : '--'}
                   {liveNearest?.stale && <span id="op-nearest-stale"> (sin señal)</span>}
                 </span>
               </div>
+              {nearestOnRoute && (
+                <div className="op-info-item">
+                  <span className="op-info-label">Más cercano en ruta</span>
+                  <span className="op-info-value">{nearestOnRoute.distanceMeters} m</span>
+                </div>
+              )}
               {batteryLevel !== null && (
                 <div className="op-info-item">
                   <span className="op-info-label">Batería</span>

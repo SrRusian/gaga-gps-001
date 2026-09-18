@@ -20,6 +20,23 @@ CREATE TABLE IF NOT EXISTS device_groups (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- catalogo global de tipos de vehiculo (largo/ancho reales, metros) - solo admin global lo
+-- administra, project_administrator solo asigna un tipo ya existente a sus dispositivos. Usado
+-- para dibujar la silueta real del vehiculo en el mapa (ver web/packages/map-core/vehicleMarker.ts)
+-- - con RTK a precision centimetrica el circulo de precision GPS ya no basta para saber si el
+-- vehiculo (varios metros) iba centrado en su carril/geocerca.
+CREATE TABLE IF NOT EXISTS vehicle_types (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  length_meters DOUBLE PRECISION NOT NULL,
+  width_meters DOUBLE PRECISION NOT NULL,
+  -- opcional - no todos los tipos necesitan limite propio (mismo criterio nullable/sin CHECK que
+  -- devices.speed_limit_kmh/geofences.speed_limit_kmh). SpeedAlertService lo combina con el limite
+  -- del dispositivo/grupo/geocerca y gana siempre el mas estricto.
+  max_speed_kmh DOUBLE PRECISION,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS devices (
   id SERIAL PRIMARY KEY,
   unique_id VARCHAR(255) UNIQUE NOT NULL,
@@ -28,13 +45,20 @@ CREATE TABLE IF NOT EXISTS devices (
   status VARCHAR(20) DEFAULT 'offline',
   project_id INTEGER REFERENCES projects(id),
   group_id INTEGER REFERENCES device_groups(id),
+  vehicle_type_id INTEGER REFERENCES vehicle_types(id) ON DELETE SET NULL,
   last_update TIMESTAMPTZ,
   attributes JSONB DEFAULT '{}',
   speed_limit_kmh DOUBLE PRECISION,
+  -- FALSE (default) = puede entrar/salir de una geocerca tipo 'allowed' libremente, sin infraccion,
+  -- solo queda el registro en geofence_events. TRUE = debe permanecer dentro, salir genera una
+  -- infraccion + alerta al operador. Default FALSE a proposito - un dispositivo existente nunca
+  -- empieza a generar infracciones solo porque se dibujo una zona permitida nueva
+  restricted_to_allowed_zone BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_devices_project ON devices (project_id);
 CREATE INDEX IF NOT EXISTS idx_devices_group ON devices (group_id);
+CREATE INDEX IF NOT EXISTS idx_devices_vehicle_type ON devices (vehicle_type_id);
 
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -259,7 +283,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
   id BIGSERIAL PRIMARY KEY,
   project_id INTEGER REFERENCES projects(id),
   alert_type VARCHAR(20) NOT NULL
-    CHECK (alert_type IN ('geofence', 'signal_lost', 'collision', 'proximity', 'preventive_stop', 'incident', 'equipment_variable', 'speed', 'power_loss')),
+    CHECK (alert_type IN ('geofence', 'signal_lost', 'collision', 'proximity', 'preventive_stop', 'incident', 'equipment_variable', 'speed', 'power_loss', 'restricted_zone')),
   severity VARCHAR(10) NOT NULL CHECK (severity IN ('info', 'warning', 'danger')),
   device_id VARCHAR(255),
   device_id_2 VARCHAR(255),
@@ -403,3 +427,33 @@ CREATE TABLE IF NOT EXISTS app_releases (
   released_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_app_releases_version_code ON app_releases (version_code DESC);
+
+-- registro permanente de infracciones reales (exceso de velocidad confirmado 100%+, o vehiculo
+-- tocando una geocerca de peligro) - a diferencia de alert_events (estado en vivo que se
+-- sobreescribe/resuelve solo), esto nunca se sobreescribe: una fila por episodio real, para que un
+-- encargado pueda revisar el historico completo. Los avisos "silenciosos" (proximidad lejana,
+-- solo para el operador) nunca generan fila aqui - ver GeofenceAlertService/SpeedAlertService.
+CREATE TABLE IF NOT EXISTS infractions (
+  id BIGSERIAL PRIMARY KEY,
+  project_id INTEGER REFERENCES projects(id),
+  device_id VARCHAR(255) NOT NULL REFERENCES devices(unique_id),
+  -- solo para infraction_type='collision' - el otro vehiculo involucrado (mismo patron que
+  -- alert_events.device_id_2, un solo registro por evento en vez de uno duplicado por vehiculo)
+  device_id_2 VARCHAR(255) REFERENCES devices(unique_id),
+  -- quien operaba el vehiculo en el momento - NULL si no habia turno activo (caso raro)
+  operator_session_id BIGINT REFERENCES operator_sessions(id),
+  infraction_type VARCHAR(20) NOT NULL CHECK (infraction_type IN ('speed', 'geofence', 'collision')),
+  -- 1 (leve) a 10 (grave/choque real) - ver backend/src/utils/infractionSeverity.ts para la formula
+  -- por tipo, decidida por el sistema (sin intervencion manual) al momento de crear la fila
+  severity SMALLINT NOT NULL DEFAULT 5 CHECK (severity BETWEEN 1 AND 10),
+  message TEXT NOT NULL,
+  latitude DOUBLE PRECISION NOT NULL,
+  longitude DOUBLE PRECISION NOT NULL,
+  metadata JSONB,
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_by INTEGER REFERENCES users(id),
+  reviewed_at TIMESTAMPTZ,
+  review_notes TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_infractions_project_time ON infractions (project_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_infractions_device_time ON infractions (device_id, occurred_at DESC);

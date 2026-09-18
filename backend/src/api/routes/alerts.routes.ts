@@ -3,7 +3,6 @@ import express from 'express';
 import type AlertEventRepository from '../../repositories/AlertEventRepository';
 import type { AlertSeverity, AlertType } from '../../repositories/AlertEventRepository';
 import type { UserRole } from '../../repositories/UserRepository';
-import type ShiftResolverService from '../../services/telemetry/ShiftResolverService';
 
 const VALID_TYPES: AlertType[] = [
   'geofence',
@@ -18,10 +17,9 @@ const VALID_SEVERITIES: AlertSeverity[] = ['info', 'warning', 'danger'];
 export interface AlertsRouterDeps {
   alertEventRepo: AlertEventRepository;
   requireRole: (...roles: UserRole[]) => RequestHandler;
-  shiftResolver: ShiftResolverService;
 }
 
-async function computeFilters(req: express.Request, shiftResolver: ShiftResolverService) {
+function computeFilters(req: express.Request) {
   const { type, severity, deviceId, from, to, limit, offset } = req.query;
 
   if (type && !VALID_TYPES.includes(type as AlertType)) {
@@ -31,33 +29,31 @@ async function computeFilters(req: express.Request, shiftResolver: ShiftResolver
     throw new Error(`severity inválida - use: ${VALID_SEVERITIES.join(', ')}`);
   }
 
-  let effectiveFrom = from ? String(from) : undefined;
-  if (req.user!.role === 'project_supervisor') {
-    const shiftStart = await shiftResolver.mostRecentShiftStartForSupervisor(req.user!.id);
-    if (shiftStart && (!effectiveFrom || new Date(effectiveFrom) < shiftStart)) {
-      effectiveFrom = shiftStart.toISOString();
-    }
-  }
-
   return {
     projectId: req.user!.role === 'admin' ? null : (req.user!.projectId ?? null),
     alertType: type ? (String(type) as AlertType) : undefined,
     severity: severity ? (String(severity) as AlertSeverity) : undefined,
     deviceId: deviceId ? String(deviceId) : undefined,
-    from: effectiveFrom,
+    from: from ? String(from) : undefined,
     to: to ? String(to) : undefined,
     limit: limit ? Math.min(parseInt(String(limit), 10), 500) : undefined,
     offset: offset ? parseInt(String(offset), 10) : undefined,
   };
 }
 
-export function buildAlertsRouter({ alertEventRepo, requireRole, shiftResolver }: AlertsRouterDeps) {
+export function buildAlertsRouter({ alertEventRepo, requireRole }: AlertsRouterDeps) {
   const router = express.Router();
-  const canView = requireRole('admin', 'project_administrator', 'project_supervisor', 'project_manager');
+  // project_supervisor deliberadamente fuera - pedido explicito: solo ve "su turno" (via
+  // /api/infractions y /api/incidents/history, ambos acotados al dia actual), sin acceso al
+  // historial completo. Encargado (project_manager) si puede filtrar libremente por fecha.
+  // (esto tambien dejo sin uso a ShiftResolverService.mostRecentShiftStartForSupervisor, que
+  // existia solo para acotar esta ruta al turno del supervisor - se deja el metodo en el servicio
+  // por si algo mas lo necesita a futuro, no tiene otro caller hoy)
+  const canView = requireRole('admin', 'project_administrator', 'project_manager');
 
   router.get('/history', canView, async (req, res) => {
     try {
-      const filters = await computeFilters(req, shiftResolver);
+      const filters = computeFilters(req);
       const rows = await alertEventRepo.findHistory(filters);
       res.json(rows);
     } catch (err) {
@@ -74,7 +70,7 @@ export function buildAlertsRouter({ alertEventRepo, requireRole, shiftResolver }
 
   router.get('/history/csv', canView, async (req, res) => {
     try {
-      const filters = await computeFilters(req, shiftResolver);
+      const filters = computeFilters(req);
       const rows = await alertEventRepo.findHistory({ ...filters, limit: 5000 });
 
       const header = 'fecha,tipo,severidad,dispositivo,dispositivo_2,mensaje,resuelto_en\n';

@@ -2,7 +2,7 @@ import type { ProjectRow } from '../../../types';
 import { NavIcon, type IconName } from '../../../../components/NavIcons';
 import type { Scope } from '../scope';
 
-export type Overlay = 'projects' | 'shifts' | 'devices' | 'users' | 'geofences' | 'equipment' | 'maps' | null;
+export type Overlay = 'projects' | 'shifts' | 'devices' | 'users' | 'geofences' | 'equipment' | 'maps' | 'alerts' | null;
 
 export interface DashboardSidebarProps {
   isAdmin: boolean;
@@ -19,6 +19,7 @@ export interface DashboardSidebarProps {
   onExitHistoryMode: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  alertCount: number;
 }
 
 function SidebarItem({
@@ -61,6 +62,7 @@ export function DashboardSidebar({
   onExitHistoryMode,
   collapsed,
   onToggleCollapse,
+  alertCount,
 }: DashboardSidebarProps) {
   return (
     <aside className={`dash-sidebar${collapsed ? ' dash-sidebar--collapsed' : ''}`}>
@@ -155,6 +157,17 @@ export function DashboardSidebar({
             collapsed={collapsed}
             onClick={() => onOpenOverlay('maps')}
           />
+          {isAdmin && (
+            // solo Admin global - project-administrator.tsx no importa supervisor.css (de donde
+            // sale el estilo del modal de Alertas), mostrarselo tambien se veria sin estilos
+            <SidebarItem
+              icon="bell"
+              label={alertCount > 0 ? `Alertas (${alertCount})` : 'Alertas'}
+              active={activeOverlay === 'alerts'}
+              collapsed={collapsed}
+              onClick={() => onOpenOverlay('alerts')}
+            />
+          )}
         </div>
 
         <div className="dash-nav-group dash-nav-group--loose">

@@ -104,11 +104,14 @@ describe('GeofenceRepository - PostGIS real', () => {
     expect(outside.map((g) => g.id)).not.toContain(polygon.id);
   });
 
-  it('línea "debe quedarse dentro" (stayInside=true, default): matchea lejos del eje, no cerca', async () => {
+  // 'authorized_route' quedo fuera a proposito de este mecanismo generico (ver test dedicado mas
+  // abajo) - se usa 'danger' aqui para seguir cubriendo el mecanismo "debe quedarse dentro" para
+  // cualquier OTRO tipo de linea que lo use (ej. un limite que de verdad debe alertar al salirse)
+  it('línea "debe quedarse dentro" (stayInside=true, default, tipo != authorized_route): matchea lejos del eje, no cerca', async () => {
     const route = await repo.create({
-      name: 'Ruta de prueba',
+      name: 'Línea de prueba',
       projectId: testProjectId,
-      type: 'authorized_route',
+      type: 'danger',
       shapeType: 'polyline',
       geometry: {
         type: 'LineString',
@@ -134,6 +137,44 @@ describe('GeofenceRepository - PostGIS real', () => {
       longitude: -103.55,
     });
     expect(farFromAxis.map((g) => g.id)).toContain(route.id);
+  });
+
+  // authorized_route nunca alerta (fuera de AREA_SEVERITY en GeofenceAlertService) - su unico
+  // proposito en este WHERE es aportar speed_limit_kmh mientras el vehiculo va SOBRE la ruta, sin
+  // importar stay_inside. Bug real encontrado y corregido en esta misma ronda: antes matcheaba al
+  // reves (lejos del eje), asi que el limite de velocidad de una ruta nunca aplicaba yendo sobre ella.
+  it('línea "authorized_route" matchea DENTRO del corredor (para el límite de velocidad), no lejos', async () => {
+    const route = await repo.create({
+      name: 'Ruta de prueba',
+      projectId: testProjectId,
+      type: 'authorized_route',
+      shapeType: 'polyline',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [-103.6, 19.37],
+          [-103.5, 19.37],
+        ],
+      },
+      corridorWidthMeters: 20,
+      speedLimitKmh: 30,
+    });
+    createdGeofenceIds.push(route.id);
+
+    const onAxis = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 19.37,
+      longitude: -103.55,
+    });
+    expect(onAxis.map((g) => g.id)).toContain(route.id);
+    expect(onAxis.find((g) => g.id === route.id)?.speed_limit_kmh).toBe(30);
+
+    const farFromAxis = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 19.4,
+      longitude: -103.55,
+    });
+    expect(farFromAxis.map((g) => g.id)).not.toContain(route.id);
   });
 
   it('línea "no tocar" (stayInside=false): matchea cerca del eje, no lejos', async () => {
@@ -271,6 +312,149 @@ describe('GeofenceRepository - PostGIS real', () => {
       longitude: -103.56,
     });
     expect(matches.map((g) => g.id)).toContain(circle.id);
+  });
+
+  it('circulo: contained=true adentro, contained=false y distance_meters>0 dentro del buffer de proximidad', async () => {
+    const circle = await repo.create({
+      name: 'Círculo de proximidad',
+      projectId: testProjectId,
+      type: 'danger',
+      shapeType: 'circle',
+      centerLat: -10.35,
+      centerLon: -150.56,
+      radiusMeters: 50,
+    });
+    createdGeofenceIds.push(circle.id);
+
+    const inside = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: -10.35,
+      longitude: -150.56,
+    });
+    const insideRow = inside.find((g) => g.id === circle.id);
+    expect(insideRow?.contained).toBe(true);
+    expect(insideRow?.distance_meters).toBe(0);
+
+    // ~67m del centro (17m fuera del radio de 50m) - sin buffer de proximidad no deberia matchear
+    const nearWithoutBuffer = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: -10.3506,
+      longitude: -150.56,
+    });
+    expect(nearWithoutBuffer.map((g) => g.id)).not.toContain(circle.id);
+
+    // mismo punto, ahora con alertableTypes+lookahead - debe matchear con contained=false
+    const nearWithBuffer = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: -10.3506,
+      longitude: -150.56,
+      alertableTypes: ['danger'],
+      proximityLookaheadMeters: 100,
+    });
+    const nearRow = nearWithBuffer.find((g) => g.id === circle.id);
+    expect(nearRow?.contained).toBe(false);
+    expect(nearRow?.distance_meters).toBeGreaterThan(0);
+  });
+
+  it('footprintWkt reemplaza al punto crudo - un rectangulo que toca el circulo matchea aunque su centro este afuera', async () => {
+    const circle = await repo.create({
+      name: 'Círculo con footprint',
+      projectId: testProjectId,
+      type: 'danger',
+      shapeType: 'circle',
+      centerLat: 5.1,
+      centerLon: 120.2,
+      radiusMeters: 10,
+    });
+    createdGeofenceIds.push(circle.id);
+
+    // punto crudo centrado bien lejos del circulo - no deberia matchear
+    const withoutFootprint = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 5.1005,
+      longitude: 120.2,
+    });
+    expect(withoutFootprint.map((g) => g.id)).not.toContain(circle.id);
+
+    // un rectangulo "vehiculo" grande centrado en el mismo punto lejano (~55m del circulo) SI
+    // alcanza a tocarlo - su borde sur llega a ~4m del centro del circulo (radio 10m)
+    const withFootprint = await repo.findMatchingSpatial({
+      projectId: testProjectId,
+      latitude: 5.1005,
+      longitude: 120.2,
+      footprintWkt:
+        'POLYGON((120.19982 5.10104, 120.20018 5.10104, 120.20018 5.09996, 120.19982 5.09996, 120.19982 5.10104))',
+    });
+    const row = withFootprint.find((g) => g.id === circle.id);
+    expect(row).toBeDefined();
+    expect(row?.contained).toBe(true);
+  });
+
+  it('findRouteMembership: detecta la ruta y la fraccion de recorrido (0=inicio, 1=fin) de un punto dentro del corredor', async () => {
+    const route = await repo.create({
+      name: 'Ruta de prueba A-B',
+      projectId: testProjectId,
+      type: 'authorized_route',
+      shapeType: 'polyline',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [-140.0, 30.0], // A
+          [-140.0, 30.01], // B - 10 puntos al norte, ~1.1km
+        ],
+      },
+      corridorWidthMeters: 20,
+    });
+    createdGeofenceIds.push(route.id);
+
+    const nearStart = await repo.findRouteMembership({
+      projectId: testProjectId,
+      latitude: 30.0005,
+      longitude: -140.0,
+    });
+    expect(nearStart?.id).toBe(route.id);
+    expect(nearStart?.lineFraction).toBeGreaterThan(0);
+    expect(nearStart?.lineFraction).toBeLessThan(0.2);
+
+    const nearEnd = await repo.findRouteMembership({
+      projectId: testProjectId,
+      latitude: 30.0095,
+      longitude: -140.0,
+    });
+    expect(nearEnd?.lineFraction).toBeGreaterThan(0.8);
+
+    const farAway = await repo.findRouteMembership({
+      projectId: testProjectId,
+      latitude: 31.0,
+      longitude: -140.0,
+    });
+    expect(farAway).toBeNull();
+  });
+
+  it('findRouteMembership solo considera polyline tipo authorized_route, no una linea "no tocar"', async () => {
+    const keepAway = await repo.create({
+      name: 'Linea a no tocar de prueba',
+      projectId: testProjectId,
+      type: 'danger',
+      shapeType: 'polyline',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [-141.0, 30.0],
+          [-141.0, 30.01],
+        ],
+      },
+      corridorWidthMeters: 20,
+      stayInside: false,
+    });
+    createdGeofenceIds.push(keepAway.id);
+
+    const match = await repo.findRouteMembership({
+      projectId: testProjectId,
+      latitude: 30.0005,
+      longitude: -141.0,
+    });
+    expect(match).toBeNull();
   });
 
   it('projectId null (dispositivo sin proyecto) no matchea ninguna geocerca real', async () => {

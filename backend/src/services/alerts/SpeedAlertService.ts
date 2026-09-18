@@ -1,3 +1,5 @@
+import { speedInfractionSeverity } from '../../utils/infractionSeverity';
+
 type Severity = 'warning' | 'danger' | null;
 
 // alerta "casi en el limite" (90%) - explicitamente NO se clasifica como riesgo (pedido de Sergio en
@@ -9,7 +11,11 @@ interface GeofenceMatchLike {
 }
 
 interface DeviceRepoLike {
-  findSpeedLimits(deviceId: string): Promise<{ deviceLimit: number | null; groupLimit: number | null }>;
+  findAlertContext(deviceId: string): Promise<{
+    deviceLimit: number | null;
+    groupLimit: number | null;
+    vehicleTypeLimit: number | null;
+  }>;
 }
 
 interface AlertEventRepoLike {
@@ -23,6 +29,19 @@ interface AlertEventRepoLike {
   resolveOpen(event: { alertType: 'speed'; deviceId: string }): Promise<unknown>;
 }
 
+interface InfractionRepoLike {
+  create(params: {
+    projectId: number | null;
+    deviceId: string;
+    infractionType: 'speed';
+    severity: number;
+    message: string;
+    latitude: number;
+    longitude: number;
+    metadata?: Record<string, unknown> | null;
+  }): Promise<unknown>;
+}
+
 interface SocketServerLike {
   broadcastToProject(projectId: number | null, event: string, payload: unknown): void;
 }
@@ -32,6 +51,10 @@ interface EvaluateParams {
   speedKmh: number;
   projectId: number | null;
   geofenceMatches?: GeofenceMatchLike[];
+  // solo se usan para registrar la infraccion (opcionales - sin ellas simplemente no se crea la
+  // fila en `infractions`, el resto del comportamiento sigue igual)
+  latitude?: number;
+  longitude?: number;
 }
 
 // separado de GeofenceAlertService a proposito - combina el limite de la geocerca/ruta (si trae uno)
@@ -40,31 +63,43 @@ class SpeedAlertService {
   deviceRepo: DeviceRepoLike;
   socketServer: SocketServerLike | null;
   alertEventRepo: AlertEventRepoLike | null;
+  infractionRepo: InfractionRepoLike | null;
   activeAlerts: Record<string, Severity>;
 
   constructor({
     deviceRepo,
     socketServer,
     alertEventRepo,
+    infractionRepo,
   }: {
     deviceRepo: DeviceRepoLike;
     socketServer?: SocketServerLike;
     alertEventRepo?: AlertEventRepoLike;
+    infractionRepo?: InfractionRepoLike;
   }) {
     this.deviceRepo = deviceRepo;
     this.socketServer = socketServer || null;
     this.alertEventRepo = alertEventRepo || null;
+    this.infractionRepo = infractionRepo || null;
     this.activeAlerts = {};
   }
 
-  async evaluate({ deviceId, speedKmh, projectId, geofenceMatches = [] }: EvaluateParams): Promise<void> {
+  async evaluate({
+    deviceId,
+    speedKmh,
+    projectId,
+    geofenceMatches = [],
+    latitude,
+    longitude,
+  }: EvaluateParams): Promise<void> {
     const candidates: number[] = geofenceMatches
       .map((g) => g.speed_limit_kmh)
       .filter((v): v is number => v != null);
 
-    const { deviceLimit, groupLimit } = await this.deviceRepo.findSpeedLimits(deviceId);
+    const { deviceLimit, groupLimit, vehicleTypeLimit } = await this.deviceRepo.findAlertContext(deviceId);
     if (deviceLimit != null) candidates.push(deviceLimit);
     if (groupLimit != null) candidates.push(groupLimit);
+    if (vehicleTypeLimit != null) candidates.push(vehicleTypeLimit);
 
     const previousAlert = this.activeAlerts[deviceId] ?? null;
 
@@ -84,7 +119,7 @@ class SpeedAlertService {
     else if (ratio >= WARNING_RATIO) severity = 'warning';
 
     if (severity && severity !== previousAlert) {
-      this.triggerAlert(deviceId, severity, speedKmh, effectiveLimit, projectId);
+      this.triggerAlert(deviceId, severity, speedKmh, effectiveLimit, projectId, latitude, longitude);
       this.activeAlerts[deviceId] = severity;
     } else if (!severity && previousAlert) {
       this.clearAlert(deviceId, projectId);
@@ -98,6 +133,8 @@ class SpeedAlertService {
     speedKmh: number,
     limitKmh: number,
     projectId: number | null,
+    latitude?: number,
+    longitude?: number,
   ): void {
     const roundedSpeed = Math.round(speedKmh);
     const roundedLimit = Math.round(limitKmh);
@@ -132,10 +169,43 @@ class SpeedAlertService {
       action: 'entered',
     });
 
-    this._recordAlertEvent(deviceId, severity, message, {
-      speedKmh: roundedSpeed,
-      limitKmh: roundedLimit,
-    });
+    // solo la infraccion real (100%+, "danger") se registra - el aviso temprano (90-99%, "warning")
+    // sigue mostrandose al operador por socket mas arriba, pero ya no deja rastro en alert_events ni
+    // en infractions (pedido explicito: en los registros solo se quieren infracciones reales, no
+    // avisos previos que el operador pudo corregir a tiempo)
+    if (severity === 'danger') {
+      this._recordAlertEvent(deviceId, severity, message, {
+        speedKmh: roundedSpeed,
+        limitKmh: roundedLimit,
+      });
+      if (latitude != null && longitude != null) {
+        this._recordInfraction(deviceId, projectId, message, roundedSpeed, roundedLimit, latitude, longitude);
+      }
+    }
+  }
+
+  _recordInfraction(
+    deviceId: string,
+    projectId: number | null,
+    message: string,
+    speedKmh: number,
+    limitKmh: number,
+    latitude: number,
+    longitude: number,
+  ): void {
+    if (!this.infractionRepo) return;
+    this.infractionRepo
+      .create({
+        projectId,
+        deviceId,
+        infractionType: 'speed',
+        severity: speedInfractionSeverity(limitKmh > 0 ? speedKmh / limitKmh : 1),
+        message,
+        latitude,
+        longitude,
+        metadata: { speedKmh, limitKmh },
+      })
+      .catch((err: Error) => console.error('SpeedAlertService._recordInfraction:', err.message));
   }
 
   clearAlert(deviceId: string, projectId: number | null): void {

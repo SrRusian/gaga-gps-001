@@ -9,6 +9,8 @@ import type {
   EquipmentVehicleApproachingPayload,
   GeofenceAlertPayload,
   GeofenceClearPayload,
+  GeofenceProximityClearPayload,
+  GeofenceProximityNoticePayload,
   IncidentNearbyPayload,
   IncidentReportedPayload,
   IncidentResolvedPayload,
@@ -17,6 +19,8 @@ import type {
   ProximityClearPayload,
   ProximityDistanceUpdatePayload,
   ProximityPayload,
+  RouteDistanceClearPayload,
+  RouteDistanceUpdatePayload,
   SignalLostPayload,
   SignalRecoveredPayload,
   SupervisorCollisionPayload,
@@ -52,6 +56,11 @@ export interface ServerToClientEvents {
   'alert:clear': (payload: GeofenceClearPayload) => void;
   'supervisor:alert': (payload: SupervisorGeofenceAlertPayload) => void;
 
+  // aviso silencioso de proximidad a geocerca peligrosa - solo llega al operador afectado
+  // (sendToDevice), canal propio deliberadamente separado de alert:*/alert:clear de arriba
+  'alert:proximity_notice': (payload: GeofenceProximityNoticePayload) => void;
+  'alert:proximity_clear': (payload: GeofenceProximityClearPayload) => void;
+
   'signal:lost:level1': (payload: SignalLostPayload) => void;
   'signal:lost:level2': (payload: SignalLostPayload) => void;
   'signal:recovered': (payload: SignalRecoveredPayload) => void;
@@ -67,6 +76,11 @@ export interface ServerToClientEvents {
   'proximity:critical': (payload: ProximityPayload) => void;
   'proximity:clear': (payload: ProximityClearPayload) => void;
   'supervisor:proximity': (payload: SupervisorProximityPayload) => void;
+
+  // distancia continua al vehiculo mas cercano en la MISMA ruta autorizada - solo al operador
+  // afectado (sendToDevice), ver RouteDistanceUpdatePayload
+  'route:distance_update': (payload: RouteDistanceUpdatePayload) => void;
+  'route:distance_clear': (payload: RouteDistanceClearPayload) => void;
 
   'fleet:preventive_stop': (payload: PreventiveStopActivePayload) => void;
   'fleet:preventive_stop_clear': (payload: PreventiveStopClearPayload) => void;

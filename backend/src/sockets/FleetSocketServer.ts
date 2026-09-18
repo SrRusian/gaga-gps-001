@@ -166,8 +166,13 @@ class FleetSocketServer {
       if (this.alertEventRepo) {
         try {
           const projectId = user?.role === 'admin' ? null : (user?.projectId ?? null);
+          // 'incident' tiene su propia hidratacion arriba (incident:reported/supervisor:incident).
+          // 'geofence'/'speed' ya no se muestran en vivo a Supervisor/Encargado (pedido explicito:
+          // esos son avisos que solo debe ver el operador - si de verdad cruza el limite ya quedo
+          // como fila permanente en `infractions`, revisable en su propia pestaña) - Admin nunca
+          // consume este snapshot (su panel es otro), asi que excluirlos aqui no le quita nada a el.
           const rows = (await this.alertEventRepo.findActive(projectId)).filter(
-            (row) => row.alert_type !== 'incident',
+            (row) => row.alert_type !== 'incident' && row.alert_type !== 'geofence' && row.alert_type !== 'speed',
           );
           if (rows.length > 0) {
             socket.emit(

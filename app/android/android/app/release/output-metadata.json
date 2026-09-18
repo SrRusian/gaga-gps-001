@@ -11,7 +11,7 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 47,
+      "versionCode": 48,
       "versionName": "1.0.43-battery-report",
       "outputFile": "app-release.apk"
     }

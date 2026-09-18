@@ -23,7 +23,7 @@ export default function ProjectManagerPanel() {
     >
       <div className="sup-layout">
         <aside className="sup-sidebar">
-          <AlertsPanel alerts={s.alerts} alertCount={s.alertCount} />
+          <AlertsPanel alerts={s.alerts} alertCount={s.alertCount} canAccessHistory />
         </aside>
 
         <div className="sup-map-area">
@@ -38,6 +38,7 @@ export default function ProjectManagerPanel() {
               mapMode={s.mapMode}
               selectedVehicleId={s.selectedVehicle}
               onVehicleClick={s.selectVehicle}
+              deviceFootprints={s.deviceFootprintsById}
             />
           </div>
 
@@ -53,7 +54,12 @@ export default function ProjectManagerPanel() {
               </div>
             )}
 
-            <VehicleListPanel vehicles={s.vehicles} now={s.now} onSelect={s.selectVehicle} />
+            <VehicleListPanel
+              vehicles={s.vehicles}
+              now={s.now}
+              onSelect={s.selectVehicle}
+              vehicleTypeNamesById={s.deviceVehicleTypeNamesById}
+            />
           </div>
 
           <div className="sup-bottom-left-stack">
@@ -73,6 +79,7 @@ export default function ProjectManagerPanel() {
           offline={s.detailOffline}
           operatorSession={s.activeSession}
           appVersion={s.detailAppVersion}
+          vehicleTypeName={s.detailVehicleTypeName}
           onClose={s.closeVehicleDetail}
         />
       )}

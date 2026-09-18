@@ -12,6 +12,9 @@ const RING_SIZE = ARROW_SIZE + 14;
 const SELECTED_RING_COLOR = '#ffd23f';
 const OFFLINE_COLOR = '#e5484d';
 const ACCURACY_COLOR = '#4f8ff0';
+// color distinto a proposito del circulo de precision (azul) y de los colores de identidad
+// (mio/otro/desconectado/seleccionado) - representa una medida fisica fija, no un estado
+const FOOTPRINT_COLOR = '#94a3b8';
 // solo se usa cuando no hay accuracy reportada (undefined) - nunca reemplaza un valor real, por
 // chico o grande que sea, el círculo debe representar la precisión real del GPS sin piso artificial
 const DEFAULT_ACCURACY_METERS = 15;
@@ -118,6 +121,28 @@ function createAccuracyCircle(): HTMLDivElement {
   return circle;
 }
 
+// silueta real del vehiculo (largo x ancho en metros, ver vehicle_types) - rectangulo centrado en
+// el mismo punto que el resto del marcador, que rota junto con la flecha (updateVehicleMarkerHeading)
+// para que su "frente" siempre coincida con hacia donde apunta. Oculto por defecto (display:none)
+// hasta que setVehicleMarkerFootprint reciba dimensiones reales - la mayoria de dispositivos no
+// tendran un tipo de vehiculo asignado de entrada. Se crea PRIMERO (mas atras en el DOM) para que
+// el circulo de precision y la flecha se dibujen encima - con RTK centimetrico el circulo de
+// precision puede ser mucho mas chico que el propio vehiculo, así que el rectangulo actua como el
+// "cuerpo" de fondo y el resto de elementos son indicadores mas finos sobre el.
+function createVehicleFootprint(): HTMLDivElement {
+  const footprint = document.createElement('div');
+  footprint.className = 'vehicle-marker__footprint';
+  footprint.style.position = 'absolute';
+  footprint.style.top = '50%';
+  footprint.style.left = '50%';
+  footprint.style.background = `${FOOTPRINT_COLOR}33`;
+  footprint.style.border = `1.5px solid ${FOOTPRINT_COLOR}cc`;
+  footprint.style.borderRadius = '3px';
+  footprint.style.pointerEvents = 'none';
+  footprint.style.display = 'none';
+  return footprint;
+}
+
 export function createVehicleMarkerElement({
   color,
   clickable = true,
@@ -129,6 +154,7 @@ export function createVehicleMarkerElement({
   el.style.height = `${ARROW_SIZE}px`;
   el.style.cursor = clickable ? 'pointer' : 'default';
 
+  el.appendChild(createVehicleFootprint());
   el.appendChild(createAccuracyCircle()); // Módulo círculo de precisión del vehículo (No modificar)
   el.appendChild(createSelectionRing());
   el.appendChild(createHeadingArrow(color));
@@ -161,6 +187,45 @@ export function setVehicleMarkerAccuracy(
   circle.style.height = `${diameterPx}px`;
 }
 
+// silueta real del vehiculo - mismo truco de map.project() que setVehicleMarkerAccuracy para medir
+// metros reales en pixeles de pantalla al zoom actual. Un solo factor px/metro (medido en el eje
+// norte-sur) se usa para largo Y ancho a la vez - la distorsion este-oeste de la proyeccion es
+// despreciable al nivel de zoom en el que se rastrean vehiculos, y usar un solo factor evita que
+// el rectangulo se deforme al rotar (el largo siempre debe verse igual de largo sin importar hacia
+// donde apunte la flecha). Oculta el rectangulo (sin tipo de vehiculo asignado) si falta cualquiera
+// de las dos medidas - nunca dibuja un tamaño inventado.
+export function setVehicleMarkerFootprint(
+  el: HTMLElement,
+  map: MaplibreMap,
+  latitude: number,
+  longitude: number,
+  lengthMeters: number | null | undefined,
+  widthMeters: number | null | undefined,
+): void {
+  const footprint = el.querySelector<HTMLDivElement>('.vehicle-marker__footprint');
+  if (!footprint) return;
+
+  if (!lengthMeters || !widthMeters || lengthMeters <= 0 || widthMeters <= 0) {
+    footprint.style.display = 'none';
+    return;
+  }
+
+  const dLat = 1 / METERS_PER_DEG_LAT; // 1 metro en grados de latitud, para medir px/metro
+  const center = map.project([longitude, latitude]);
+  const edge = map.project([longitude, latitude + dLat]);
+  const pxPerMeter = Math.hypot(edge.x - center.x, edge.y - center.y);
+  const widthPx = widthMeters * pxPerMeter;
+  const heightPx = lengthMeters * pxPerMeter;
+
+  footprint.style.display = 'block';
+  footprint.style.width = `${widthPx}px`;
+  footprint.style.height = `${heightPx}px`;
+  // centrado por margen (no transform:translate) para no pelear con la rotacion, que
+  // updateVehicleMarkerHeading/realignVehicleMarkerToBearing escriben en style.transform aparte
+  footprint.style.marginLeft = `-${widthPx / 2}px`;
+  footprint.style.marginTop = `-${heightPx / 2}px`;
+}
+
 // mapBearing (grados, default 0 = sin cambio para Admin/Supervisor cuyo mapa nunca rota) resta el
 // rumbo del mapa al rumbo real del vehiculo - asi en modo "orientado al frente" (mapa rotado para
 // que el vehiculo seguido siempre apunte hacia arriba) el resto de los vehiculos se ven girados
@@ -182,6 +247,11 @@ export function updateVehicleMarkerHeading(
   arrow.dataset.course = String(resolvedCourse);
   arrow.style.transform = `rotate(${resolvedCourse - mapBearing}deg)`;
   arrow.style.opacity = stopped ? '0.55' : '1';
+
+  // la silueta del vehiculo gira junto con la flecha, siempre con el mismo rumbo - asi su "frente"
+  // coincide con hacia donde apunta la flecha
+  const footprint = el.querySelector<HTMLDivElement>('.vehicle-marker__footprint');
+  if (footprint) footprint.style.transform = `rotate(${resolvedCourse - mapBearing}deg)`;
 }
 
 // re-aplica solo la orientacion en pantalla de un marcador ya existente cuando cambia el rumbo del
@@ -192,6 +262,9 @@ export function realignVehicleMarkerToBearing(el: HTMLElement, mapBearing: numbe
   if (!arrow) return;
   const course = Number(arrow.dataset.course ?? '0');
   arrow.style.transform = `rotate(${course - mapBearing}deg)`;
+
+  const footprint = el.querySelector<HTMLDivElement>('.vehicle-marker__footprint');
+  if (footprint) footprint.style.transform = `rotate(${course - mapBearing}deg)`;
 }
 
 // agrega/quita el anillo amarillo - nunca toca el color de relleno (identidad/estado), así un

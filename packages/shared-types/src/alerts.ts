@@ -36,8 +36,39 @@ export interface GeofenceClearPayload {
   timestamp: string;
 }
 
-export interface SupervisorGeofenceAlertPayload extends Partial<GeofenceAlertPayload> {
+// aviso silencioso de proximidad - canal propio, deliberadamente separado de
+// GeofenceAlertPayload/GeofenceClearPayload: se manda SOLO al operador afectado (sendToDevice,
+// nunca broadcastToProject), nunca se persiste (ni alert_events ni infractions), y no debe poder
+// pisar/limpiar una alerta real que ya este en pantalla (ver alert:critical/alert:warning/alert:clear).
+// Reusado por 2 fuentes distintas (GeofenceAlertService "tier silencioso" y CollisionRiskService
+// "tier silencioso" de vehiculo cercano en la misma ruta) - de ahi que geofenceId/geofenceName sean
+// opcionales y exista otherDeviceId, sin necesidad de dos canales/payloads casi identicos.
+export interface GeofenceProximityNoticePayload {
   deviceId: string;
+  geofenceId?: number;
+  geofenceName?: string;
+  otherDeviceId?: string;
+  distanceMeters: number;
+  message: string;
+  timestamp: string;
+}
+
+export interface GeofenceProximityClearPayload {
+  deviceId: string;
+  timestamp: string;
+}
+
+// canal generico reusado tal cual por 3 servicios distintos (GeofenceAlertService,
+// SpeedAlertService, power-events.routes.ts) - el `type` real que viaja aqui incluye los 3 grupos,
+// no solo geocerca, por eso no extiende Partial<GeofenceAlertPayload> (ese `type` es mas angosto
+// y rompia el chequeo de tipos en useSupervisorSocket.ts al comparar contra 'power_loss')
+export interface SupervisorGeofenceAlertPayload {
+  deviceId: string;
+  type?: GeofenceAlertPayload['type'] | SpeedAlertPayload['type'] | 'power_loss';
+  geofenceId?: number;
+  geofenceName?: string;
+  message?: string;
+  loop?: boolean;
   action: 'entered' | 'exited';
   timestamp: string;
 }
@@ -107,6 +138,24 @@ export interface ProximityDistanceUpdatePayload {
   deviceId: string;
   nearestDeviceId: string;
   distance: number;
+  timestamp: string;
+}
+
+// distancia continua al vehiculo mas cercano EN LA MISMA RUTA (authorized_route) - solo al operador
+// afectado (sendToDevice), independiente del radar generico de arriba (que ademas excluye a
+// cualquier vehiculo dentro de una ruta). Se manda en cada posicion mientras haya al menos un
+// vehiculo compartiendo la misma ruta, sin importar direccion/alerta - es un valor informativo
+// continuo, no un umbral de alerta.
+export interface RouteDistanceUpdatePayload {
+  deviceId: string;
+  nearestDeviceId: string;
+  distanceMeters: number;
+  routeName: string;
+  timestamp: string;
+}
+
+export interface RouteDistanceClearPayload {
+  deviceId: string;
   timestamp: string;
 }
 
@@ -240,4 +289,32 @@ export interface AlertHistoryRow {
   metadata: Record<string, unknown> | null;
   triggered_at: string;
   resolved_at: string | null;
+}
+
+// registro permanente de infracciones reales (velocidad/geocerca/colision) - ver
+// backend/db/001_init.sql tabla `infractions`, generado solo por el sistema (nunca creado a mano)
+export type InfractionType = 'speed' | 'geofence' | 'collision';
+
+export interface InfractionRow {
+  id: number;
+  project_id: number | null;
+  device_id: string;
+  device_name: string | null;
+  // solo para infraction_type='collision' - el otro vehiculo involucrado
+  device_id_2: string | null;
+  device_2_name: string | null;
+  operator_session_id: number | null;
+  operator_name: string | null;
+  infraction_type: InfractionType;
+  // 1 (leve) a 10 (grave/choque real) - ver backend/src/utils/infractionSeverity.ts
+  severity: number;
+  message: string;
+  latitude: number;
+  longitude: number;
+  metadata: Record<string, unknown> | null;
+  occurred_at: string;
+  reviewed_by: number | null;
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  review_notes: string | null;
 }

@@ -5,6 +5,7 @@ import {
   realignVehicleMarkerToBearing,
   resolveVehicleCourse,
   setVehicleMarkerAccuracy,
+  setVehicleMarkerFootprint,
   setVehicleMarkerStale,
   setVehicleMarkerThreat,
   updateVehicleMarkerHeading,
@@ -19,6 +20,12 @@ import { colors } from '@gaga-gps/ui';
 import type { ActiveMap, Geofence, Position } from '@gaga-gps/shared-types';
 import maplibregl from 'maplibre-gl';
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import {
+  applyHeadingOffset,
+  INITIAL_HEADING_OFFSET_STATE,
+  updateHeadingOffset,
+  type HeadingOffsetState,
+} from './headingCalibration';
 import { useDeviceOrientation } from './useDeviceOrientation';
 
 const STALE_THRESHOLD_MS = 3000;
@@ -73,6 +80,9 @@ export interface MapViewProps {
   initialCenter: [number, number];
   initialZoom?: number;
   onUserInteraction?: () => void;
+  // silueta real del vehiculo (largo/ancho, metros) por deviceId - ver useVehicleFootprints.ts.
+  // Sin entrada para un deviceId = sin tipo asignado, ese marcador no dibuja silueta.
+  deviceFootprints?: Record<string, { lengthMeters: number | null; widthMeters: number | null }>;
 }
 
 export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
@@ -89,6 +99,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     initialCenter,
     initialZoom = 17,
     onUserInteraction,
+    deviceFootprints = {},
   },
   ref,
 ) {
@@ -101,6 +112,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const lastFixTimeRef = useRef<Record<string, number>>({});
   const fixTimeRef = useRef<Record<string, number>>({});
   const accuracyRef = useRef<Record<string, number | undefined>>({}); // Módulo círculo de precisión del vehículo (No modificar)
+  // shadow del prop deviceFootprints, igual que accuracyRef, para que el handler de zoom (solo
+  // depende de [map]) siempre lea el valor mas reciente
+  const footprintsRef = useRef(deviceFootprints);
+  footprintsRef.current = deviceFootprints;
   const glideFrameRef = useRef<Record<string, number>>({});
 
   // ver comentario de DEAD_RECKONING_* arriba - estado del vehiculo propio unicamente
@@ -115,37 +130,53 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const compassHeadingRef = useRef<number | null>(compassHeading);
   compassHeadingRef.current = compassHeading;
 
+  // desfase de montaje de la tablet (soporte girado/chueco en la cabina) - se aprende solo
+  // mientras el vehiculo va a velocidad confiable (ver headingCalibration.ts) comparando el rumbo
+  // GPS real contra lo que reporta la brujula en ese momento, y se aplica encima de la brujula solo
+  // cuando el vehiculo esta detenido - sin esto, un soporte girado 30° hace que el mapa "brinque"
+  // ese angulo justo al frenar.
+  const headingOffsetRef = useRef<HeadingOffsetState>(INITIAL_HEADING_OFFSET_STATE);
+
   // envuelve resolveVehicleCourse (map-core, compartido con Admin/Supervisor - no se toca) solo
-  // para el vehiculo propio: si esta detenido y hay lectura de brujula, la usa en vez de quedarse
-  // con el ultimo rumbo GPS conocido (que puede llevar minutos sin actualizarse). Con movimiento
-  // real, se comporta identico a resolveVehicleCourse - el GPS sigue siendo la unica fuente,
-  // mismo criterio que ya se aplico antes al descartar el magnetometro para frente/reversa del
-  // chasis (ahi la tolerancia necesaria era mucho mas fina que "hacia donde apunta el mapa").
+  // para el vehiculo propio: si esta detenido y hay lectura de brujula, la usa (corregida por el
+  // desfase de montaje aprendido) en vez de quedarse con el ultimo rumbo GPS conocido (que puede
+  // llevar minutos sin actualizarse). Con movimiento real, se comporta identico a
+  // resolveVehicleCourse - el GPS sigue siendo la unica fuente, mismo criterio que ya se aplico
+  // antes al descartar el magnetometro para frente/reversa del chasis (ahi la tolerancia necesaria
+  // era mucho mas fina que "hacia donde apunta el mapa").
   function resolveOwnCourse(deviceId: string, course: number | undefined, speed: number | undefined) {
     const resolved = resolveVehicleCourse(deviceId, course, speed);
     if (resolved.stopped && compassHeadingRef.current !== null) {
-      return { course: compassHeadingRef.current, stopped: true };
+      return {
+        course: applyHeadingOffset(compassHeadingRef.current, headingOffsetRef.current.offsetDeg),
+        stopped: true,
+      };
     }
     return resolved;
   }
 
   // mismo cuerpo que updateVehicleMarkerHeading (map-core) pero con brujula de respaldo detenido -
   // solo para el marcador propio, sin tocar el modulo compartido con Admin/Supervisor (que nunca
-  // deben usar la brujula, no tienen ese sensor ni lo necesitan). Lee compassHeadingRef directo
-  // (no via resolveOwnCourse) para que esta funcion siga siendo "estable" a ojos de
-  // react-hooks/exhaustive-deps (solo refs/imports, igual que glideMarkerTo) y no obligue al efecto
-  // de fleet de mas abajo a re-ejecutarse en cada lectura nueva de la brujula.
+  // deben usar la brujula, no tienen ese sensor ni lo necesitan). Lee compassHeadingRef/
+  // headingOffsetRef directo (no via resolveOwnCourse) para que esta funcion siga siendo "estable"
+  // a ojos de react-hooks/exhaustive-deps (solo refs/imports, igual que glideMarkerTo) y no obligue
+  // al efecto de fleet de mas abajo a re-ejecutarse en cada lectura nueva de la brujula.
   function applyOwnMarkerHeading(el: HTMLElement, deviceId: string, course: number | undefined, speed: number | undefined, mapBearing: number) {
     const arrow = el.querySelector<HTMLDivElement>('.vehicle-marker__arrow');
     if (!arrow) return;
     const resolved = resolveVehicleCourse(deviceId, course, speed);
     const resolvedCourse =
-      resolved.stopped && compassHeadingRef.current !== null ? compassHeadingRef.current : resolved.course;
+      resolved.stopped && compassHeadingRef.current !== null
+        ? applyHeadingOffset(compassHeadingRef.current, headingOffsetRef.current.offsetDeg)
+        : resolved.course;
     arrow.dataset.course = String(resolvedCourse);
     arrow.style.transform = `rotate(${resolvedCourse - mapBearing}deg)`;
     // "stopped" sigue reflejando movimiento REAL (no si hay brujula) - un vehiculo detenido se ve
     // detenido aunque ahora sepamos hacia donde apunta
     arrow.style.opacity = resolved.stopped ? '0.55' : '1';
+
+    const footprint = el.querySelector<HTMLDivElement>('.vehicle-marker__footprint');
+    if (footprint) footprint.style.transform = `rotate(${resolvedCourse - mapBearing}deg)`;
   }
 
   useEffect(() => {
@@ -320,6 +351,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const previousFixAt = lastFixTimeRef.current[vehicleId];
       lastFixTimeRef.current[vehicleId] = now;
       accuracyRef.current[pos.deviceId] = pos.accuracy; // Módulo círculo de precisión del vehículo (No modificar)
+      const footprint = deviceFootprints[pos.deviceId];
 
       // fixTime real del reporte (no "cuándo lo vio este navegador") - así al recargar la
       // página un vehículo ya offline se marca de inmediato, sin esperar un umbral completo
@@ -330,6 +362,17 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       // vehiculo propio: el efecto de arriba (dead reckoning) es quien mueve el marcador entre
       // fixes reales - aqui solo se actualiza el fix base que ese efecto usa, nunca marker.setLngLat
       if (isMine) {
+        // aprende el desfase de montaje mientras haya rumbo GPS real y lectura de brujula a la vez -
+        // no hace nada si va lento (ver MIN_SPEED_MPS_FOR_CALIBRATION en headingCalibration.ts)
+        if (pos.course !== undefined && compassHeadingRef.current !== null) {
+          headingOffsetRef.current = updateHeadingOffset(
+            headingOffsetRef.current,
+            pos.course,
+            compassHeadingRef.current,
+            pos.speed ?? 0,
+          );
+        }
+
         const { course: resolvedCourse } = resolveVehicleCourse(pos.deviceId, pos.course, pos.speed);
         ownFixRef.current = {
           lng: pos.longitude,
@@ -358,6 +401,14 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         setVehicleMarkerStale(marker.getElement(), isStale);
         // Módulo círculo de precisión del vehículo (No modificar)
         setVehicleMarkerAccuracy(marker.getElement(), map, pos.latitude, pos.longitude, pos.accuracy);
+        setVehicleMarkerFootprint(
+          marker.getElement(),
+          map,
+          pos.latitude,
+          pos.longitude,
+          footprint?.lengthMeters,
+          footprint?.widthMeters,
+        );
         return;
       }
 
@@ -370,14 +421,15 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       }
       setVehicleMarkerStale(el, isStale);
       setVehicleMarkerAccuracy(el, map, pos.latitude, pos.longitude, pos.accuracy); // Módulo círculo de precisión del vehículo (No modificar)
+      setVehicleMarkerFootprint(el, map, pos.latitude, pos.longitude, footprint?.lengthMeters, footprint?.widthMeters);
 
       markersRef.current[vehicleId] = new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map);
     });
-  }, [map, loaded, fleet, myDeviceId, equipment]);
+  }, [map, loaded, fleet, myDeviceId, equipment, deviceFootprints]);
 
-  // Módulo círculo de precisión del vehículo (No modificar)
-  // el círculo es en pixeles de pantalla real (no metros) - al hacer zoom hay que recalcular
-  // el tamaño de todos aunque no haya llegado una posición nueva
+  // el círculo/la silueta son en pixeles de pantalla real (no metros) - al hacer zoom hay que
+  // recalcular el tamaño de todos aunque no haya llegado una posición nueva (círculo de precisión:
+  // Módulo, No modificar)
   useEffect(() => {
     if (!map) return;
 
@@ -386,6 +438,15 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         const deviceId = vehicleId.replace(/^vehicle-/, '');
         const lngLat = marker.getLngLat();
         setVehicleMarkerAccuracy(marker.getElement(), map, lngLat.lat, lngLat.lng, accuracyRef.current[deviceId]);
+        const footprint = footprintsRef.current[deviceId];
+        setVehicleMarkerFootprint(
+          marker.getElement(),
+          map,
+          lngLat.lat,
+          lngLat.lng,
+          footprint?.lengthMeters,
+          footprint?.widthMeters,
+        );
       });
     };
     map.on('zoom', handler);

@@ -14,6 +14,7 @@ import type IncidentAlertService from '../../services/alerts/IncidentAlertServic
 import type StaticEquipmentManager from '../../services/static_equipment/StaticEquipmentManager';
 import type EquipmentRepository from '../../repositories/EquipmentRepository';
 import type DeviceProjectHistoryRepository from '../../repositories/DeviceProjectHistoryRepository';
+import type { VehicleHeadingTracker } from '../../utils/vehicleFootprint';
 
 interface SocketServerLike {
   broadcastToProject(projectId: number | null, event: string, payload: unknown): void;
@@ -36,6 +37,7 @@ export interface DevicesRouterDeps {
   equipmentManager?: StaticEquipmentManager;
   socketServer?: SocketServerLike;
   deviceProjectHistoryRepo?: DeviceProjectHistoryRepository;
+  headingTracker?: VehicleHeadingTracker;
 }
 
 export function buildDevicesRouter({
@@ -55,6 +57,7 @@ export function buildDevicesRouter({
   equipmentManager,
   socketServer,
   deviceProjectHistoryRepo,
+  headingTracker,
 }: DevicesRouterDeps) {
   const router = express.Router();
 
@@ -123,13 +126,13 @@ export function buildDevicesRouter({
 
   router.post('/', authMiddleware, requireRole('admin', 'project_administrator'), async (req, res) => {
     try {
-      const { uniqueId, name, type, attributes } = req.body;
+      const { uniqueId, name, type, attributes, vehicleTypeId } = req.body;
       if (!uniqueId || !name) {
         return res.status(400).json({ error: 'uniqueId y name son requeridos' });
       }
       // no-admin nunca origina un dispositivo fuera de su propio proyecto
       const projectId = req.user!.role === 'admin' ? req.body.projectId : req.user!.projectId;
-      const device = await deviceRepo.create({ uniqueId, name, type, projectId, attributes });
+      const device = await deviceRepo.create({ uniqueId, name, type, projectId, vehicleTypeId, attributes });
       if (device.project_id != null) {
         await deviceProjectHistoryRepo?.recordChange({
           deviceId: device.unique_id,
@@ -152,7 +155,7 @@ export function buildDevicesRouter({
         return res.status(404).json({ error: 'Dispositivo no encontrado' });
       }
 
-      const { name, type, attributes, groupId, speedLimitKmh } = req.body;
+      const { name, type, attributes, groupId, vehicleTypeId, speedLimitKmh, restrictedToAllowedZone } = req.body;
       const projectId = req.user!.role === 'admin' ? req.body.projectId : undefined;
       const device = await deviceRepo.update(Number(req.params.id), {
         name,
@@ -160,7 +163,9 @@ export function buildDevicesRouter({
         projectId,
         attributes,
         groupId,
+        vehicleTypeId,
         speedLimitKmh,
+        restrictedToAllowedZone,
       });
       if (
         req.user!.role === 'admin' &&
@@ -214,6 +219,7 @@ export function buildDevicesRouter({
         vehicleProximityService?.clearDevice(device.unique_id, otherDeviceIds);
         speedAlertService?.clearDevice(device.unique_id, device.project_id);
         activityClassificationService?.clearDevice(device.unique_id);
+        headingTracker?.clearDevice(device.unique_id);
 
         const unlinkedEquipment = equipmentManager?.clearDeviceLink(device.unique_id);
         if (unlinkedEquipment && socketServer && equipmentManager) {

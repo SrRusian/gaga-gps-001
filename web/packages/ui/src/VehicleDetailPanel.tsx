@@ -4,7 +4,6 @@ import { formatAccuracy } from './format';
 export interface VehicleDetailData {
   deviceId: string;
   deviceName?: string;
-  deviceType?: string;
   speed?: number;
   course?: number;
   latitude: number;
@@ -34,6 +33,9 @@ export interface VehicleDetailPanelProps {
   offline: boolean;
   operatorSession?: VehicleOperatorSession | null;
   appVersion?: VehicleAppVersion;
+  // nombre del tipo de vehículo asignado (ver vehicle_types) - null/undefined si no tiene uno
+  // asignado, en cuyo caso el paréntesis simplemente no aparece (nunca un "vehicle" generico)
+  vehicleTypeName?: string | null;
   onClose: () => void;
 }
 
@@ -44,6 +46,7 @@ export function VehicleDetailPanel({
   offline,
   operatorSession,
   appVersion,
+  vehicleTypeName,
   onClose,
 }: VehicleDetailPanelProps) {
   return (
@@ -51,7 +54,7 @@ export function VehicleDetailPanel({
       <div className="gg-vehicle-detail__title">
         <span>
           {vehicle.deviceName
-            ? `${vehicle.deviceName}${vehicle.deviceType ? ` (${vehicle.deviceType})` : ''}`
+            ? `${vehicle.deviceName}${vehicleTypeName ? ` (${vehicleTypeName})` : ''}`
             : `Vehículo ${vehicle.deviceId}`}
         </span>
         <button className="gg-vehicle-detail__close" onClick={onClose}>

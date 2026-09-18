@@ -1,5 +1,6 @@
 import type { Position } from '@gaga-gps/shared-types';
 import type PositionRepository from '../../repositories/PositionRepository';
+import { buildVehicleFootprintWkt, VehicleHeadingTracker } from '../../utils/vehicleFootprint';
 import type ActivityClassificationService from './ActivityClassificationService';
 import type CollisionRiskService from '../alerts/CollisionRiskService';
 import type GeofenceAlertService from '../alerts/GeofenceAlertService';
@@ -12,6 +13,14 @@ import type DeviceManager from './DeviceManager';
 import type FleetStateManager from './FleetStateManager';
 import type PositionFilterService from './PositionFilterService';
 import type SpeedEstimationService from './SpeedEstimationService';
+
+interface DeviceFootprintRepoLike {
+  findAlertContext(deviceId: string): Promise<{
+    lengthMeters: number | null;
+    widthMeters: number | null;
+    restrictedToAllowedZone: boolean;
+  }>;
+}
 
 interface SocketServerLike {
   broadcast(event: string, payload: unknown): void;
@@ -33,6 +42,9 @@ export interface PositionProcessorDeps {
   speedEstimator?: SpeedEstimationService;
   speedAlertService?: SpeedAlertService;
   activityClassificationService?: ActivityClassificationService;
+  // solo para el rectangulo de deteccion de proximidad a geocercas peligrosas (largo/ancho reales
+  // del tipo de vehiculo) - ver backend/src/utils/vehicleFootprint.ts
+  deviceFootprintRepo?: DeviceFootprintRepoLike;
 }
 
 class PositionProcessor {
@@ -50,6 +62,8 @@ class PositionProcessor {
   speedEstimator?: SpeedEstimationService;
   speedAlertService?: SpeedAlertService;
   activityClassificationService?: ActivityClassificationService;
+  deviceFootprintRepo?: DeviceFootprintRepoLike;
+  headingTracker: VehicleHeadingTracker;
 
   constructor({
     positionRepo,
@@ -66,6 +80,7 @@ class PositionProcessor {
     speedEstimator,
     speedAlertService,
     activityClassificationService,
+    deviceFootprintRepo,
   }: PositionProcessorDeps) {
     this.positionRepo = positionRepo;
     this.fleetState = fleetState;
@@ -83,6 +98,8 @@ class PositionProcessor {
     this.speedEstimator = speedEstimator;
     this.speedAlertService = speedAlertService;
     this.activityClassificationService = activityClassificationService;
+    this.deviceFootprintRepo = deviceFootprintRepo;
+    this.headingTracker = new VehicleHeadingTracker();
   }
 
   async process(position: Position): Promise<Position> {
@@ -158,11 +175,44 @@ class PositionProcessor {
 
       await this.fleetState.update(position);
 
+      // rectangulo orientado real del vehiculo (Parte B - proximidad elastica a geocercas
+      // peligrosas), solo si el dispositivo tiene tipo de vehiculo asignado y un rumbo confiable
+      // reciente - si cualquiera de los dos falta, footprintWkt queda null y el resto del flujo
+      // sigue exactamente igual que antes de esta feature (punto crudo, sin buffer)
+      let footprintWkt: string | null = null;
+      let restrictedToAllowedZone = false;
+      if (this.deviceFootprintRepo) {
+        try {
+          const context = await this.deviceFootprintRepo.findAlertContext(position.deviceId);
+          restrictedToAllowedZone = context.restrictedToAllowedZone;
+          const speedKmhForHeading = (position.speed ?? 0) * 3.6;
+          const trustedCourse = this.headingTracker.resolveTrustedCourse(
+            position.deviceId,
+            position.course,
+            speedKmhForHeading,
+          );
+          if (context.lengthMeters != null && context.widthMeters != null && trustedCourse != null) {
+            footprintWkt = buildVehicleFootprintWkt(
+              position.latitude,
+              position.longitude,
+              trustedCourse,
+              context.lengthMeters,
+              context.widthMeters,
+            );
+          }
+        } catch (err) {
+          console.error('PositionProcessor - error construyendo footprint del vehiculo:', (err as Error).message);
+        }
+      }
+
       let geofenceMatches: Awaited<ReturnType<GeofenceAlertService['evaluate']>> = [];
       if (this.geofenceService) {
         geofenceMatches = await this.geofenceService.evaluate({
           ...position,
           projectId: position.projectId ?? null,
+          footprintWkt,
+          accuracy: position.accuracy ?? 0,
+          restrictedToAllowedZone,
         });
       }
 
@@ -172,6 +222,8 @@ class PositionProcessor {
           speedKmh: (position.speed ?? 0) * 3.6,
           projectId: position.projectId ?? null,
           geofenceMatches,
+          latitude: position.latitude,
+          longitude: position.longitude,
         });
       }
 
@@ -185,12 +237,9 @@ class PositionProcessor {
 
       if (this.collisionService) {
         const fleet = await this.fleetState.getAll();
-        this.collisionService.evaluate(
-          position as unknown as { deviceId: number; latitude: number; longitude: number },
-          fleet as unknown as Record<
-            string,
-            { deviceId: number; latitude: number; longitude: number }
-          >,
+        await this.collisionService.evaluate(
+          { ...position, projectId: position.projectId ?? null, footprintWkt },
+          fleet,
         );
       }
 
