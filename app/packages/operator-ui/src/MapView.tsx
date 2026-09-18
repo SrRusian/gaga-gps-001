@@ -28,6 +28,14 @@ import {
 } from './headingCalibration';
 import { useDeviceOrientation } from './useDeviceOrientation';
 import { RtkNtrip } from '@gaga-gps/android-bridge';
+import { createCachedBaseMapStyle, prefetchTilesAround, registerOfflineTileProtocol } from './offlineTiles';
+
+// radio de descarga anticipada alrededor del area de operacion - a zoom 10-16 son ~1500 tiles
+// (~25MB), suficiente para una mina entera sin llenar la tableta. Ajustable sin tocar nada mas.
+const PREFETCH_RADIUS_KM = 8;
+// margen para que el mapa ya se haya centrado en la posicion real del vehiculo (follow()) antes de
+// decidir que area bajar - si se hiciera al instante bajaria el area del centro inicial por default
+const PREFETCH_DELAY_MS = 15000;
 
 const STALE_THRESHOLD_MS = 3000;
 const STALE_CHECK_INTERVAL_MS = 1000;
@@ -105,9 +113,13 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // se registra antes de crear el mapa: a partir de aqui cada tile que se baje con internet queda
+  // guardado, asi que ese mismo terreno se sigue viendo sin red (ver offlineTiles.ts)
+  registerOfflineTileProtocol();
   const { map, loaded } = useMapLibreMap(containerRef, {
     center: initialCenter,
     zoom: initialZoom,
+    style: createCachedBaseMapStyle(),
   });
   const markersRef = useRef<Record<string, maplibregl.Marker>>({});
   const lastFixTimeRef = useRef<Record<string, number>>({});
@@ -273,6 +285,22 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       Object.values(frames).forEach((frame) => cancelAnimationFrame(frame));
     };
   }, []);
+
+  // descarga por adelantado el area alrededor de donde esta operando, para que no dependa de que el
+  // operador ya haya pasado por ahi con internet. Se espera a que el mapa se centre en su posicion
+  // real antes de decidir el area, corre una sola vez por sesion y salta lo que ya esta en cache,
+  // asi que repetirla es barato. Sin red no hace nada y se reintenta en la siguiente apertura.
+  useEffect(() => {
+    if (!map || !loaded) return;
+    const timer = setTimeout(() => {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      const center = map.getCenter();
+      prefetchTilesAround(center.lat, center.lng, PREFETCH_RADIUS_KM).catch(() => {
+        // sin red o sin espacio: el cache progresivo por navegacion sigue funcionando igual
+      });
+    }, PREFETCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [map, loaded]);
 
   useSatelliteLayers(map, loaded, activeMaps, mapMode, true);
   useGeofenceLayer(map, loaded, geofences, highlightedGeofenceId);
