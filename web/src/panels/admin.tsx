@@ -1,6 +1,9 @@
 import { roleLabel } from '@gaga-gps/client';
 import { useState } from 'react';
 import './shared/management/admin.css';
+// AlertsPanel (dentro del modal de Alertas de DashboardSection) usa clases sup-* definidas ahi -
+// project-administrator.tsx NO lo importa a proposito, Admin (global) es el unico pedido
+import './shared/monitor/supervisor.css';
 import { AdminShell, type AdminSectionId } from './shared/management/components/AdminShell';
 import { DashboardSection } from './shared/management/sections/dashboard/DashboardSection';
 import { SystemSection } from './shared/management/sections/SystemSection';

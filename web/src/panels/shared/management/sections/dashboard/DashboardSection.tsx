@@ -1,4 +1,5 @@
 import { createSocket } from '@gaga-gps/client';
+import type { GagaSocket } from '@gaga-gps/client';
 import { useEquipmentLayer, useGeofenceLayer, useSatelliteLayers } from '@gaga-gps/map-core';
 import { MapModeSelector, VehicleDetailPanel } from '@gaga-gps/ui';
 import type MapboxDraw from '@mapbox/mapbox-gl-draw';
@@ -6,6 +7,8 @@ import type maplibregl from 'maplibre-gl';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toGeofence } from '../../geofenceMapper';
 import { useAdminAuth } from '../../useAdminAuth';
+import { useAlertsFeed } from '../../../hooks/useAlertsFeed';
+import { AlertsModal } from './components/AlertsModal';
 import { DashboardStats } from './components/DashboardStats';
 import { DashboardSidebar, type Overlay } from './components/DashboardSidebar';
 import { DevicesModal } from './components/DevicesModal';
@@ -153,18 +156,27 @@ export function DashboardSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [socket, setSocket] = useState<GagaSocket | null>(null);
+
   useEffect(() => {
-    const socket = createSocket();
-    socket.on('maps:active_update', () => mapsAdmin.loadMaps());
+    const s = createSocket();
+    setSocket(s);
+    s.on('maps:active_update', () => mapsAdmin.loadMaps());
     // reemplaza el poll REST de 7s que useDashboardMap tenía antes - bug real reportado: la
     // "última actualización" del detalle de vehículo se sentía cada ~8s en vez de cada 1s real
     // como ya funcionaba en Supervisor (que ya usa este mismo mecanismo de socket)
-    socket.on('fleet:update', (data) => dashboardMap.applyFleetUpdate(data.positions));
+    s.on('fleet:update', (data) => dashboardMap.applyFleetUpdate(data.positions));
     return () => {
-      socket.disconnect();
+      s.disconnect();
+      setSocket(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // mismo socket de arriba, nunca uno segundo - Admin (global) antes no tenia ninguna visibilidad
+  // de alertas de seguridad (parada preventiva, colision, señal perdida, incidentes), pedido
+  // explicito del usuario para que el panel global vea lo mismo que ya ve Supervisor
+  const alertsFeed = useAlertsFeed(socket);
 
   const geofencesForLayer = useMemo(
     () => geofencesAdmin.scopedGeofences.map(toGeofence),
@@ -233,6 +245,7 @@ export function DashboardSection() {
         onExitHistoryMode={history.exitHistoryMode}
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleSidebar}
+        alertCount={alertsFeed.alertCount}
       />
 
       <div className="dash-map-area">
@@ -358,6 +371,15 @@ export function DashboardSection() {
         projects={projects}
         admin={mapsAdmin}
       />
+
+      {isAdmin && (
+        <AlertsModal
+          open={activeOverlay === 'alerts'}
+          onClose={() => setActiveOverlay(null)}
+          alerts={alertsFeed.alerts}
+          alertCount={alertsFeed.alertCount}
+        />
+      )}
 
       {dashboardMap.detail && (
         <VehicleDetailPanel
