@@ -18,13 +18,21 @@ data class BufferedPosition(
 // varios miles de puntos (offline de horas, no minutos) reescribir un blob completo en cada
 // insercion se vuelve lento; una tabla indexada por id soporta esto sin esfuerzo.
 class OfflineBufferStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "gaga_traccar_buffer.db", null, 1) {
+    SQLiteOpenHelper(context.applicationContext, "gaga_traccar_buffer.db", null, 2) {
 
     companion object {
         private const val TABLE = "buffer"
-        // limite de seguridad, no de operacion normal - evita crecer sin fin si la tableta pasa
-        // dias sin red; para el caso real (horas) nunca deberia acercarse a este numero
-        private const val MAX_ROWS = 200_000
+
+        // ventana deslizante: se conserva la ULTIMA hora de recorrido, no la primera (pedido
+        // explicito). Si la tableta pasa 3 horas sin red, al recuperarla manda el tramo de la
+        // hora 2 a la 3, que es el relevante - no el de la hora 0 a la 1, que ya no le sirve a
+        // nadie. Se mide contra el punto MAS NUEVO del propio buffer, no contra el reloj, para
+        // que no dependa de cuando se llame ni de un cambio de hora del sistema.
+        private const val RETENTION_MS = 60L * 60L * 1000L
+
+        // red de seguridad por si algo llenara el buffer mucho mas rapido que 1/seg - a la
+        // cadencia normal, una hora son ~3600 filas y esto nunca se alcanza
+        private const val MAX_ROWS = 50_000
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -49,6 +57,9 @@ class OfflineBufferStore(context: Context) :
             )
             """.trimIndent(),
         )
+        // la poda por ventana de tiempo corre en cada insercion - sin indice seria un recorrido
+        // completo de la tabla una vez por segundo
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_buffer_time ON $TABLE (time)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -76,10 +87,15 @@ class OfflineBufferStore(context: Context) :
         }
         writableDatabase.insert(TABLE, null, values)
 
+        // ventana deslizante de la ultima hora - ver RETENTION_MS
+        writableDatabase.execSQL(
+            "DELETE FROM $TABLE WHERE time < (SELECT MAX(time) FROM $TABLE) - $RETENTION_MS",
+        )
+
         val count = count()
         if (count > MAX_ROWS) {
             // se descartan los mas viejos por encima del tope de seguridad - nunca deberia pasar
-            // en operacion normal, solo si la tableta paso dias enteros sin red
+            // en operacion normal, solo si algo encolara mucho mas rapido que 1/seg
             writableDatabase.execSQL(
                 "DELETE FROM $TABLE WHERE id IN (SELECT id FROM $TABLE ORDER BY id ASC LIMIT ${count - MAX_ROWS})",
             )

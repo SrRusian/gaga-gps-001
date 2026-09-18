@@ -21,7 +21,25 @@ describe('PositionFilterService', () => {
       allowedMaxKmh: null,
       distanceMeters: null,
       resynced: false,
+      backfill: false,
     });
+  });
+
+  it('marca como backfill una posicion claramente mas vieja (buffer sin conexion de la tableta)', () => {
+    filter.evaluate(pos(19.35, -103.56, '2026-01-01T00:10:00Z'));
+    const result = filter.evaluate(pos(19.36, -103.57, '2026-01-01T00:02:00Z'));
+    expect(result.accepted).toBe(true);
+    expect(result.backfill).toBe(true);
+    expect(result.reason).toBe('backfill');
+  });
+
+  it('el backfill no mueve el estado del filtro: la siguiente posicion en vivo se compara contra la ultima real', () => {
+    filter.evaluate(pos(19.35, -103.56, '2026-01-01T00:10:00Z'));
+    filter.evaluate(pos(19.5, -103.9, '2026-01-01T00:02:00Z')); // relleno lejano y viejo
+    // 2 segundos despues de la ultima EN VIVO, a ~9m (16 km/h): debe aceptarse con normalidad
+    const result = filter.evaluate(pos(19.35008, -103.56, '2026-01-01T00:10:02Z'));
+    expect(result.accepted).toBe(true);
+    expect(result.backfill).toBe(false);
   });
 
   it('descarta un fix fuera de orden (dtSeconds <= 0) sin afectar el contador de rechazos', () => {

@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 48,
-      "versionName": "1.0.43-battery-report",
+      "versionCode": 50,
+      "versionName": "1.0.44-usb-looper-fix",
       "outputFile": "app-release.apk"
     }
   ],

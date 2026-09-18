@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.os.Looper
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
@@ -177,7 +178,22 @@ class UsbSerialManager(private val context: Context) {
             },
         )
         ioManager = manager
-        Executors.newSingleThreadExecutor().submit(manager)
+        // bug real reportado en campo: "Conexion USB perdida: Can't create handler inside thread
+        // ... that has not called Looper.prepare()" - un hilo de Executors.newSingleThreadExecutor()
+        // plano no tiene Looper preparado, y algo dentro del driver USB (usb-serial-for-android,
+        // via UsbRequest en ciertos caminos internos) intenta crear un Handler() ahi - gotcha
+        // conocido de la libreria. Fix: el hilo que corre el manager prepara su propio Looper antes
+        // de arrancar (no hace falta Looper.loop() - basta con que exista, para que Handler() no
+        // truene al construirse). Sin verificar en hardware real todavia (sin SDK/receptor en este
+        // entorno) - pendiente que el usuario confirme que el error ya no aparece al conectar.
+        Executors.newSingleThreadExecutor { runnable ->
+            object : Thread(runnable, "usb-serial-io") {
+                override fun run() {
+                    Looper.prepare()
+                    super.run()
+                }
+            }
+        }.submit(manager)
         connectedDeviceName = device.friendlyLabel()
         connectedDeviceId = device.deviceId
         listener?.onConnected()

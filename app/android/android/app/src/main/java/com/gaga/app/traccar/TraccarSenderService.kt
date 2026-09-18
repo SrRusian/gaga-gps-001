@@ -42,10 +42,15 @@ class TraccarSenderService : Service() {
         const val NOTIFICATION_ID = 4210
 
         // cuanto tiempo sin un fix de GPS antes de aceptar un fix de NETWORK_PROVIDER como
-        // respaldo (ver listener) - mayor al intervalo de envio normal para no alternar entre
-        // GPS/red en cada tick por un solo fix perdido, pero menor a los saltos largos reportados
-        // en campo (minutos), para que de verdad ayude en esos casos
-        private const val NETWORK_FALLBACK_GRACE_MS = 5_000L
+        // respaldo (ver listener). Subido de 5s a 20s tras el incidente de campo del 17 sep: con
+        // 5s el respaldo entraba en cualquier hueco normal de GPS dentro del vehiculo e inundaba
+        // el historial de posiciones de antena celular (18,181 posiciones con accuracy=100 ese
+        // dia, 0 en todos los dias anteriores). Ahora solo cubre apagones de GPS de verdad largos.
+        private const val NETWORK_FALLBACK_GRACE_MS = 20_000L
+
+        // una posicion de antena celular por encima de esto no aporta nada util a un sistema que
+        // opera con RTK centimetrico - vale mas no mandar nada que mandar un punto a 500m de error
+        private const val NETWORK_FALLBACK_MAX_ACCURACY_M = 150f
 
         @Volatile var isRunning: Boolean = false
             private set
@@ -237,9 +242,17 @@ class TraccarSenderService : Service() {
     // requestSingleUpdate() (una sola vez, no continuo - no reintroduce el bug de retrasar al GPS)
     // pide un fix de red FRESCO de verdad cuando hace falta, en vez de confiar en una cache pasiva.
     private var networkRequestPendingSinceMs: Long = 0L
+    private var lastNetworkFixTimeMs: Long = 0L
     private val singleNetworkListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            networkRequestPendingSinceMs = 0L
+            // se marca ENTREGADA, no "sin peticion pendiente" (antes se ponia en 0) - con 0, el
+            // watchdog volvia a pedir en el siguiente tick de 1s y el proveedor de red devolvia su
+            // fix en cache al instante, asi que la MISMA posicion de antena se reenviaba cada
+            // segundo con la precision inflandose sola. En produccion eso dejo 84.7% del recorrido
+            // con coordenadas identicas a la anterior, y saltos de 800m al cambiar de antena.
+            networkRequestPendingSinceMs = System.currentTimeMillis()
+            if (!isUsableNetworkFix(location)) return
+            lastNetworkFixTimeMs = location.time
             sendLocation(location, System.currentTimeMillis())
         }
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
@@ -247,6 +260,14 @@ class TraccarSenderService : Service() {
         override fun onProviderDisabled(provider: String) {
             networkRequestPendingSinceMs = 0L
         }
+    }
+
+    // descarta lo que no aporta: precision inservible, o el mismo fix en cache que ya se mando
+    private fun isUsableNetworkFix(location: Location): Boolean {
+        if (location.hasAccuracy() && location.accuracy > NETWORK_FALLBACK_MAX_ACCURACY_M) return false
+        if (location.time <= lastNetworkFixTimeMs) return false
+        if (location.time <= lastGpsFixAtMs) return false
+        return true
     }
 
     private val networkFallbackRunnable = object : Runnable {

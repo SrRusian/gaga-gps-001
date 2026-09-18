@@ -337,6 +337,16 @@ class RtkNtripPlugin : Plugin() {
         call.resolve()
     }
 
+    // rumbo de la brujula ya corregido por la auto-calibracion de montaje (headingCalibration.ts).
+    // El WebView lo empuja ~1/seg; TraccarUplink lo usa como bearing solo cuando el rumbo GPS no es
+    // confiable (vehiculo detenido), para que el servidor vea lo mismo que el operador en pantalla.
+    @PluginMethod
+    fun setCompassHeading(call: PluginCall) {
+        val heading = call.getFloat("headingDeg")
+        if (heading != null) CompassHeadingHolder.set(heading)
+        call.resolve()
+    }
+
     @PluginMethod
     fun startMockLocation(call: PluginCall) {
         val ok = mockLocation.start()

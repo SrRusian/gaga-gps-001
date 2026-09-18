@@ -41,6 +41,9 @@ export default function OperatorApp() {
   const deviceId = useDeviceId();
   const { session, operatingEquipment, needsShiftStart, shiftStartError, checking, startShift, endShift } =
     useOperatorAuth(deviceId);
+  // se resuelve antes del socket a proposito: sin conexion es la UNICA fuente de posicion, y es la
+  // que alimenta la evaluacion local de geocercas dentro de useOperatorSocket
+  const { position: localGeo, error: geoError, supported: geoSupported } = useDeviceGeolocation();
   const {
     connected,
     activeCount,
@@ -55,7 +58,7 @@ export default function OperatorApp() {
     activeGeofenceId,
     incidents,
     proximityNotice,
-  } = useOperatorSocket(deviceId);
+  } = useOperatorSocket(deviceId, localGeo);
   const [mapMode, setMapMode] = useMapMode('gaga_operator_map_mode');
   const [autoFollow, setAutoFollow] = useAutoFollow();
   const [framingThreat, setFramingThreat] = useState(false);
@@ -64,7 +67,6 @@ export default function OperatorApp() {
   const { report: reportIncident, submitting: reportingIncident, error: reportIncidentError } =
     useIncidentReporter(deviceId);
 
-  const { position: localGeo, error: geoError, supported: geoSupported } = useDeviceGeolocation();
   const { level: batteryLevel, charging: batteryCharging } = useBatteryLevel();
   useDeviceSensorReporter(deviceId);
   const vehicleFootprints = useVehicleFootprints();

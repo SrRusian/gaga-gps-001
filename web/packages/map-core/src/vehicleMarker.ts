@@ -149,7 +149,15 @@ export function createVehicleMarkerElement({
 }: VehicleMarkerOptions): HTMLDivElement {
   const el = document.createElement('div');
   el.className = 'vehicle-marker';
-  el.style.position = 'relative';
+  // DEBE ser absolute: MapLibre posiciona el marcador escribiendo un transform en ESTE mismo
+  // elemento, y su hoja de estilos lo deja en `position:absolute; top:0; left:0` para que ese
+  // transform se mida desde el origen del contenedor del mapa. Un `relative` inline le gana a esa
+  // regla de clase y devuelve el marcador al flujo normal del documento: cada marcador queda
+  // apilado 34px mas abajo que el anterior y el transform lo desplaza desde ahi, no desde el
+  // origen. Bug real reportado en campo: el primer vehiculo se veia bien y los demas aparecian
+  // corridos hacia el sur una cantidad fija de PIXELES - imperceptible con zoom cercano, pero
+  // decenas de km al alejar. Sigue siendo bloque contenedor de los hijos absolutos igual que antes.
+  el.style.position = 'absolute';
   el.style.width = `${ARROW_SIZE}px`;
   el.style.height = `${ARROW_SIZE}px`;
   el.style.cursor = clickable ? 'pointer' : 'default';

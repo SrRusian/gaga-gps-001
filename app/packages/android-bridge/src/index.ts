@@ -143,6 +143,10 @@ export interface RtkNtripPlugin {
   setCorrectionMode(options: { mode: CorrectionMode }): Promise<void>;
   startNtrip(): Promise<void>;
   stopNtrip(): Promise<void>;
+  // rumbo ya corregido por la auto-calibracion de montaje (ver headingCalibration.ts) - lo usa el
+  // envio al servidor cuando el rumbo GPS no es confiable (vehiculo detenido), para que Admin y
+  // Supervisor vean hacia donde apunta el vehiculo igual que el operador en su propia pantalla
+  setCompassHeading(options: { headingDeg: number }): Promise<void>;
   startMockLocation(): Promise<void>;
   stopMockLocation(): Promise<void>;
   startSwMapsOutput(options?: { port?: number }): Promise<void>;
@@ -208,6 +212,7 @@ const webRtkFallback: RtkNtripPlugin = {
   setCorrectionMode: async () => unavailable('RtkNtrip'),
   startNtrip: async () => unavailable('RtkNtrip'),
   stopNtrip: async () => unavailable('RtkNtrip'),
+  setCompassHeading: async () => unavailable('RtkNtrip'),
   startMockLocation: async () => unavailable('RtkNtrip'),
   stopMockLocation: async () => unavailable('RtkNtrip'),
   startSwMapsOutput: async () => unavailable('RtkNtrip'),

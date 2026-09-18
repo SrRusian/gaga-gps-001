@@ -7,6 +7,8 @@ import android.location.Location
 import android.location.LocationManager
 import android.location.provider.ProviderProperties
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import com.gaga.app.traccar.TraccarSenderService
@@ -21,8 +23,29 @@ import com.gaga.app.traccar.TraccarSenderService
 // desarrollador - Android bloquea deliberadamente setTestProviderLocation si no, sin forma de saltarlo
 // por software (proteccion anti-spoofing real, no un permiso que se pueda pedir en runtime).
 class MockLocationFeeder(private val context: Context) {
+    companion object {
+        // sin un fix RTK real en este tiempo se suelta GPS_PROVIDER y vuelve el GPS de la tableta.
+        // Bug real de campo (17 sep): basta UN fix para secuestrar GPS_PROVIDER, y si el receptor
+        // deja de entregar despues (crash del USB, antena sin cielo, receptor sin lock) el
+        // proveedor se quedaba secuestrado y VACIO - el GPS real huerfano y la tableta ciega, sin
+        // ningun error visible. Eso dejaba al respaldo por red como unica fuente de posicion.
+        private const val FIX_STALE_MS = 6_000L
+        private const val WATCHDOG_PERIOD_MS = 2_000L
+    }
+
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private var providerAdded = false
+    @Volatile private var lastFedAtMs = 0L
+    private val watchdogHandler = Handler(Looper.getMainLooper())
+
+    private val staleWatchdog = object : Runnable {
+        override fun run() {
+            if (providerAdded && System.currentTimeMillis() - lastFedAtMs > FIX_STALE_MS) {
+                releaseProvider() // requested sigue en true - el proximo fix real lo vuelve a tomar
+            }
+            if (requested) watchdogHandler.postDelayed(this, WATCHDOG_PERIOD_MS)
+        }
+    }
 
     // true solo mientras el usuario/checklist pidio "ubicacion simulada" (entre start() y stop()) -
     // separado a proposito de providerAdded (que ahora refleja si GPS_PROVIDER de verdad ya fue
@@ -39,7 +62,22 @@ class MockLocationFeeder(private val context: Context) {
 
     fun start(): Boolean {
         requested = true
+        watchdogHandler.removeCallbacks(staleWatchdog)
+        watchdogHandler.postDelayed(staleWatchdog, WATCHDOG_PERIOD_MS)
         return isAllowedByOs()
+    }
+
+    // suelta GPS_PROVIDER sin cancelar la peticion de ubicacion simulada - se usa cuando el
+    // receptor deja de entregar fixes, para que el GPS real de la tableta vuelva a funcionar
+    // mientras tanto. A diferencia de stop(), el proximo fix real vuelve a secuestrarlo solo.
+    private fun releaseProvider() {
+        if (!providerAdded) return
+        try {
+            locationManager.removeTestProvider(LocationManager.GPS_PROVIDER)
+        } catch (_: Exception) {
+        }
+        providerAdded = false
+        TraccarSenderService.reregisterLocationListener()
     }
 
     private fun addProvider(): Boolean {
@@ -77,6 +115,7 @@ class MockLocationFeeder(private val context: Context) {
         val lat = fix.latitude ?: return // sin fix todavia - nada real que alimentar
         val lon = fix.longitude ?: return
         if (!addProvider()) return // permiso de OS no concedido - nada que alimentar
+        lastFedAtMs = System.currentTimeMillis()
         val location = Location(LocationManager.GPS_PROVIDER).apply {
             latitude = lat
             longitude = lon
@@ -97,15 +136,10 @@ class MockLocationFeeder(private val context: Context) {
 
     fun stop() {
         requested = false
-        if (!providerAdded) return
-        try {
-            locationManager.removeTestProvider(LocationManager.GPS_PROVIDER)
-        } catch (_: Exception) {
-        }
-        providerAdded = false
+        watchdogHandler.removeCallbacks(staleWatchdog)
         // mismo motivo que en addProvider() - volver al GPS real tambien reemplaza el proveedor y
-        // deja huerfano al listener del envio continuo
-        TraccarSenderService.reregisterLocationListener()
+        // deja huerfano al listener del envio continuo, por eso releaseProvider() lo re-registra
+        releaseProvider()
     }
 
     // refleja si GPS_PROVIDER de verdad esta secuestrado ahora mismo (llego al menos un fix real) -

@@ -14,9 +14,23 @@ const VALID_TYPES: AlertType[] = [
 ];
 const VALID_SEVERITIES: AlertSeverity[] = ['info', 'warning', 'danger'];
 
+// tope por peticion, no del total: la tableta manda el historico sin conexion en tandas sucesivas
+// hasta vaciar su cola, sin limite de cuantas tandas (pedido explicito: no perder ningun dato)
+const MAX_OFFLINE_BATCH = 500;
+
+interface GeofenceEventRepoLike {
+  record(input: {
+    deviceId: string;
+    geofenceId: number | null;
+    eventType: 'enter' | 'exit';
+    severity?: string | null;
+  }): Promise<unknown>;
+}
+
 export interface AlertsRouterDeps {
   alertEventRepo: AlertEventRepository;
   requireRole: (...roles: UserRole[]) => RequestHandler;
+  geofenceEventRepo?: GeofenceEventRepoLike;
 }
 
 function computeFilters(req: express.Request) {
@@ -41,7 +55,7 @@ function computeFilters(req: express.Request) {
   };
 }
 
-export function buildAlertsRouter({ alertEventRepo, requireRole }: AlertsRouterDeps) {
+export function buildAlertsRouter({ alertEventRepo, requireRole, geofenceEventRepo }: AlertsRouterDeps) {
   const router = express.Router();
   // project_supervisor deliberadamente fuera - pedido explicito: solo ve "su turno" (via
   // /api/infractions y /api/incidents/history, ambos acotados al dia actual), sin acceso al
@@ -99,6 +113,63 @@ export function buildAlertsRouter({ alertEventRepo, requireRole }: AlertsRouterD
       }
       console.error('alerts.routes GET /history/csv:', (err as Error).message);
       res.status(500).json({ error: 'Error exportando CSV' });
+    }
+  });
+
+  // Ingesta de las alertas de geocerca que el Operador genero SIN conexion y recien pudo mandar.
+  // Sin restriccion de rol mas alla de estar autenticado: el unico que llama esto es la propia
+  // tableta con su sesion de operador. Cada elemento es un hecho ya ocurrido y ya terminado, con su
+  // fecha real - nunca toca el estado de alertas EN VIVO (ver recordHistorical).
+  router.post('/offline-batch', async (req, res) => {
+    try {
+      const items = req.body?.alerts;
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: 'Se espera { alerts: [...] } con al menos un elemento' });
+      }
+      if (items.length > MAX_OFFLINE_BATCH) {
+        return res.status(400).json({ error: `Maximo ${MAX_OFFLINE_BATCH} alertas por lote` });
+      }
+
+      let stored = 0;
+      for (const item of items) {
+        const severity = String(item?.severity) as AlertSeverity;
+        const deviceId = item?.deviceId ? String(item.deviceId) : null;
+        const occurredAt = new Date(item?.occurredAt);
+        if (!deviceId || !VALID_SEVERITIES.includes(severity) || Number.isNaN(occurredAt.getTime())) {
+          continue; // un elemento corrupto no debe tirar el lote entero
+        }
+
+        await alertEventRepo.recordHistorical({
+          alertType: 'geofence',
+          severity,
+          deviceId,
+          message: item?.message ? String(item.message) : null,
+          metadata: {
+            offline: true,
+            geofenceId: item?.geofenceId ?? null,
+            geofenceName: item?.geofenceName ?? null,
+            event: item?.event ?? null,
+            latitude: item?.latitude ?? null,
+            longitude: item?.longitude ?? null,
+          },
+          occurredAt,
+        });
+
+        if (geofenceEventRepo && typeof item?.geofenceId === 'number') {
+          await geofenceEventRepo.record({
+            deviceId,
+            geofenceId: item.geofenceId,
+            eventType: item?.event === 'exit' ? 'exit' : 'enter',
+            severity,
+          });
+        }
+        stored += 1;
+      }
+
+      res.json({ success: true, stored });
+    } catch (err) {
+      console.error('alerts.routes POST /offline-batch:', (err as Error).message);
+      res.status(500).json({ error: 'Error guardando alertas sin conexión' });
     }
   });
 

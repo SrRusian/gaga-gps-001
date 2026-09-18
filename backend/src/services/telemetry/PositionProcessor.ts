@@ -104,9 +104,23 @@ class PositionProcessor {
 
   async process(position: Position): Promise<Position> {
     try {
+      // se evalua antes de registrar/marcar online: una posicion de relleno no debe mover el
+      // last_seen del dispositivo hacia atras (su fixTime es de hace minutos, no de ahora)
+      const verdict = this.positionFilter?.evaluate(
+        position as {
+          deviceId: string;
+          latitude: number;
+          longitude: number;
+          fixTime: Date | string | number;
+        },
+      );
+      const isBackfill = verdict?.backfill === true;
+
       if (this.deviceManager) {
         const device = await this.deviceManager.ensureRegistered(position.deviceId);
-        await this.deviceManager.markOnline(position.deviceId, position.fixTime as Date);
+        if (!isBackfill) {
+          await this.deviceManager.markOnline(position.deviceId, position.fixTime as Date);
+        }
 
         if (device) {
           position.deviceName = device.name;
@@ -119,16 +133,16 @@ class PositionProcessor {
         this.signalLostService.recordPosition(position.deviceId, position.projectId ?? null);
       }
 
-      if (this.positionFilter) {
-        const verdict = this.positionFilter.evaluate(
-          position as {
-            deviceId: string;
-            latitude: number;
-            longitude: number;
-            fixTime: Date | string | number;
-          },
-        );
+      // recorrido historico del buffer de la tableta: se guarda completo para que el historial no
+      // pierda nada, pero no alimenta posicion en vivo, velocidad, alertas ni broadcast - esos
+      // hechos ya ocurrieron hace minutos y re-evaluarlos ahora seria falsear el presente
+      if (isBackfill) {
+        position.attributes = { ...(position.attributes || {}), backfilled: true };
+        await this.positionRepo.save(position);
+        return position;
+      }
 
+      if (verdict) {
         if (!verdict.accepted) {
           position.valid = false;
           position.attributes = {
@@ -149,6 +163,9 @@ class PositionProcessor {
         }
 
         if (verdict.resynced) {
+          // la distancia que cruza la discontinuidad no es movimiento real - sin esto el
+          // estimador la convertia en una velocidad enorme que la EMA arrastraba varios segundos
+          this.speedEstimator?.resetTrack(position.deviceId);
           console.warn(
             ` Device ${position.deviceId} resincronizado tras varios saltos consecutivos - vel. implícita ${verdict.impliedSpeedKmh?.toFixed(1)}km/h`,
           );
@@ -163,6 +180,7 @@ class PositionProcessor {
           position.longitude,
           fixTimeMs,
           position.speed,
+          position.accuracy,
         );
         position.attributes = {
           ...(position.attributes || {}),
