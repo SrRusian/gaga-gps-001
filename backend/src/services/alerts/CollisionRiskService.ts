@@ -390,7 +390,7 @@ class CollisionRiskService {
       deviceId1,
       deviceId2,
       distance: Math.round(distance),
-      message: `PRECAUCIÓN - VEHÍCULO ${deviceId2} A ${Math.round(distance)} METROS - REDUZCA VELOCIDAD`,
+      message: `PRECAUCIÓN - VEHÍCULOS ${deviceId1} Y ${deviceId2} A ${Math.round(distance)} METROS - REDUZCA VELOCIDAD`,
       timestamp: new Date().toISOString(),
     };
 
@@ -418,7 +418,7 @@ class CollisionRiskService {
       deviceId1,
       deviceId2,
       distance: Math.round(distance),
-      message: `PELIGRO - COLISIÓN INMINENTE CON VEHÍCULO - DETÉNGASE INMEDIATAMENTE`,
+      message: `PELIGRO - COLISIÓN INMINENTE ENTRE ${deviceId1} Y ${deviceId2} - DETÉNGANSE INMEDIATAMENTE`,
       loop: true,
       timestamp: new Date().toISOString(),
     };
@@ -451,7 +451,7 @@ class CollisionRiskService {
       deviceId1,
       deviceId2,
       distance: Math.round(distance),
-      message: 'COLISIÓN - VEHÍCULOS EN CONTACTO - DETENGA OPERACIONES Y REPORTE DE INMEDIATO',
+      message: `COLISIÓN - VEHÍCULOS ${deviceId1} Y ${deviceId2} EN CONTACTO - DETENGA OPERACIONES Y REPORTE DE INMEDIATO`,
       loop: true,
       timestamp: new Date().toISOString(),
     };

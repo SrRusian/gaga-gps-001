@@ -96,6 +96,28 @@ class AlertEventRepository {
     }
   }
 
+  // resuelve TODAS las filas abiertas de un tipo, sin importar deviceId - usado solo al arrancar el
+  // proceso (ver app.ts) para tipos cuya "¿sigue siendo real?" depende enteramente de estado en
+  // memoria que un reinicio del servidor borra (signal_lost/collision/proximity - sus in-memory
+  // alertLevel/collisionAlerts/proximityAlerts vuelven a 'none' al reiniciar, y sin esto la fila
+  // vieja se quedaba "abierta" para siempre aunque el vehiculo ya llevara horas bien). Seguro porque
+  // el detector correspondiente re-abre una fila nueva de inmediato si el problema de verdad sigue
+  // (checkAllDevices corre cada 5s, colision/proximity se re-evaluan en la siguiente posicion real).
+  async resolveAllOpenOfType(alertType: AlertType): Promise<number> {
+    try {
+      const { rows } = await query(
+        `UPDATE alert_events SET resolved_at = NOW()
+         WHERE alert_type = $1 AND resolved_at IS NULL
+         RETURNING id`,
+        [alertType],
+      );
+      return rows.length;
+    } catch (err) {
+      console.error('AlertEventRepository.resolveAllOpenOfType:', (err as Error).message);
+      throw err;
+    }
+  }
+
   async findActive(projectId: number | null): Promise<AlertEventRow[]> {
     try {
       const { rows } = await query<AlertEventRow>(

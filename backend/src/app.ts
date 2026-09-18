@@ -497,6 +497,18 @@ async function loadPersistedState(): Promise<void> {
       `${staleTrackedDevices.length} dispositivo(s) "online" recuperado(s) para monitoreo de señal`,
     );
 
+    // signal_lost/collision/proximity dependen 100% de estado en memoria (alertLevel/collisionAlerts/
+    // proximityAlerts) que un reinicio del proceso borra - sin esto una fila abierta antes del reinicio
+    // queda "activa" para siempre aunque el vehiculo ya lleve horas bien. Los detectores re-abren de
+    // inmediato si el problema sigue siendo real (checkAllDevices cada 5s, colision/proximity en la
+    // siguiente posicion real).
+    for (const alertType of ['signal_lost', 'collision', 'proximity'] as const) {
+      const closed = await alertEventRepo.resolveAllOpenOfType(alertType);
+      if (closed > 0) {
+        console.log(`${closed} alerta(s) '${alertType}' abierta(s) antes del reinicio, cerrada(s) al arrancar`);
+      }
+    }
+
     const equipment = await equipmentRepo.findAll();
     equipment.forEach((eq) =>
       equipmentManager.registerEquipment({

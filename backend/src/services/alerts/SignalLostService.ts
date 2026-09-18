@@ -179,7 +179,12 @@ class SignalLostService {
       });
     }
 
-    this._recordAlertEvent(deviceId, 'warning', `Sin señal por ${seconds}s`, { elapsedSeconds: seconds });
+    // el mensaje guardado debe bastar por si solo para identificar el vehiculo - a diferencia de los
+    // mensajes en vivo de arriba, este es el unico texto que le llega al Encargado/Supervisor via
+    // alerts:snapshot (reconexion) o el historial, que no traen un campo de deviceId aparte
+    this._recordAlertEvent(deviceId, 'warning', `Vehículo ${deviceId} sin señal por ${seconds}s`, {
+      elapsedSeconds: seconds,
+    });
   }
 
   triggerLevel2(deviceId: string, elapsed: number): void {
@@ -206,7 +211,7 @@ class SignalLostService {
       });
     }
 
-    this._recordAlertEvent(deviceId, 'danger', `Sin señal por ${seconds}s - emergencia`, {
+    this._recordAlertEvent(deviceId, 'danger', `Vehículo ${deviceId} sin señal por ${seconds}s - emergencia`, {
       elapsedSeconds: seconds,
     });
 

@@ -122,7 +122,7 @@ class VehicleProximityService {
       deviceId1,
       deviceId2,
       distance: Math.round(distance),
-      message: `PRECAUCIÓN - VEHÍCULO A ${Math.round(distance)} METROS - FUERA DE RUTA`,
+      message: `PRECAUCIÓN - VEHÍCULOS ${deviceId1} Y ${deviceId2} A ${Math.round(distance)} METROS - FUERA DE RUTA`,
       timestamp: new Date().toISOString(),
     };
 
@@ -144,7 +144,7 @@ class VehicleProximityService {
       deviceId1,
       deviceId2,
       distance: Math.round(distance),
-      message: 'PELIGRO - VEHÍCULO MUY CERCA FUERA DE RUTA - REDUZCA VELOCIDAD',
+      message: `PELIGRO - VEHÍCULOS ${deviceId1} Y ${deviceId2} MUY CERCA FUERA DE RUTA - REDUZCA VELOCIDAD`,
       loop: true,
       timestamp: new Date().toISOString(),
     };
