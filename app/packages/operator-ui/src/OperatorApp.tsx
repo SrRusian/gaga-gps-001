@@ -50,6 +50,7 @@ export default function OperatorApp() {
     fleet,
     alert,
     nearestVehicle,
+    nearestOnRoute,
     threat,
     activeGeofenceId,
     incidents,
@@ -273,12 +274,18 @@ export default function OperatorApp() {
                 </span>
               </div>
               <div className="op-info-item">
-                <span className="op-info-label">Más cercano</span>
+                <span className="op-info-label">Vehículo más cercano</span>
                 <span className="op-info-value">
                   {liveNearest ? `${Math.round(liveNearest.distanceM)} m` : '--'}
                   {liveNearest?.stale && <span id="op-nearest-stale"> (sin señal)</span>}
                 </span>
               </div>
+              {nearestOnRoute && (
+                <div className="op-info-item">
+                  <span className="op-info-label">Más cercano en ruta</span>
+                  <span className="op-info-value">{nearestOnRoute.distanceMeters} m</span>
+                </div>
+              )}
               {batteryLevel !== null && (
                 <div className="op-info-item">
                   <span className="op-info-label">Batería</span>

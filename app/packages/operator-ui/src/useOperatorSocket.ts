@@ -33,6 +33,15 @@ export interface NearestVehicle {
   distance: number;
 }
 
+// distancia al vehiculo mas cercano EN LA MISMA RUTA autorizada - independiente de NearestVehicle
+// (radar generico de toda el area, que ademas excluye vehiculos dentro de una ruta) - ver
+// CollisionRiskService._updateRouteDistance
+export interface NearestOnRouteVehicle {
+  deviceId: string;
+  distanceMeters: number;
+  routeName: string;
+}
+
 export interface ThreatVehicle {
   deviceId: string;
   distance: number;
@@ -60,6 +69,7 @@ export function useOperatorSocket(deviceId: string | null) {
   const [myOnline, setMyOnline] = useState(false);
   const [alert, setAlert] = useState<AlertState>({ severity: null, message: '' });
   const [nearestVehicle, setNearestVehicle] = useState<NearestVehicle | null>(null);
+  const [nearestOnRoute, setNearestOnRoute] = useState<NearestOnRouteVehicle | null>(null);
   const [threat, setThreat] = useState<ThreatVehicle | null>(null);
   const [activeGeofenceId, setActiveGeofenceId] = useState<number | null>(null);
   const [incidents, setIncidents] = useState<Record<number, IncidentReportedPayload>>({});
@@ -163,6 +173,15 @@ export function useOperatorSocket(deviceId: string | null) {
       });
     });
     socket.on('alert:proximity_clear', () => setProximityNotice(null));
+
+    socket.on('route:distance_update', (data) => {
+      setNearestOnRoute({
+        deviceId: data.nearestDeviceId,
+        distanceMeters: data.distanceMeters,
+        routeName: data.routeName,
+      });
+    });
+    socket.on('route:distance_clear', () => setNearestOnRoute(null));
 
     // el backend ya decide el mensaje segun la audiencia (SignalLostService.ts): al propio
     // vehiculo afectado le llega en primera persona via un evento dirigido solo a el, al resto del
@@ -345,6 +364,7 @@ export function useOperatorSocket(deviceId: string | null) {
     alert,
     activeCount,
     nearestVehicle,
+    nearestOnRoute,
     threat,
     activeGeofenceId,
     incidents,

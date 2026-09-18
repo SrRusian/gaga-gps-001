@@ -141,6 +141,24 @@ export interface ProximityDistanceUpdatePayload {
   timestamp: string;
 }
 
+// distancia continua al vehiculo mas cercano EN LA MISMA RUTA (authorized_route) - solo al operador
+// afectado (sendToDevice), independiente del radar generico de arriba (que ademas excluye a
+// cualquier vehiculo dentro de una ruta). Se manda en cada posicion mientras haya al menos un
+// vehiculo compartiendo la misma ruta, sin importar direccion/alerta - es un valor informativo
+// continuo, no un umbral de alerta.
+export interface RouteDistanceUpdatePayload {
+  deviceId: string;
+  nearestDeviceId: string;
+  distanceMeters: number;
+  routeName: string;
+  timestamp: string;
+}
+
+export interface RouteDistanceClearPayload {
+  deviceId: string;
+  timestamp: string;
+}
+
 export interface SupervisorProximityPayload extends Partial<ProximityPayload> {
   deviceId1: string;
   deviceId2: string;

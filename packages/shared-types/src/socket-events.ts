@@ -19,6 +19,8 @@ import type {
   ProximityClearPayload,
   ProximityDistanceUpdatePayload,
   ProximityPayload,
+  RouteDistanceClearPayload,
+  RouteDistanceUpdatePayload,
   SignalLostPayload,
   SignalRecoveredPayload,
   SupervisorCollisionPayload,
@@ -74,6 +76,11 @@ export interface ServerToClientEvents {
   'proximity:critical': (payload: ProximityPayload) => void;
   'proximity:clear': (payload: ProximityClearPayload) => void;
   'supervisor:proximity': (payload: SupervisorProximityPayload) => void;
+
+  // distancia continua al vehiculo mas cercano en la MISMA ruta autorizada - solo al operador
+  // afectado (sendToDevice), ver RouteDistanceUpdatePayload
+  'route:distance_update': (payload: RouteDistanceUpdatePayload) => void;
+  'route:distance_clear': (payload: RouteDistanceClearPayload) => void;
 
   'fleet:preventive_stop': (payload: PreventiveStopActivePayload) => void;
   'fleet:preventive_stop_clear': (payload: PreventiveStopClearPayload) => void;

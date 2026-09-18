@@ -105,6 +105,9 @@ class CollisionRiskService {
   footprintByDevice: Record<string, string>;
   routeStateByDevice: Record<string, RouteState>;
   activeSilentNotices: Record<string, boolean>;
+  // true = el dispositivo tiene actualmente un valor de "distancia en ruta" enviado - para saber
+  // cuando mandar route:distance_clear (deja de tener un vehiculo compartiendo ruta)
+  activeRouteDistances: Record<string, boolean>;
   readonly THRESHOLD_1_METERS = 80;
   readonly THRESHOLD_2_METERS = 40;
   readonly CLEAR_MARGIN = 1.15; // histeresis - evita parpadeo por ruido GPS al limpiar
@@ -132,6 +135,7 @@ class CollisionRiskService {
     this.footprintByDevice = {};
     this.routeStateByDevice = {};
     this.activeSilentNotices = {};
+    this.activeRouteDistances = {};
   }
 
   // fleetState viene keyed por deviceId. Async solo por la consulta de ruta (geofenceRepo) - si no
@@ -154,6 +158,7 @@ class CollisionRiskService {
 
     if (this.geofenceRepo) {
       const myRoute = await this._updateRouteState(position);
+      let nearestOnRoute: { deviceId: string; distanceMeters: number } | null = null;
       if (myRoute) {
         for (const [otherId, otherRoute] of Object.entries(this.routeStateByDevice)) {
           if (otherId === String(deviceId)) continue;
@@ -163,11 +168,21 @@ class CollisionRiskService {
           if (!this.positionHistory[otherId] || this.positionHistory[otherId].length < 2) continue;
 
           routePeerIds.add(otherId);
+          const distanceMeters = this.calculateDistance(
+            position.latitude,
+            position.longitude,
+            otherPos.latitude,
+            otherPos.longitude,
+          );
+          if (!nearestOnRoute || distanceMeters < nearestOnRoute.distanceMeters) {
+            nearestOnRoute = { deviceId: otherId, distanceMeters };
+          }
           const sameDirection =
             myRoute.direction !== null && otherRoute.direction !== null && myRoute.direction === otherRoute.direction;
           this._evaluateRoutePair(position, otherPos, sameDirection);
         }
       }
+      this._updateRouteDistance(String(deviceId), myRoute?.geofenceName ?? null, nearestOnRoute);
     }
 
     if (!this.positionHistory[deviceId] || this.positionHistory[deviceId].length < 2) {
@@ -295,6 +310,34 @@ class CollisionRiskService {
       deviceId: String(deviceId),
       timestamp: new Date().toISOString(),
     });
+  }
+
+  // distancia continua al vehiculo mas cercano en la MISMA ruta - independiente de si escala a
+  // aviso/alerta (eso lo deciden evaluatePair/_evaluateRoutePair aparte). Se manda en cada posicion
+  // mientras haya al menos un companero de ruta; se limpia en cuanto deja de haberlo (sale de la
+  // ruta, o se queda sin nadie mas compartiendola)
+  _updateRouteDistance(
+    deviceId: string,
+    routeName: string | null,
+    nearest: { deviceId: string; distanceMeters: number } | null,
+  ): void {
+    if (!this.socketServer) return;
+    if (nearest && routeName) {
+      this.activeRouteDistances[deviceId] = true;
+      this.socketServer.sendToDevice(deviceId, 'route:distance_update', {
+        deviceId,
+        nearestDeviceId: nearest.deviceId,
+        distanceMeters: Math.round(nearest.distanceMeters),
+        routeName,
+        timestamp: new Date().toISOString(),
+      });
+    } else if (this.activeRouteDistances[deviceId]) {
+      this.activeRouteDistances[deviceId] = false;
+      this.socketServer.sendToDevice(deviceId, 'route:distance_clear', {
+        deviceId,
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   updateHistory(position: EvaluatedPosition): void {
@@ -562,6 +605,13 @@ class CollisionRiskService {
     delete this.positionHistory[deviceId];
     delete this.footprintByDevice[deviceId];
     delete this.routeStateByDevice[deviceId];
+    if (this.activeRouteDistances[deviceId] && this.socketServer) {
+      this.socketServer.sendToDevice(deviceId, 'route:distance_clear', {
+        deviceId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    delete this.activeRouteDistances[deviceId];
   }
 }
 

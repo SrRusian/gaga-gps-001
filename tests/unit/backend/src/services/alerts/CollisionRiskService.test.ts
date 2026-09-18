@@ -311,4 +311,36 @@ describe('CollisionRiskService - rutas, dirección y contacto real', () => {
     expect(service.routeStateByDevice['1']).toBeUndefined();
     expect(io.emit).not.toHaveBeenCalled();
   });
+
+  it('route:distance_update manda la distancia al companero de ruta mas cercano - independiente de si convergen/escalan', async () => {
+    await primeRouteDevice(2, LAT, [0.1, 0.15]);
+    await primeRouteDevice(1, north(100), [0.4, 0.4]);
+
+    socketServer.sendToDevice.mockClear();
+    geofenceRepo.findRouteMembership.mockResolvedValueOnce(routeMatch(0.42));
+    await service.evaluate({ deviceId: 1, latitude: north(95), longitude: LON, projectId: 7, speed: 5 }, fleet);
+
+    expect(socketServer.sendToDevice).toHaveBeenCalledWith(
+      '1',
+      'route:distance_update',
+      expect.objectContaining({ deviceId: '1', nearestDeviceId: '2', routeName: 'Ruta A-B' }),
+    );
+  });
+
+  it('route:distance_clear se manda cuando el vehiculo sale de la ruta tras haber tenido un companero', async () => {
+    await primeRouteDevice(2, LAT, [0.1, 0.15]);
+    await primeRouteDevice(1, north(100), [0.4, 0.4]);
+    geofenceRepo.findRouteMembership.mockResolvedValueOnce(routeMatch(0.42));
+    await service.evaluate({ deviceId: 1, latitude: north(95), longitude: LON, projectId: 7, speed: 5 }, fleet);
+
+    socketServer.sendToDevice.mockClear();
+    geofenceRepo.findRouteMembership.mockResolvedValueOnce(null);
+    await service.evaluate({ deviceId: 1, latitude: north(490), longitude: LON, projectId: 7, speed: 10 }, fleet);
+
+    expect(socketServer.sendToDevice).toHaveBeenCalledWith(
+      '1',
+      'route:distance_clear',
+      expect.objectContaining({ deviceId: '1' }),
+    );
+  });
 });
