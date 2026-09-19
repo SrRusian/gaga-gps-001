@@ -55,16 +55,16 @@ describe('SignalLostService', () => {
     expect(socketServer.broadcastToProjectExceptDevice).not.toHaveBeenCalled();
   });
 
-  it('dispara nivel 1 a partir de 10s sin señal - deviceId real (texto), nunca parseInt/NaN', () => {
+  it('dispara nivel 1 a partir de 5s sin señal - deviceId real (texto), nunca parseInt/NaN', () => {
     service.recordPosition('T1');
-    vi.advanceTimersByTime(10000);
+    vi.advanceTimersByTime(5000);
     service.checkAllDevices();
 
     // al propio vehiculo, mensaje en primera persona
     expect(socketServer.sendToDevice).toHaveBeenCalledWith(
       'T1',
       'signal:lost:level1',
-      expect.objectContaining({ deviceId: 'T1', elapsedSeconds: 10, message: expect.stringContaining('PERDISTE') }),
+      expect.objectContaining({ deviceId: 'T1', elapsedSeconds: 5, message: expect.stringContaining('PERDISTE') }),
     );
     // al resto del proyecto, mensaje en tercera persona nombrando el vehiculo
     expect(socketServer.broadcastToProjectExceptDevice).toHaveBeenCalledWith(
@@ -82,7 +82,7 @@ describe('SignalLostService', () => {
 
   it('usa el projectId reportado en recordPosition para dirigir el broadcast', () => {
     service.recordPosition('T1', 7);
-    vi.advanceTimersByTime(10000);
+    vi.advanceTimersByTime(5000);
     service.checkAllDevices();
 
     expect(socketServer.broadcastToProjectExceptDevice).toHaveBeenCalledWith(
@@ -95,65 +95,50 @@ describe('SignalLostService', () => {
 
   it('no repite nivel 1 en cada chequeo mientras siga en el mismo nivel', () => {
     service.recordPosition('T1');
-    vi.advanceTimersByTime(10000);
+    vi.advanceTimersByTime(5000);
     service.checkAllDevices();
     socketServer.sendToDevice.mockClear();
     socketServer.broadcastToProjectExceptDevice.mockClear();
-    vi.advanceTimersByTime(5000);
+    vi.advanceTimersByTime(3000);
     service.checkAllDevices();
     expect(socketServer.sendToDevice).not.toHaveBeenCalled();
     expect(socketServer.broadcastToProjectExceptDevice).not.toHaveBeenCalled();
   });
 
-  it('escala a nivel 2 a partir de 20s y activa la parada preventiva automáticamente', () => {
+  it('escala a nivel 2 a partir de 15s, avisando al vehículo y al resto del proyecto', () => {
     service.recordPosition('T1');
-    vi.advanceTimersByTime(20000);
+    vi.advanceTimersByTime(15000);
     service.checkAllDevices();
 
     expect(socketServer.sendToDevice).toHaveBeenCalledWith(
       'T1',
       'signal:lost:level2',
-      expect.objectContaining({ deviceId: 'T1', elapsedSeconds: 20, loop: true }),
+      expect.objectContaining({ deviceId: 'T1', elapsedSeconds: 15, loop: true }),
     );
-    expect(preventiveStopService.activate).toHaveBeenCalledWith(
-      expect.stringContaining('T1'),
-      'auto',
+    expect(socketServer.broadcastToProjectExceptDevice).toHaveBeenCalledWith(
+      null,
+      'T1',
+      'signal:lost:level2',
+      expect.objectContaining({ message: expect.stringContaining('VEHÍCULO T1') }),
     );
   });
 
-  it('NO activa la parada preventiva si ya está activa', () => {
-    preventiveStopService.isActive = true;
+  // decision explicita del usuario: una tableta sin señal ya NO frena a toda la flota. En un viaje
+  // real se dispararon 23 paradas globales por baches de cobertura de un solo vehiculo
+  it('NUNCA activa la parada preventiva global por una tableta sin señal', () => {
     service.recordPosition('T1');
-    vi.advanceTimersByTime(20000);
+    vi.advanceTimersByTime(60000);
     service.checkAllDevices();
     expect(preventiveStopService.activate).not.toHaveBeenCalled();
   });
 
-  it('auto-desactiva la parada preventiva cuando el único vehículo en nivel 2 recupera señal', () => {
+  it('una tableta estacionada en zona permitida no alarma a nadie al quedarse sin señal', () => {
     service.recordPosition('T1');
-    vi.advanceTimersByTime(20000);
+    service.setZoneExempt('T1', true);
+    vi.advanceTimersByTime(60000);
     service.checkAllDevices();
-    expect(preventiveStopService.isActive).toBe(true);
-
-    service.recordPosition('T1');
-    expect(preventiveStopService.deactivate).toHaveBeenCalledWith('auto');
-    expect(preventiveStopService.isActive).toBe(false);
-  });
-
-  it('NO auto-desactiva mientras otro vehículo siga en nivel 2', () => {
-    service.recordPosition('T1');
-    service.recordPosition('T2');
-    vi.advanceTimersByTime(20000);
-    service.checkAllDevices();
-    expect(preventiveStopService.isActive).toBe(true);
-
-    service.recordPosition('T1');
-    expect(preventiveStopService.deactivate).not.toHaveBeenCalled();
-    expect(preventiveStopService.isActive).toBe(true);
-
-    service.recordPosition('T2');
-    expect(preventiveStopService.deactivate).toHaveBeenCalledWith('auto');
-    expect(preventiveStopService.isActive).toBe(false);
+    expect(socketServer.sendToDevice).not.toHaveBeenCalled();
+    expect(socketServer.broadcastToProjectExceptDevice).not.toHaveBeenCalled();
   });
 
   it('NO auto-desactiva una parada preventiva activada manualmente por un supervisor', () => {
@@ -168,14 +153,49 @@ describe('SignalLostService', () => {
     expect(preventiveStopService.isActive).toBe(true);
   });
 
-  it('recordPosition emite signal:recovered (a ambas audiencias) si el dispositivo estaba en alerta', () => {
+  it('la reconexion no levanta la alerta al primer paquete: exige 5s de conexion estable', () => {
     service.recordPosition('T1');
-    vi.advanceTimersByTime(10000);
+    vi.advanceTimersByTime(5000);
+    service.checkAllDevices();
+    socketServer.sendToDevice.mockClear();
+
+    service.recordPosition('T1'); // primer paquete de vuelta: arranca la ventana, no limpia nada
+    expect(socketServer.sendToDevice).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(3000);
+    service.recordPosition('T1'); // sigue sin cumplir los 5s
+    expect(socketServer.sendToDevice).not.toHaveBeenCalled();
+  });
+
+  it('una reconexion que se vuelve a caer antes de estabilizarse no limpia la alerta', () => {
+    service.recordPosition('T1');
+    vi.advanceTimersByTime(5000);
+    service.checkAllDevices();
+    service.recordPosition('T1'); // arranca la ventana de estabilidad
+    socketServer.sendToDevice.mockClear();
+
+    vi.advanceTimersByTime(6000); // se vuelve a caer antes de completarla
+    service.checkAllDevices();
+    service.recordPosition('T1'); // vuelve: la ventana se reinicia desde cero
+    vi.advanceTimersByTime(3000);
+    service.recordPosition('T1');
+    expect(socketServer.sendToDevice).not.toHaveBeenCalledWith(
+      'T1',
+      'signal:recovered',
+      expect.anything(),
+    );
+  });
+
+  it('recordPosition emite signal:recovered (a ambas audiencias) tras 5s estable', () => {
+    service.recordPosition('T1');
+    vi.advanceTimersByTime(5000);
     service.checkAllDevices();
     socketServer.sendToDevice.mockClear();
     socketServer.broadcastToProjectExceptDevice.mockClear();
     socketServer.broadcastToProject.mockClear();
 
+    service.recordPosition('T1');
+    vi.advanceTimersByTime(5000);
     service.recordPosition('T1');
     expect(socketServer.sendToDevice).toHaveBeenCalledWith(
       'T1',

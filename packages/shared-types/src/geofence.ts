@@ -17,6 +17,10 @@ interface GeofenceBase {
   name: string;
   type: GeofenceType;
   projectId: number | null;
+  // limite de velocidad de la zona, si tiene. Viaja hasta la tableta a proposito: desde el
+  // rediseño de "la tableta evalua, el servidor registra", el exceso de velocidad lo decide el
+  // propio Operador con los limites que ya tiene en mano, sin depender de ida y vuelta al servidor
+  speedLimitKmh?: number | null;
 }
 
 export interface CircleGeofence extends GeofenceBase {

@@ -104,6 +104,7 @@ describe('GeofenceAlertService', () => {
     socketServer = { broadcastToProject: vi.fn<BroadcastToProject>() };
     findMatchingSpatial = vi.fn<FindMatchingSpatial>().mockResolvedValue([]);
     service = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
       geofenceRepo: { findMatchingSpatial },
       socketServer,
     });
@@ -272,6 +273,7 @@ describe('GeofenceAlertService', () => {
   it('_persistEvent es fire-and-forget vía geofenceEventRepo si se provee', async () => {
     const record = vi.fn().mockResolvedValue(undefined);
     const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
       geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([dangerCircleRow]) },
       socketServer,
       geofenceEventRepo: { record },
@@ -329,6 +331,7 @@ describe('GeofenceAlertService', () => {
   it('_persistEvent registra severity "info" para geocercas de estacionamiento', async () => {
     const record = vi.fn().mockResolvedValue(undefined);
     const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
       geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([parkingCircleRow]) },
       socketServer,
       geofenceEventRepo: { record },
@@ -363,6 +366,7 @@ describe('GeofenceAlertService', () => {
 
   it('no emite nada si socketServer todavía no se asignó (dependencia circular con FleetSocketServer)', async () => {
     const withoutSocket = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
       geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([dangerCircleRow]) },
     });
     await expect(withoutSocket.evaluate(pos())).resolves.not.toThrow();
@@ -433,6 +437,7 @@ describe('GeofenceAlertService', () => {
     it('un dispositivo RESTRINGIDO genera alert:critical + infraccion al salir de "allowed"', async () => {
       const create = vi.fn().mockResolvedValue(undefined);
       const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
         geofenceRepo: {
           findMatchingSpatial: vi
             .fn()
@@ -461,6 +466,7 @@ describe('GeofenceAlertService', () => {
 
     it('un dispositivo RESTRINGIDO recibe alert:clear al regresar a "allowed"', async () => {
       const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
         geofenceRepo: {
           findMatchingSpatial: vi
             .fn()
@@ -492,6 +498,7 @@ describe('GeofenceAlertService', () => {
 
     it('no re-emite la alerta en cada tick posterior fuera de la zona (restringido)', async () => {
       const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
         geofenceRepo: {
           findMatchingSpatial: vi
             .fn()
@@ -530,6 +537,7 @@ describe('GeofenceAlertService', () => {
       const recordOrEscalate = vi.fn().mockResolvedValue(undefined);
       const create = vi.fn().mockResolvedValue(undefined);
       const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
         geofenceRepo: {
           findMatchingSpatial: vi
             .fn()
@@ -558,6 +566,7 @@ describe('GeofenceAlertService', () => {
       const create = vi.fn().mockResolvedValue(undefined);
       const broadcastToProject = vi.fn();
       const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
         geofenceRepo: {
           findMatchingSpatial: vi
             .fn()
@@ -589,6 +598,7 @@ describe('GeofenceAlertService', () => {
       const sendToDevice = vi.fn();
       const broadcastToProject = vi.fn();
       const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
         geofenceRepo: {
           findMatchingSpatial: vi
             .fn()
@@ -607,6 +617,7 @@ describe('GeofenceAlertService', () => {
     it('clearDevice limpia un aviso silencioso activo (sendToDevice proximity_clear)', async () => {
       const sendToDevice = vi.fn();
       const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
         geofenceRepo: {
           findMatchingSpatial: vi
             .fn()
@@ -633,6 +644,7 @@ describe('GeofenceAlertService', () => {
     it('el tier critico (ya tocando) crea una infraccion sin el flag de proximidad', async () => {
       const create = vi.fn().mockResolvedValue(undefined);
       const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
         geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([dangerCircleRow]) },
         socketServer,
         infractionRepo: { create },
@@ -652,6 +664,7 @@ describe('GeofenceAlertService', () => {
     it('nunca crea infraccion para "parking" (severidad info, puramente informativa)', async () => {
       const create = vi.fn().mockResolvedValue(undefined);
       const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
         geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([parkingCircleRow]) },
         socketServer,
         infractionRepo: { create },
@@ -663,6 +676,7 @@ describe('GeofenceAlertService', () => {
     it('no re-crea la infraccion en cada tick mientras se mantiene en la misma severidad', async () => {
       const create = vi.fn().mockResolvedValue(undefined);
       const withRepo = new GeofenceAlertService({
+      evaluateAreaAlerts: true,
         geofenceRepo: { findMatchingSpatial: vi.fn().mockResolvedValue([dangerCircleRow]) },
         socketServer,
         infractionRepo: { create },

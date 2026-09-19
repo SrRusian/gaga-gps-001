@@ -1,3 +1,4 @@
+import { Power } from '@gaga-gps/android-bridge';
 import { useEffect, useState } from 'react';
 
 // Brujula del propio tablet (giroscopio + magnetometro + acelerometro, fusionados por el
@@ -43,8 +44,36 @@ export function useDeviceOrientation(): number | null {
     // absolute=true - se prefiere sobre 'deviceorientation' (que puede ser relativo al angulo
     // inicial y derivar sin limite, inutil como brujula)
     const eventName = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
-    window.addEventListener(eventName, handle as EventListener);
-    return () => window.removeEventListener(eventName, handle as EventListener);
+
+    let listening = false;
+    function start() {
+      if (listening) return;
+      listening = true;
+      window.addEventListener(eventName, handle as EventListener);
+    }
+    // durante la suspension por perdida de corriente hay que consumir lo minimo posible (pedido
+    // explicito): el magnetometro/giroscopio se sueltan igual que ya hace useDeviceGeolocation con
+    // el GPS. Sin esto seguian registrados con la pantalla apagada y el vehiculo apagado.
+    function stop() {
+      if (!listening) return;
+      listening = false;
+      window.removeEventListener(eventName, handle as EventListener);
+      setHeading(null);
+    }
+
+    start();
+    Power.getStatus().then((status) => {
+      if (status.suspended) stop();
+    });
+    const powerListenerPromise = Power.addListener('powerStatus', (status) => {
+      if (status.suspended) stop();
+      else start();
+    });
+
+    return () => {
+      stop();
+      powerListenerPromise.then((h) => h.remove());
+    };
   }, []);
 
   return heading;

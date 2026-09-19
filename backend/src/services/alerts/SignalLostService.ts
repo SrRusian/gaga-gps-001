@@ -51,9 +51,20 @@ class SignalLostService {
   // dispositivos en suspension de energia autorizada (ver power-events.routes.ts) - checkAllDevices
   // los salta por completo mientras dure, aunque lleven horas/dias sin mandar nada
   suspendedDevices: Record<string, boolean>;
+  // dispositivos cuya ultima posicion reportada estaba dentro de una zona permitida/estacionamiento
+  // (lo reporta la propia tableta, ver device-events). Una tableta estacionada ahi puede quedarse
+  // sin señal sin que sea un problema operativo - pedido explicito
+  zoneExemptDevices: Record<string, boolean>;
+  // desde cuando un dispositivo caido volvio a reportar - la alerta no se limpia hasta que lleve
+  // RECOVERY_STABLE_MS reportando seguido, para no encender/apagar el aviso en cada bache de red
+  recoveringSince: Record<string, number>;
   checkInterval: ReturnType<typeof setInterval> | null;
-  readonly LEVEL1_MS = 10000;
-  readonly LEVEL2_MS = 20000;
+  // 5s: pedido explicito. El proyecto se entera de que ese vehiculo esta sin señal casi de
+  // inmediato, en vez de a los 20s - con telemetria de 1/seg, 5 posiciones perdidas seguidas ya
+  // no son un bache normal de red
+  readonly LEVEL1_MS = 5000;
+  readonly LEVEL2_MS = 15000;
+  readonly RECOVERY_STABLE_MS = 5000;
 
   constructor({
     socketServer,
@@ -74,7 +85,18 @@ class SignalLostService {
     this.alertLevel = {};
     this.projectByDevice = {};
     this.suspendedDevices = {};
+    this.zoneExemptDevices = {};
+    this.recoveringSince = {};
     this.checkInterval = null;
+  }
+
+  // lo reporta la propia tableta junto con su evaluacion de geocercas (ver device-events.routes):
+  // si se desconecta estando dentro de una zona permitida/estacionamiento, no se alarma a nadie.
+  // Se conserva el ULTIMO estado reportado a proposito - es justo el que vale cuando ya no hay
+  // forma de preguntarle donde esta
+  setZoneExempt(deviceId: string, exempt: boolean): void {
+    if (exempt) this.zoneExemptDevices[deviceId] = true;
+    else delete this.zoneExemptDevices[deviceId];
   }
 
   // el dispositivo avisó que perdió corriente dentro de una geocerca tipo estacionamiento
@@ -98,17 +120,32 @@ class SignalLostService {
 
   recordPosition(deviceId: string, projectId: number | null = null): void {
     const wasLost = this.alertLevel[deviceId];
-    this.lastSeen[deviceId] = Date.now();
+    const now = Date.now();
+    this.lastSeen[deviceId] = now;
     this.projectByDevice[deviceId] = projectId;
     // cualquier posicion real (encendido normal, o interaccion sospechosa sin corriente - ver
     // power-events.routes.ts) significa que ya no esta "silenciosamente suspendido"
     delete this.suspendedDevices[deviceId];
 
-    if (wasLost && wasLost !== 'none') {
-      this.handleRecovery(deviceId);
+    if (!wasLost || wasLost === 'none') {
+      delete this.recoveringSince[deviceId];
+      this.alertLevel[deviceId] = 'none';
+      return;
     }
 
+    // ya reconecto, pero la alerta NO se levanta al primer paquete: tiene que sostener la conexion
+    // RECOVERY_STABLE_MS seguidos. Sin esto, una red intermitente encendia y apagaba el aviso a
+    // los demas del proyecto cada pocos segundos (pedido explicito: esperar a que este estable)
+    const since = this.recoveringSince[deviceId];
+    if (since === undefined) {
+      this.recoveringSince[deviceId] = now;
+      return;
+    }
+    if (now - since < this.RECOVERY_STABLE_MS) return;
+
+    delete this.recoveringSince[deviceId];
     this.alertLevel[deviceId] = 'none';
+    this.handleRecovery(deviceId);
   }
 
   startMonitoring(): void {
@@ -130,8 +167,14 @@ class SignalLostService {
 
     Object.entries(this.lastSeen).forEach(([deviceId, lastTime]) => {
       if (this.suspendedDevices[deviceId]) return;
+      // estacionado dentro de una zona permitida cuando se desconecto - no se alarma a nadie
+      if (this.zoneExemptDevices[deviceId]) return;
       const elapsed = now - lastTime;
       const currentLevel = this.alertLevel[deviceId] || 'none';
+
+      // volvio a caerse antes de completar la ventana de estabilidad: la cuenta se reinicia, no se
+      // arrastra el progreso de una reconexion que no llego a sostenerse
+      if (elapsed >= this.LEVEL1_MS) delete this.recoveringSince[deviceId];
 
       if (elapsed >= this.LEVEL2_MS && currentLevel !== 'level2') {
         this.triggerLevel2(deviceId, elapsed);
@@ -215,12 +258,13 @@ class SignalLostService {
       elapsedSeconds: seconds,
     });
 
-    if (this.preventiveStopService && !this.preventiveStopService.isActive) {
-      this.preventiveStopService.activate(
-        `Vehículo ${deviceId} sin señal por ${seconds} segundos`,
-        'auto',
-      );
-    }
+    // El ALTO TOTAL de todo el proyecto ya NO se activa solo por una tableta sin señal (decision
+    // explicita del usuario). Motivo real: en un viaje de 110 minutos se dispararon 23 paradas
+    // globales por baches de cobertura de UNA tableta, frenando a toda la flota sin razon. Ahora
+    // el resto del proyecto solo se ENTERA (supervisor:signal_lost + signal:lost:level2 en tercera
+    // persona, arriba) y sigue operando; el alto total lo aplica la tableta afectada sobre si misma,
+    // con su propio vigilante local - que es ademas el unico que puede actuar estando sin red.
+    // El supervisor conserva la parada manual de siempre.
   }
 
   handleRecovery(deviceId: string): void {
@@ -292,6 +336,8 @@ class SignalLostService {
     delete this.alertLevel[deviceId];
     delete this.projectByDevice[deviceId];
     delete this.suspendedDevices[deviceId];
+    delete this.zoneExemptDevices[deviceId];
+    delete this.recoveringSince[deviceId];
   }
 }
 

@@ -167,6 +167,9 @@ class GeofenceAlertService {
   // CollisionRiskService.positionHistory, para decidir "¿se esta acercando de verdad?"
   distanceHistoryByKey: Record<string, number[]>;
   activeSilentNotices: Record<string, boolean>;
+  // false = la alerta de zona la decide la tableta y el servidor solo registra lo que ella reporta
+  // (ver el bloque en evaluate()). Default false: es el modo vigente del proyecto.
+  evaluateAreaAlerts: boolean;
 
   constructor({
     geofenceRepo,
@@ -174,12 +177,14 @@ class GeofenceAlertService {
     geofenceEventRepo,
     alertEventRepo,
     infractionRepo,
+    evaluateAreaAlerts = false,
   }: {
     geofenceRepo: GeofenceRepoLike;
     socketServer?: SocketServerLike;
     geofenceEventRepo?: GeofenceEventRepoLike;
     alertEventRepo?: AlertEventRepoLike;
     infractionRepo?: InfractionRepoLike;
+    evaluateAreaAlerts?: boolean;
   }) {
     this.geofenceRepo = geofenceRepo;
     this.socketServer = socketServer || null;
@@ -191,6 +196,7 @@ class GeofenceAlertService {
     this.infractionRepo = infractionRepo || null;
     this.distanceHistoryByKey = {};
     this.activeSilentNotices = {};
+    this.evaluateAreaAlerts = evaluateAreaAlerts;
   }
 
   addGeofence(geofence: Partial<Geofence> & { id: number }): void {
@@ -293,6 +299,22 @@ class GeofenceAlertService {
     }
 
     const previousAlert = this.activeAlerts[deviceId];
+
+    // La alerta de ZONA (entrar a una geocerca con severidad) la decide ahora la propia tableta y
+    // la reporta a device-events.routes.ts - decision explicita del usuario. Aqui se deja de
+    // emitirla para no duplicar alertas ni infracciones. Lo que SI se sigue evaluando en el
+    // servidor es lo que la tableta no puede resolver sola: la zona restringida (necesita saber si
+    // ESTE dispositivo tiene permiso, dato del servidor) y los tiers elasticos de acercamiento
+    // (necesitan ST_Buffer/ST_Distance contra la geometria real en PostGIS). Ver el bloque de
+    // arriba y _evaluateSilentTier, que siguen corriendo.
+    if (!this.evaluateAreaAlerts) {
+      if (previousAlert) {
+        this.clearAlert(deviceId, previousAlert, projectId);
+        this.activeAlerts[deviceId] = null;
+      }
+      this._evaluateSilentTier(deviceId, bestSilent);
+      return matches;
+    }
 
     if (maxSeverity && maxSeverity !== previousAlert) {
       this.triggerAlert(
