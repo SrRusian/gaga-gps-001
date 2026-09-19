@@ -114,7 +114,17 @@ class MockLocationFeeder(private val context: Context) {
         if (!requested) return // nadie pidio ubicacion simulada - no secuestrar GPS_PROVIDER
         val lat = fix.latitude ?: return // sin fix todavia - nada real que alimentar
         val lon = fix.longitude ?: return
-        if (!addProvider()) return // permiso de OS no concedido - nada que alimentar
+
+        // ESTE metodo corre en el hilo del USB (onDataReceived -> parseGga -> feed). Dar de alta el
+        // proveedor toca LocationManager Y re-registra el listener del envio continuo, y eso tiene
+        // que pasar en el hilo principal: registrarlo desde aqui lo ataba al Looper de este hilo,
+        // que nadie procesa, y el GPS dejaba de entregar en silencio (bug real de campo del 19 sep,
+        // ver TraccarSenderService.startLocationUpdates). Se difiere y este fix se salta - el
+        // siguiente llega en milisegundos, ya con el proveedor dado de alta.
+        if (!providerAdded) {
+            watchdogHandler.post { addProvider() }
+            return
+        }
         lastFedAtMs = System.currentTimeMillis()
         val location = Location(LocationManager.GPS_PROVIDER).apply {
             latitude = lat

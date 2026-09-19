@@ -23,6 +23,12 @@ function speedInfractionSeverity(speedKmh: number, limitKmh: number): number {
 interface SocketServerLike {
   sendToDevice(deviceId: string, event: string, payload: unknown): void;
   broadcastToProject(projectId: number | null, event: string, payload: unknown): void;
+  broadcastToProjectExceptDevice(
+    projectId: number | null,
+    excludeDeviceId: string,
+    event: string,
+    payload: unknown,
+  ): void;
 }
 
 interface GeofenceEventRepoLike {
@@ -106,7 +112,7 @@ export function buildDeviceEventsRouter({
 
     if (state === 'cleared') {
       await alertEventRepo.resolveOpen({ alertType, deviceId });
-      socketServer?.broadcastToProject(projectId, 'alert:clear', {
+      socketServer?.broadcastToProjectExceptDevice(projectId, deviceId, 'alert:clear', {
         deviceId,
         timestamp: new Date().toISOString(),
       });
@@ -160,8 +166,12 @@ export function buildDeviceEventsRouter({
       });
     }
 
+    // NUNCA se le devuelve la alerta a la tableta que la reporto: ella ya la esta mostrando y
+    // sonando en local desde antes de mandarla. Devolversela creaba un eco que ademas podia dejar
+    // el pitido en bucle atorado si el 'cleared' no alcanzaba a llegar (bug real de campo del
+    // 19 sep: audio sonando todo el viaje sin ninguna alerta visible).
     const channel = severity === 'danger' ? 'alert:critical' : 'alert:warning';
-    socketServer?.broadcastToProject(projectId, channel, {
+    socketServer?.broadcastToProjectExceptDevice(projectId, deviceId, channel, {
       deviceId,
       message,
       geofenceId: typeof event.geofenceId === 'number' ? event.geofenceId : null,

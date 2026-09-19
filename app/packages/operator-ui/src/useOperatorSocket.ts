@@ -385,5 +385,8 @@ export function useOperatorSocket(deviceId: string | null) {
     activeGeofenceId,
     incidents,
     proximityNotice,
+    // la evaluacion local (useLocalAlerts) suena por su cuenta, compartiendo esta MISMA instancia:
+    // dos useAlertSound distintos tendrian cada uno su propio bucle y ninguno podria callar al otro
+    sounds: { playWarningSound, playDangerSound, stopSound },
   };
 }

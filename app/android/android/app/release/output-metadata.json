@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 57,
-      "versionName": "1.0.51-tablet-authoritative",
+      "versionCode": 58,
+      "versionName": "1.0.52-fix-dead-gps-listener",
       "outputFile": "app-release.apk"
     }
   ],

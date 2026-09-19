@@ -33,18 +33,30 @@ export interface LocalFixInput {
   speedKmh: number;
 }
 
+// el sonido lo dispara la propia tableta, no el eco del servidor (ver device-events.routes.ts):
+// asi suena en el instante en que ella decide, y sigue sonando igual sin conexion
+export interface AlertSounds {
+  playWarningSound: () => void;
+  playDangerSound: (loop?: boolean) => void;
+  stopSound: () => void;
+}
+
 export function useLocalAlerts(
   deviceId: string | null,
   geofences: Geofence[],
   fix: LocalFixInput | null,
   limits: SpeedLimits = NO_SPEED_LIMITS,
   connected = false,
+  sounds?: AlertSounds,
 ) {
   const [alert, setAlert] = useState<LocalAlert | null>(null);
 
   const geofenceRef = useRef<OfflineGeofenceMatch | null>(null);
   const speedSeverityRef = useRef<'warning' | 'danger' | null>(null);
   const lastEvalAtRef = useRef(0);
+  const alertSeverityRef = useRef<'warning' | 'danger' | 'info' | null>(null);
+  const soundsRef = useRef(sounds);
+  soundsRef.current = sounds;
   const geofencesRef = useRef(geofences);
   geofencesRef.current = geofences;
   const limitsRef = useRef(limits);
@@ -133,7 +145,18 @@ export function useLocalAlerts(
     }
 
     // en pantalla gana lo mas grave de las dos evaluaciones
-    setAlert(pickAlert(match, speed.severity, speed.message));
+    const next = pickAlert(match, speed.severity, speed.message);
+    setAlert(next);
+
+    // el sonido solo cambia cuando cambia la severidad, no en cada evaluacion - si no, el pitido
+    // se reiniciaria dos veces por segundo y nunca llegaria a sonar completo
+    const previousSeverity = alertSeverityRef.current;
+    if (next?.severity !== previousSeverity) {
+      alertSeverityRef.current = next?.severity ?? null;
+      if (next?.severity === 'danger') soundsRef.current?.playDangerSound(true);
+      else if (next?.severity === 'warning') soundsRef.current?.playWarningSound();
+      else soundsRef.current?.stopSound();
+    }
   }, [deviceId, fix, connected]);
 
   return alert;

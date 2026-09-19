@@ -16,6 +16,7 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.gaga.app.MainActivity
@@ -336,7 +337,23 @@ class TraccarSenderService : Service() {
         } catch (_: SecurityException) {
         }
         try {
-            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, intervalMs, 0f, listener)
+            // El Looper EXPLICITO no es opcional. La variante de 4 argumentos ata el listener al
+            // Looper del hilo que llama, y reregisterLocationListener() se invoca desde el hilo del
+            // USB (MockLocationFeeder.feed() <- onDataReceived del receptor RTK). Ese hilo tiene un
+            // Looper preparado pero NUNCA se le corre loop(), asi que el listener quedaba
+            // registrado contra una cola de mensajes que nadie vacia: onLocationChanged no volvia a
+            // dispararse jamas y la tableta dejaba de mandar posicion en silencio, con el servicio
+            // vivo y el switch de "envio continuo" en azul. Bug real de campo del 19 sep: 2 horas
+            // de viaje sin una sola posicion, y se arreglaba solo apagando y prendiendo el switch
+            // (eso re-registraba desde el hilo principal). Con el Looper explicito, da igual quien
+            // llame: la entrega siempre ocurre en el hilo principal.
+            locationManager.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER,
+                intervalMs,
+                0f,
+                listener,
+                Looper.getMainLooper(),
+            )
             registeredIntervalMs = intervalMs
             // mantiene el CPU despierto mientras el envio continuo este activo (ver comentario
             // junto a sendWakeLock) - acquire() sin timeout aqui es intencional, se suelta
