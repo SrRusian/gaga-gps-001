@@ -42,6 +42,7 @@ class InfractionRepository {
     latitude,
     longitude,
     metadata = null,
+    occurredAt,
   }: {
     projectId: number | null;
     deviceId: string;
@@ -52,6 +53,9 @@ class InfractionRepository {
     latitude: number;
     longitude: number;
     metadata?: Record<string, unknown> | null;
+    // cuando de verdad ocurrio - lo manda la tableta, que puede estar reportando algo que paso
+    // sin conexion hace rato. Sin este dato se usa NOW(), el comportamiento de siempre
+    occurredAt?: Date;
   }): Promise<InfractionRow> {
     try {
       const { rows } = await query<InfractionRow>(
@@ -60,12 +64,12 @@ class InfractionRepository {
         // reusar el mismo placeholder dentro de un VALUES() y una subconsulta aparte confunde al
         // planner ("inconsistent types deduced for parameter $2", gotcha ya documentado)
         `INSERT INTO infractions
-           (project_id, device_id, device_id_2, operator_session_id, infraction_type, severity, message, latitude, longitude, metadata)
+           (project_id, device_id, device_id_2, operator_session_id, infraction_type, severity, message, latitude, longitude, metadata, occurred_at)
          VALUES ($1, $2, $3,
            (SELECT id FROM operator_sessions WHERE device_id = $9 AND ended_at IS NULL LIMIT 1),
-           $4, $5, $6, $7, $8, $10)
+           $4, $5, $6, $7, $8, $10, COALESCE($11, NOW()))
          RETURNING *`,
-        [projectId, deviceId, deviceId2, infractionType, severity, message, latitude, longitude, deviceId, metadata],
+        [projectId, deviceId, deviceId2, infractionType, severity, message, latitude, longitude, deviceId, metadata, occurredAt ?? null],
       );
       return rows[0];
     } catch (err) {

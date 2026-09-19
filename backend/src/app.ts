@@ -83,6 +83,7 @@ import buildProjectsRouter from './api/routes/projects.routes';
 import buildShiftsRouter from './api/routes/shifts.routes';
 import buildIncidentsRouter from './api/routes/incidents.routes';
 import buildAlertsRouter from './api/routes/alerts.routes';
+import buildDeviceEventsRouter from './api/routes/device-events.routes';
 import buildInfractionsRouter from './api/routes/infractions.routes';
 import buildSettingsRouter from './api/routes/settings.routes';
 import buildDeviceGroupsRouter from './api/routes/device-groups.routes';
@@ -351,6 +352,20 @@ app.use(
   '/api/alerts',
   authMiddleware,
   buildAlertsRouter({ alertEventRepo, requireRole, geofenceEventRepo }),
+);
+// lo que la TABLETA decide por su cuenta (velocidad, zona) - autenticado con la sesion del
+// operador, sin restriccion de rol: el unico que llama esto es la propia tableta
+app.use(
+  '/api/alerts',
+  authMiddleware,
+  buildDeviceEventsRouter({
+    alertEventRepo,
+    infractionRepo,
+    geofenceEventRepo,
+    deviceRepo,
+    socketServer,
+    signalLostService,
+  }),
 );
 app.use('/api/infractions', buildInfractionsRouter({ infractionRepo, authMiddleware, requireRole }));
 // chequeo de rol por-ruta dentro del router, no aquí - ver users.routes.ts

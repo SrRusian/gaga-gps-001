@@ -386,6 +386,8 @@ class GeofenceRepository {
 
   static toMemoryFormat(row: GeofenceRow): Geofence {
     const shapeType = row.shape_type || 'circle';
+    // el limite de la zona viaja al Operador: es el quien evalua el exceso de velocidad ahora
+    const speedLimitKmh = row.speed_limit_kmh ?? null;
 
     if (shapeType === 'circle') {
       return {
@@ -394,6 +396,7 @@ class GeofenceRepository {
         type: row.type,
         projectId: row.project_id,
         shapeType: 'circle',
+        speedLimitKmh,
         center: { lat: row.center_lat as number, lon: row.center_lon as number },
         radiusMeters: row.radius_meters as number,
       };
@@ -405,6 +408,7 @@ class GeofenceRepository {
         type: row.type,
         projectId: row.project_id,
         shapeType: 'polyline',
+        speedLimitKmh,
         geometry: row.geometry as import('geojson').LineString,
         corridorWidthMeters: row.corridor_width_meters as number,
         stayInside: row.stay_inside,
@@ -416,6 +420,7 @@ class GeofenceRepository {
       type: row.type,
       projectId: row.project_id,
       shapeType: 'polygon',
+      speedLimitKmh,
       geometry: row.geometry as import('geojson').Polygon,
       filled: row.filled,
       corridorWidthMeters: row.corridor_width_meters ?? undefined,

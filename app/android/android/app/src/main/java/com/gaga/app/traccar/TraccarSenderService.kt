@@ -15,9 +15,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.gaga.app.MainActivity
@@ -40,17 +38,6 @@ class TraccarSenderService : Service() {
     companion object {
         const val CHANNEL_ID = "gaga_position_sender"
         const val NOTIFICATION_ID = 4210
-
-        // cuanto tiempo sin un fix de GPS antes de aceptar un fix de NETWORK_PROVIDER como
-        // respaldo (ver listener). Subido de 5s a 20s tras el incidente de campo del 17 sep: con
-        // 5s el respaldo entraba en cualquier hueco normal de GPS dentro del vehiculo e inundaba
-        // el historial de posiciones de antena celular (18,181 posiciones con accuracy=100 ese
-        // dia, 0 en todos los dias anteriores). Ahora solo cubre apagones de GPS de verdad largos.
-        private const val NETWORK_FALLBACK_GRACE_MS = 20_000L
-
-        // una posicion de antena celular por encima de esto no aporta nada util a un sistema que
-        // opera con RTK centimetrico - vale mas no mandar nada que mandar un punto a 500m de error
-        private const val NETWORK_FALLBACK_MAX_ACCURACY_M = 150f
 
         // margen para aceptar un fix que llega apenas antes de cumplirse el intervalo - ver
         // sendLocation(). Mas chico que el jitter tipico del chip y muy lejos de permitir un envio
@@ -222,85 +209,28 @@ class TraccarSenderService : Service() {
         applicationContext.startActivity(launchIntent)
     }
 
-    // respaldo por red (WiFi/celular) cuando el GPS no entrega nada por un rato - pedido
-    // explicito, bug real reportado: adentro de un vehiculo techado el chip GPS interno de la
-    // tableta puede quedarse sin ningun satelite visible por minutos, y hasta ahora el envio
-    // continuo se quedaba completamente mudo mientras tanto (el envio MANUAL ya tenia este mismo
-    // respaldo, ver TraccarSenderPlugin.sendNow - el continuo no).
-    //
-    // Bug real de la PRIMERA version de este fix: se probo con requestLocationUpdates(NETWORK_
-    // PROVIDER, ...) continuo, igual que GPS - eso introdujo una regresion real reportada en campo
-    // (el GPS, que SI estaba funcionando bien, empezo a entregar cada ~2s en vez de cada 1s como
-    // antes). Causa probable: Android/el fabricante agrupa o retrasa las entregas cuando hay DOS
-    // proveedores suscritos a la vez con el mismo listener, sin importar que el segundo (red) casi
-    // nunca se estuviera usando. Fix real: NETWORK_PROVIDER ya NO se suscribe de forma continua -
-    // solo se CONSULTA bajo demanda (getLastKnownLocation, igual que ya hace el envio manual) desde
-    // un watchdog aparte que no toca la suscripcion de GPS para nada, asi GPS vuelve a comportarse
-    // exactamente como antes de este fix.
-    private var lastGpsFixAtMs: Long = 0L
-    private val networkFallbackHandler = Handler(Looper.getMainLooper())
-
-    // bug real reportado en campo (ronda posterior a quitar la suscripcion continua): un salto de
-    // 16s de GPS no se llenaba con NINGUN dato de red tampoco - getLastKnownLocation() solo lee
-    // una cache PASIVA; sin nada mas en la tableta pidiendo activamente NETWORK_PROVIDER, esa
-    // cache puede estar vacia o vieja, asi que el respaldo nunca tenia nada real que mandar. Fix:
-    // requestSingleUpdate() (una sola vez, no continuo - no reintroduce el bug de retrasar al GPS)
-    // pide un fix de red FRESCO de verdad cuando hace falta, en vez de confiar en una cache pasiva.
-    private var networkRequestPendingSinceMs: Long = 0L
-    private var lastNetworkFixTimeMs: Long = 0L
-    private val singleNetworkListener = object : LocationListener {
-        override fun onLocationChanged(location: Location) {
-            // se marca ENTREGADA, no "sin peticion pendiente" (antes se ponia en 0) - con 0, el
-            // watchdog volvia a pedir en el siguiente tick de 1s y el proveedor de red devolvia su
-            // fix en cache al instante, asi que la MISMA posicion de antena se reenviaba cada
-            // segundo con la precision inflandose sola. En produccion eso dejo 84.7% del recorrido
-            // con coordenadas identicas a la anterior, y saltos de 800m al cambiar de antena.
-            networkRequestPendingSinceMs = System.currentTimeMillis()
-            if (!isUsableNetworkFix(location)) return
-            lastNetworkFixTimeMs = location.time
-            sendLocation(location, System.currentTimeMillis())
-        }
-        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-        override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {
-            networkRequestPendingSinceMs = 0L
-        }
-    }
-
-    // descarta lo que no aporta: precision inservible, o el mismo fix en cache que ya se mando
-    private fun isUsableNetworkFix(location: Location): Boolean {
-        if (location.hasAccuracy() && location.accuracy > NETWORK_FALLBACK_MAX_ACCURACY_M) return false
-        if (location.time <= lastNetworkFixTimeMs) return false
-        if (location.time <= lastGpsFixAtMs) return false
-        return true
-    }
-
-    private val networkFallbackRunnable = object : Runnable {
-        override fun run() {
-            val now = System.currentTimeMillis()
-            val intervalMs = TraccarPrefs.getIntervalMs(applicationContext)
-            val gpsQuiet = now - lastGpsFixAtMs >= NETWORK_FALLBACK_GRACE_MS
-            // evita apilar varias solicitudes de una sola vez si la anterior nunca respondio (sin
-            // senal de red tampoco) - se vuelve a intentar pasado el mismo periodo de gracia
-            val canRetryRequest = now - networkRequestPendingSinceMs >= NETWORK_FALLBACK_GRACE_MS
-            if (gpsQuiet && canRetryRequest) {
-                try {
-                    networkRequestPendingSinceMs = now
-                    @Suppress("DEPRECATION")
-                    locationManager.requestSingleUpdate(
-                        LocationManager.NETWORK_PROVIDER,
-                        singleNetworkListener,
-                        Looper.getMainLooper(),
-                    )
-                } catch (_: SecurityException) {
-                    networkRequestPendingSinceMs = 0L
-                } catch (_: IllegalArgumentException) {
-                    networkRequestPendingSinceMs = 0L
-                }
-            }
-            networkFallbackHandler.postDelayed(this, intervalMs)
-        }
-    }
+    // El respaldo por NETWORK_PROVIDER se ELIMINO (18 sep). Se agrego el 17 sep para cubrir
+    // "GPS sin satelites por minutos dentro de un vehiculo techado", y en dos salidas de campo
+    // seguidas nunca produjo una sola posicion util - solo daño:
+    //   17 sep: inundo el historial con 18,181 posiciones de antena celular (accuracy=100), que
+    //           al saltar de antena generaron 393 km/h falsos, alertas e infracciones falsas.
+    //   18 sep: peor - ESTARVABA AL GPS. Medido en produccion: el GPS entrego un fix a las
+    //           20:20:00 y se callo el viaje entero; de ahi en adelante llegaron posiciones
+    //           EXACTAMENTE cada 20s (el periodo de gracia del respaldo), sin Doppler, con
+    //           precision de 24 a 130m. 603 posiciones en 110 minutos (9% de lo esperado) y 6,248
+    //           segundos sin datos. Una vez que arrancaba, el circulo se sostenia solo: el
+    //           respaldo interfiere con la entrega del GPS (misma interferencia ya documentada
+    //           cuando se probo NETWORK_PROVIDER continuo), el GPS seguia callado, y el respaldo
+    //           volvia a disparar. Solo se rompia con un requestLocationUpdates nuevo (al volver
+    //           la corriente). Consecuencias en cadena: recorrido que no sigue la calle, velocidad
+    //           guardada de 2.2 km/h en todo el viaje (el servidor nunca supo que iba a 92),
+    //           ninguna alerta de exceso posible, 125 alertas de señal perdida y 23 paradas
+    //           preventivas. Ademas seguia corriendo durante la suspension por perdida de
+    //           corriente (suspendGps() nunca lo paraba), mandando cada 20s con el vehiculo
+    //           apagado y la pantalla muerta - por eso la tableta seguia "En linea".
+    // Sin red no se manda nada, que es lo correcto en un sistema de seguridad: una posicion
+    // equivocada es peor que ninguna, y para "no se donde esta" ya existe la alerta de señal
+    // perdida y el buffer sin conexion. No reintroducir sin evidencia real de que hace falta.
 
     private fun sendLocation(location: Location, now: Long) {
         // La tolerancia NO es cosmetica: sin ella se perdia ~35% de la telemetria. El chip entrega
@@ -326,8 +256,7 @@ class TraccarSenderService : Service() {
 
     private val listener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            lastGpsFixAtMs = System.currentTimeMillis()
-            sendLocation(location, lastGpsFixAtMs)
+            sendLocation(location, System.currentTimeMillis())
         }
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
         override fun onProviderEnabled(provider: String) {}
@@ -369,11 +298,6 @@ class TraccarSenderService : Service() {
         startForegroundCompat()
         runningInstance = this
         startLocationUpdates()
-        // onStartCommand puede llamarse mas de una vez mientras el servicio ya esta corriendo
-        // (ej. resumeTraccarIfNeeded() en cada apertura de la app) - remover antes de postear evita
-        // apilar varias copias del watchdog corriendo en paralelo, cada vez mas seguido
-        networkFallbackHandler.removeCallbacks(networkFallbackRunnable)
-        networkFallbackHandler.postDelayed(networkFallbackRunnable, TraccarPrefs.getIntervalMs(applicationContext))
         isRunning = true
         return START_STICKY
     }
@@ -383,11 +307,6 @@ class TraccarSenderService : Service() {
             locationManager.removeUpdates(listener)
         } catch (_: SecurityException) {
         }
-        try {
-            locationManager.removeUpdates(singleNetworkListener)
-        } catch (_: SecurityException) {
-        }
-        networkFallbackHandler.removeCallbacks(networkFallbackRunnable)
         getSharedPreferences(TraccarPrefs.PREFS_NAME, MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(prefsListener)
         try {
@@ -430,10 +349,8 @@ class TraccarSenderService : Service() {
         } catch (e: IllegalArgumentException) {
             android.util.Log.w("TraccarSender", "GPS no disponible en este dispositivo")
         }
-        // el respaldo por red (NETWORK_PROVIDER) NO se suscribe aqui a proposito - ver el
-        // comentario junto a networkFallbackRunnable arriba (bug real: suscribirlo en paralelo a
-        // GPS_PROVIDER retrasaba las entregas del GPS real). Se consulta bajo demanda desde el
-        // watchdog aparte, sin tocar esta suscripcion.
+        // GPS_PROVIDER es la UNICA fuente a proposito - ver el bloque de arriba sobre por que se
+        // elimino el respaldo por NETWORK_PROVIDER.
     }
 
     private fun createChannel() {

@@ -15,6 +15,7 @@ import { useDeviceId } from './useDeviceId';
 import { useIncidentReporter } from './useIncidentReporter';
 import { useOperatorAuth } from './useOperatorAuth';
 import { useOperatorSocket } from './useOperatorSocket';
+import { useLocalAlerts } from './useLocalAlerts';
 import { useVehicleFootprints } from './useVehicleFootprints';
 
 const AUTO_FOLLOW_STORAGE_KEY = 'gaga_operator_auto_follow';
@@ -58,7 +59,7 @@ export default function OperatorApp() {
     activeGeofenceId,
     incidents,
     proximityNotice,
-  } = useOperatorSocket(deviceId, localGeo);
+  } = useOperatorSocket(deviceId);
   const [mapMode, setMapMode] = useMapMode('gaga_operator_map_mode');
   const [autoFollow, setAutoFollow] = useAutoFollow();
   const [framingThreat, setFramingThreat] = useState(false);
@@ -69,7 +70,32 @@ export default function OperatorApp() {
 
   const { level: batteryLevel, charging: batteryCharging } = useBatteryLevel();
   useDeviceSensorReporter(deviceId);
-  const vehicleFootprints = useVehicleFootprints();
+  const { footprints: vehicleFootprints, limits: speedLimits } = useVehicleFootprints(deviceId);
+
+  // la tableta decide geocercas y velocidad por su cuenta, con o sin conexion, y le reporta al
+  // servidor lo que decide (ver useLocalAlerts.ts). En pantalla gana lo mas grave entre eso y lo
+  // que el servidor si sigue decidiendo (colision, proximidad, equipo, incidentes, señal)
+  const localAlert = useLocalAlerts(
+    deviceId,
+    geofences,
+    localGeo
+      ? {
+          latitude: localGeo.latitude,
+          longitude: localGeo.longitude,
+          speedKmh: (localGeo.speed ?? 0) * 3.6,
+        }
+      : null,
+    speedLimits,
+    connected,
+  );
+
+  const SEVERITY_RANK = { info: 1, warning: 2, danger: 3 } as const;
+  const effectiveAlert =
+    localAlert &&
+    (!alert.severity || SEVERITY_RANK[localAlert.severity] >= SEVERITY_RANK[alert.severity])
+      ? { severity: localAlert.severity, message: localAlert.message }
+      : alert;
+  const effectiveGeofenceId = localAlert?.geofenceId ?? activeGeofenceId;
 
   // posición propia: local tiene prioridad sobre servidor; alertas siguen siendo del servidor
   const displayFleet = useMemo(() => {
@@ -196,8 +222,8 @@ export default function OperatorApp() {
         </div>
       </header>
 
-      <div id="op-alert-message" className={alert.severity ?? ''}>
-        {alert.message}
+      <div id="op-alert-message" className={effectiveAlert.severity ?? ''}>
+        {effectiveAlert.message}
       </div>
 
       {!checking && myDisplay && (
@@ -216,7 +242,7 @@ export default function OperatorApp() {
                 threat?.deviceId ??
                 (nearestVehicle && nearestVehicle.distance <= 80 ? nearestVehicle.deviceId : null)
               }
-              highlightedGeofenceId={activeGeofenceId}
+              highlightedGeofenceId={effectiveGeofenceId}
               initialCenter={[myDisplay.longitude, myDisplay.latitude]}
               deviceFootprints={vehicleFootprints}
               onUserInteraction={() => setAutoFollow(false)}
@@ -314,7 +340,7 @@ export default function OperatorApp() {
       {}
       <div
         id="op-alert-overlay"
-        className={alert.severity === 'info' ? '' : (alert.severity ?? '')}
+        className={effectiveAlert.severity === 'info' ? '' : (effectiveAlert.severity ?? '')}
       />
 
       {!deviceId && (

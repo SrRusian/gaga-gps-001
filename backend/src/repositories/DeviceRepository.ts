@@ -19,13 +19,20 @@ export interface DeviceRow {
   vehicle_type_name?: string | null;
   vehicle_type_length_meters?: number | null;
   vehicle_type_width_meters?: number | null;
+  vehicle_type_max_speed_kmh?: number | null;
+  group_speed_limit_kmh?: number | null;
 }
 
+// vt.max_speed_kmh y g.speed_limit_kmh viajan aqui porque desde el rediseño de "la tableta evalua,
+// el servidor registra" el Operador necesita sus propios limites en mano para decidir el exceso sin
+// preguntarle a nadie - y tenerlos cacheados es lo que le permite seguir haciendolo sin conexion
 const SELECT_WITH_VEHICLE_TYPE = `
   SELECT d.*, vt.name AS vehicle_type_name, vt.length_meters AS vehicle_type_length_meters,
-    vt.width_meters AS vehicle_type_width_meters
+    vt.width_meters AS vehicle_type_width_meters, vt.max_speed_kmh AS vehicle_type_max_speed_kmh,
+    g.speed_limit_kmh AS group_speed_limit_kmh
   FROM devices d
   LEFT JOIN vehicle_types vt ON vt.id = d.vehicle_type_id
+  LEFT JOIN device_groups g ON g.id = d.group_id
 `;
 
 export class DeviceHasPositionsError extends Error {

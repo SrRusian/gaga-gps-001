@@ -150,6 +150,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // TraccarUplink.resolveBearing - solo se usa cuando el rumbo GPS no es confiable.
   useEffect(() => {
     const interval = setInterval(() => {
+      // null tambien mientras dura la suspension por perdida de corriente (useDeviceOrientation
+      // suelta el sensor) - asi este empuje tampoco despierta nada con el vehiculo apagado
       const heading = compassHeadingRef.current;
       if (heading === null) return;
       RtkNtrip.setCompassHeading({

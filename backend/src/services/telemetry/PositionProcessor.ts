@@ -234,16 +234,14 @@ class PositionProcessor {
         });
       }
 
-      if (this.speedAlertService) {
-        await this.speedAlertService.evaluate({
-          deviceId: position.deviceId,
-          speedKmh: (position.speed ?? 0) * 3.6,
-          projectId: position.projectId ?? null,
-          geofenceMatches,
-          latitude: position.latitude,
-          longitude: position.longitude,
-        });
-      }
+      // El exceso de velocidad y la alerta de zona los decide AHORA LA TABLETA, no el servidor
+      // (decision explicita del usuario, ver app/packages/operator-ui/src/useLocalAlerts.ts y
+      // api/routes/device-events.routes.ts). El servidor solo registra lo que ella le reporta.
+      // Motivo: sin conexion el servidor no puede decidir nada, y un vehiculo no puede quedarse
+      // sin avisos por un bache de cobertura. `speedAlertService` se deja inyectado pero sin
+      // llamarse desde aqui - su logica sigue siendo la referencia de la copia que corre en la
+      // tableta (localSpeed.ts), igual que el resto de duplicaciones deliberadas del proyecto.
+      void geofenceMatches;
 
       if (this.activityClassificationService) {
         await this.activityClassificationService.evaluate({
