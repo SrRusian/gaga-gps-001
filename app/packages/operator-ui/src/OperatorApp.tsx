@@ -59,6 +59,7 @@ export default function OperatorApp() {
     activeGeofenceId,
     incidents,
     proximityNotice,
+    sounds,
   } = useOperatorSocket(deviceId);
   const [mapMode, setMapMode] = useMapMode('gaga_operator_map_mode');
   const [autoFollow, setAutoFollow] = useAutoFollow();
@@ -87,6 +88,7 @@ export default function OperatorApp() {
       : null,
     speedLimits,
     connected,
+    sounds,
   );
 
   const SEVERITY_RANK = { info: 1, warning: 2, danger: 3 } as const;

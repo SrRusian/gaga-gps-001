@@ -44,11 +44,13 @@ describe('evaluateSpeed', () => {
   // caso real: T1 tiene 100 km/h por su tipo de vehiculo y alcanzo 92 sin recibir nada
   const limits = { deviceLimitKmh: null, groupLimitKmh: null, vehicleTypeLimitKmh: 100 };
 
-  it('por debajo del 90% del limite no dice nada', () => {
-    expect(evaluateSpeed(80, limits, null).severity).toBeNull();
+  it('por debajo del 75% del limite no dice nada', () => {
+    expect(evaluateSpeed(70, limits, null).severity).toBeNull();
   });
 
-  it('a partir del 90% avisa, sin marcarlo como exceso', () => {
+  // 75% y no 90%: de 90 a 100 km/h pasan unos pocos segundos, el aviso llegaba junto con el exceso
+  it('a partir del 75% avisa con margen para corregir, sin marcarlo como exceso', () => {
+    expect(evaluateSpeed(75, limits, null).severity).toBe('warning');
     const verdict = evaluateSpeed(92, limits, null);
     expect(verdict.severity).toBe('warning');
     expect(verdict.limitKmh).toBe(100);

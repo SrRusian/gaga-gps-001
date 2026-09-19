@@ -1,4 +1,5 @@
 import { Power } from '@gaga-gps/android-bridge';
+
 import { useEffect, useState } from 'react';
 
 // Brujula del propio tablet (giroscopio + magnetometro + acelerometro, fusionados por el

@@ -8,7 +8,6 @@ import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
-import android.os.Looper
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
@@ -178,22 +177,20 @@ class UsbSerialManager(private val context: Context) {
             },
         )
         ioManager = manager
-        // bug real reportado en campo: "Conexion USB perdida: Can't create handler inside thread
-        // ... that has not called Looper.prepare()" - un hilo de Executors.newSingleThreadExecutor()
-        // plano no tiene Looper preparado, y algo dentro del driver USB (usb-serial-for-android,
-        // via UsbRequest en ciertos caminos internos) intenta crear un Handler() ahi - gotcha
-        // conocido de la libreria. Fix: el hilo que corre el manager prepara su propio Looper antes
-        // de arrancar (no hace falta Looper.loop() - basta con que exista, para que Handler() no
-        // truene al construirse). Sin verificar en hardware real todavia (sin SDK/receptor en este
-        // entorno) - pendiente que el usuario confirme que el error ya no aparece al conectar.
-        Executors.newSingleThreadExecutor { runnable ->
-            object : Thread(runnable, "usb-serial-io") {
-                override fun run() {
-                    Looper.prepare()
-                    super.run()
-                }
-            }
-        }.submit(manager)
+        // Este hilo NO debe preparar un Looper. Hubo una version que lo hacia, para callar el error
+        // "Can't create handler inside thread ... that has not called Looper.prepare()" que salia
+        // como "Conexion USB perdida" - pero ese error nunca fue culpa de la libreria: lo causaba
+        // nuestro propio codigo, porque cada fix RTK llega por aqui (onDataReceived -> parseGga ->
+        // MockLocationFeeder.feed) y terminaba llamando requestLocationUpdates() desde ESTE hilo.
+        // Prepararle un Looper apago el crash y creo algo peor: el listener de ubicacion quedaba
+        // registrado contra una cola de mensajes que nunca se vacia (nadie corre Looper.loop()
+        // aqui), asi que el GPS dejaba de entregar en silencio, con el servicio vivo. Bug real de
+        // campo del 19 sep: 2 horas de viaje sin una sola posicion. La causa se arreglo de raiz en
+        // TraccarSenderService.startLocationUpdates() pasando Looper.getMainLooper() explicito.
+        // Sin Looper aqui, cualquier reaparicion de ese patron vuelve a fallar RUIDOSAMENTE, que es
+        // justo lo que se quiere.
+        Executors.newSingleThreadExecutor { runnable -> Thread(runnable, "usb-serial-io") }
+            .submit(manager)
         connectedDeviceName = device.friendlyLabel()
         connectedDeviceId = device.deviceId
         listener?.onConnected()

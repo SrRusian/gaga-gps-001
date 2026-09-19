@@ -9,8 +9,11 @@ import type { Geofence } from '@gaga-gps/shared-types';
 // mismo criterio ya aplicado a offlineGeofences.ts. Si cambia alla, replicar aqui.
 
 // el aviso temprano NO se reporta al servidor a proposito: es para que el operador corrija a
-// tiempo, no para dejarle un registro encima (pedido explicito de una ronda anterior)
-const WARNING_RATIO = 0.9;
+// tiempo, no para dejarle un registro encima (pedido explicito de una ronda anterior).
+// 0.75 y no 0.9 (pedido explicito tras probarlo en carretera): de 90 a 100 km/h pasan unos pocos
+// segundos, asi que avisar al 90% del limite llegaba practicamente junto con el exceso y no daba
+// margen para corregir. Al 75% (75 km/h con limite de 100) el operador alcanza a reaccionar.
+const WARNING_RATIO = 0.75;
 
 export interface SpeedLimits {
   deviceLimitKmh: number | null;
