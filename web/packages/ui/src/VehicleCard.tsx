@@ -16,7 +16,7 @@ export function VehicleCard({ name, type, status, info, hasAlert, onClick }: Veh
       <div className="gg-vehicle-card__header">
         <span className="gg-vehicle-card__name">
           {name}
-          {type && <span style={{ fontWeight: 'normal', color: '#8b949e' }}> · {type}</span>}
+          {type && <span style={{ fontWeight: 'normal', color: '#7d93b8' }}> · {type}</span>}
         </span>
         <span
           className={`gg-vehicle-card__status gg-vehicle-card__status--${status === 'online' ? '' : status}`}

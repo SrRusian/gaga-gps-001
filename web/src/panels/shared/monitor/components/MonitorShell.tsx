@@ -14,7 +14,7 @@ export interface MonitorShellProps {
 // panels/supervisor.tsx y panels/project-manager.tsx.
 export function MonitorShell({ connected, userName, userRoleLabel, onLogout, children }: MonitorShellProps) {
   return (
-    <div className="sup-app">
+    <div className="sup-app sup-tokens">
       <TopBar connected={connected} userName={userName} userRoleLabel={userRoleLabel} onLogout={onLogout} />
       <div className="sup-body">{children}</div>
     </div>

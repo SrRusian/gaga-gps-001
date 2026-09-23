@@ -27,7 +27,7 @@ function LoadingScreen() {
         alignItems: 'center',
         justifyContent: 'center',
         background: '#0d1117',
-        color: '#8b949e',
+        color: '#7d93b8',
         fontFamily: 'Arial, sans-serif',
       }}
     >

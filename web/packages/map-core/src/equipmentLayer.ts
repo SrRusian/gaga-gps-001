@@ -14,7 +14,7 @@ export interface EquipmentMarkerData {
 }
 
 export const EQUIPMENT_CORE_COLOR = '#f0a83c';
-export const EQUIPMENT_OUTER_COLOR = '#4f8ff0';
+export const EQUIPMENT_OUTER_COLOR = '#008cff';
 const CORE_COLOR = EQUIPMENT_CORE_COLOR;
 const OUTER_COLOR = EQUIPMENT_OUTER_COLOR;
 

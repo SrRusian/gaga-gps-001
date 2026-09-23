@@ -4,8 +4,8 @@
   --ad-surface-2: #1a1e24;
   --ad-border: #262b33;
   --ad-text: #e8eaed;
-  --ad-text-muted: #8b949e;
-  --ad-accent: #4f8ff0;
+  --ad-text-muted: #7d93b8;
+  --ad-accent: #008cff;
   --ad-danger: #e5484d;
   --ad-warning: #f0a83c;
 
@@ -137,7 +137,7 @@
   color: var(--ad-text);
 }
 .dash-nav-item.active {
-  background: rgba(79, 143, 240, 0.14);
+  background: rgba(0, 140, 255, 0.14);
   color: var(--ad-accent);
 }
 .dash-nav-label {
@@ -262,7 +262,7 @@
   cursor: pointer;
 }
 .btn:hover {
-  background: #3f7cd6;
+  background: #0066ff;
 }
 .btn-sm {
   padding: 7px 12px;

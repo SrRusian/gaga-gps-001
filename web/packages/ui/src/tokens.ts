@@ -1,11 +1,11 @@
 export const colors = {
-  accent: '#4f8ff0',
+  accent: '#008cff',
   warning: '#f0a83c',
   warningAlt: '#f5b95c',
   danger: '#e5484d',
   dangerAlt: '#c93b40',
-  info: '#4f8ff0',
-  myVehicle: '#4f8ff0',
+  info: '#008cff',
+  myVehicle: '#008cff',
   otherVehicle: '#8b95a1',
   // mismo valor que danger - vehículo desconectado/sin señal reciente en el mapa
   offlineVehicle: '#e5484d',
@@ -14,7 +14,7 @@ export const colors = {
   bgPrimary: '#0b0d10',
   bgSecondary: '#14171c',
   border: '#262b33',
-  textMuted: '#8b949e',
+  textMuted: '#7d93b8',
 } as const;
 
 export type ColorToken = keyof typeof colors;

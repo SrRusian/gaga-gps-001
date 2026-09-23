@@ -91,7 +91,7 @@ export function useHistoryMode({ map, scope, historyMode, setHistoryMode }: UseH
         const b = points[i + 1];
         segments.push({
           type: 'Feature',
-          properties: { color: a.zones.length > 0 ? '#4f8ff0' : '#e5484d' },
+          properties: { color: a.zones.length > 0 ? '#008cff' : '#e5484d' },
           geometry: {
             type: 'LineString',
             coordinates: [

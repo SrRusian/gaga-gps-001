@@ -21,7 +21,7 @@
   gap: 9px;
 }
 .gg-topbar-brand-pin {
-  color: #4f8ff0;
+  color: #008cff;
 }
 .gg-topbar-brand-text {
   display: flex;
@@ -59,7 +59,7 @@
   border: none;
   border-radius: 8px;
   background: none;
-  color: #8b949e;
+  color: #7d93b8;
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
@@ -71,7 +71,7 @@
 }
 .gg-topbar-nav button.active {
   background: #1a1e24;
-  color: #4f8ff0;
+  color: #008cff;
   font-weight: 600;
 }
 
@@ -94,7 +94,7 @@
 }
 .gg-topbar-clock-date {
   font-size: 11px;
-  color: #8b949e;
+  color: #7d93b8;
   text-transform: capitalize;
 }
 .gg-topbar-conn {
@@ -102,7 +102,7 @@
   align-items: center;
   gap: 7px;
   font-size: 12px;
-  color: #8b949e;
+  color: #7d93b8;
   white-space: nowrap;
 }
 
@@ -136,17 +136,17 @@
   background: #1a1e24;
   display: grid;
   place-items: center;
-  color: #8b949e;
+  color: #7d93b8;
 }
 .gg-topbar-user-name {
   white-space: nowrap;
 }
 .gg-topbar-user-role {
-  color: #8b949e;
+  color: #7d93b8;
   font-size: 12px;
 }
 .gg-topbar-user-caret {
-  color: #8b949e;
+  color: #7d93b8;
   transition: transform 0.15s ease;
 }
 .gg-topbar-user-btn.open .gg-topbar-user-caret {

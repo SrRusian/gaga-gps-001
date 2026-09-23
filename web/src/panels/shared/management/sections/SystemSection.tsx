@@ -241,13 +241,13 @@ export function SystemSection() {
 
       <div className="card">
         <h3>Actualización de la app (tabletas)</h3>
-        <p style={{ fontSize: 13, color: '#8b949e' }}>
+        <p style={{ fontSize: 13, color: '#7d93b8' }}>
           {latestRelease
             ? `Última versión publicada: ${latestRelease.version_name} (build ${latestRelease.version_code}), ${formatBytes(latestRelease.size_bytes)}.`
             : 'Todavía no se ha publicado ningún release.'}
         </p>
 
-        <p style={{ fontSize: 12, color: '#8b949e' }}>
+        <p style={{ fontSize: 12, color: '#7d93b8' }}>
           El version code y version name se leen directo del APK (lo que hayas puesto en
           build.gradle antes de compilar) - no hace falta escribirlos aquí. Se rechaza si el
           version code no es mayor al ya publicado.
@@ -293,7 +293,7 @@ export function SystemSection() {
           </button>
           {forceUpdateMessage && <span style={{ color: '#3fb950' }}>{forceUpdateMessage}</span>}
         </div>
-        <p style={{ fontSize: 12, color: '#8b949e', marginTop: 8 }}>
+        <p style={{ fontSize: 12, color: '#7d93b8', marginTop: 8 }}>
           "Actualizar" solo llega de inmediato a una tableta con la app abierta y conectada en ese
           momento - las demás se ponen al día solas en su revisión diaria de las 2 AM.
         </p>
@@ -343,7 +343,7 @@ export function SystemSection() {
             Generar QR de descarga
           </button>
         </div>
-        <p style={{ fontSize: 12, color: '#8b949e', marginTop: 8 }}>
+        <p style={{ fontSize: 12, color: '#7d93b8', marginTop: 8 }}>
           <strong>Aprovisionamiento</strong>: para una tableta NUEVA o recién reseteada de fábrica -
           en teoría deja la app instalada como dueña del dispositivo (Device Owner) sin computadora
           ni cable, escaneando este código durante la configuración inicial. Bloqueado en la
@@ -361,7 +361,7 @@ export function SystemSection() {
         {qrImage && qrInfo && (
           <div style={{ textAlign: 'center' }}>
             <img src={qrImage} alt="QR de aprovisionamiento" style={{ maxWidth: '100%' }} />
-            <p style={{ fontSize: 13, color: '#8b949e', marginTop: 8 }}>
+            <p style={{ fontSize: 13, color: '#7d93b8', marginTop: 8 }}>
               Versión {qrInfo.versionName} (build {qrInfo.versionCode})
             </p>
             <ol style={{ textAlign: 'left', fontSize: 13, color: '#c9d1d9' }}>
@@ -373,7 +373,7 @@ export function SystemSection() {
               <li>Conecta WiFi cuando lo pida (necesita internet para descargar la app).</li>
               <li>Escanea este código y sigue las instrucciones en pantalla.</li>
             </ol>
-            <p style={{ fontSize: 12, color: '#8b949e' }}>
+            <p style={{ fontSize: 12, color: '#7d93b8' }}>
               Sin verificar en hardware real todavía - probar con una tableta reseteada antes de
               confiar en esto para una instalación real.
             </p>
@@ -387,7 +387,7 @@ export function SystemSection() {
         {downloadQrImage && downloadQrInfo && (
           <div style={{ textAlign: 'center' }}>
             <img src={downloadQrImage} alt="QR de descarga" style={{ maxWidth: '100%' }} />
-            <p style={{ fontSize: 13, color: '#8b949e', marginTop: 8 }}>
+            <p style={{ fontSize: 13, color: '#7d93b8', marginTop: 8 }}>
               Versión {downloadQrInfo.versionName} (build {downloadQrInfo.versionCode})
             </p>
             <p style={{ fontSize: 13, color: '#c9d1d9', textAlign: 'left' }}>
