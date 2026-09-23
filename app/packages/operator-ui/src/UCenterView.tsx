@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { KioskStatus, NtripMountpoint, RtkFixLabel, RtkStatus, SatelliteInfo } from '@gaga-gps/android-bridge';
+import type {
+  KioskStatus,
+  NtripMountpoint,
+  RtkFix,
+  RtkFixLabel,
+  RtkStatus,
+  SatelliteInfo,
+  UsbDeviceInfo,
+} from '@gaga-gps/android-bridge';
 import type { NtripProfile } from './ntripProfiles';
 import { WORLD_CONTINENTS } from './worldOutline';
 
@@ -26,6 +34,20 @@ function formatMeters(value: number | null | undefined, digits = 2): string {
 
 function formatDop(value: number | null | undefined): string {
   return value != null ? value.toFixed(2) : '--';
+}
+
+// precision dinamica para el encabezado - cm cuando importa la resolucion fina (RTK FIX/FLOAT,
+// tipicamente bajo 1m), m para el resto (DGPS/GPS). Prefiere la medicion real del receptor (GST,
+// fix.horizontalStdMeters); sin GST habilitado cae a la estimacion categorica por tipo de fix
+// (fix.accuracyMeters, mismo criterio de "sin piso artificial" que el resto del proyecto) y lo
+// marca con "~" para no presentar una estimacion como si fuera una medicion real.
+function formatHeaderPrecision(fix: RtkFix | undefined | null): string | null {
+  if (!fix) return null;
+  const real = fix.horizontalStdMeters;
+  const value = real ?? fix.accuracyMeters;
+  if (value == null) return null;
+  const prefix = real == null ? '~' : '';
+  return value < 1 ? `${prefix}±${Math.round(value * 100)}cm` : `${prefix}±${value.toFixed(1)}m`;
 }
 
 // C/N0 en dB-Hz: bajo 25 no sirve ni para posicion estable, 35+ es lo minimo para RTK
@@ -459,8 +481,8 @@ function useSatelliteHistory(satellites: SatelliteInfo[] | undefined) {
 }
 
 function Sparkline({ values }: { values: number[] }) {
-  const w = 64;
-  const h = 22;
+  const w = 52;
+  const h = 40; // coincide con el tamaño renderizado real (.uc-sparkline) para que la linea no se deforme
   const maxSnr = 50;
   const points = values
     .map((v, i) => {
@@ -476,6 +498,10 @@ function Sparkline({ values }: { values: number[] }) {
   );
 }
 
+// Vuelto al visual de tarjeta+sparkline original (mas legible que la matriz de color en cuadros,
+// que resulto confusa en la practica). Panel de una sola columna (no uc-panel-full) - dentro de su
+// propio ancho, las constelaciones (uc-history-groups) siguen agregandose hacia la derecha con
+// scroll horizontal si no caben todas, en vez de estirar el panel entero.
 function SatelliteLevelHistoryPanel({ status }: { status: RtkStatus }) {
   const history = useSatelliteHistory(status.satellites);
   const groups = useMemo(() => groupByConstellation(status.satellites), [status.satellites]);
@@ -486,23 +512,25 @@ function SatelliteLevelHistoryPanel({ status }: { status: RtkStatus }) {
       {groups.length === 0 ? (
         <p className="ds-hint">Sin historial todavia.</p>
       ) : (
-        groups.map(([constellation, sats]) => (
-          <div className="ds-sat-group" key={constellation}>
-            <div className="ds-sat-group-title">{constellation}</div>
-            <div className="uc-history-rows">
-              {sats.map((s) => {
-                const key = `${s.constellation}-${s.id}-${s.signalId}`;
-                return (
-                  <div className="uc-history-row" key={key}>
-                    <span className="uc-history-id">{s.id}</span>
-                    <Sparkline values={history.get(key) ?? []} />
-                    <span className="uc-history-snr">{s.snr ?? '--'}</span>
-                  </div>
-                );
-              })}
+        <div className="uc-history-groups">
+          {groups.map(([constellation, sats]) => (
+            <div className="uc-history-group" key={constellation}>
+              <div className="ds-sat-group-title">{constellation}</div>
+              <div className="uc-history-rows">
+                {sats.map((s) => {
+                  const key = `${s.constellation}-${s.id}-${s.signalId}`;
+                  return (
+                    <div className="uc-history-row" key={key}>
+                      <span className="uc-history-row-id">{s.id}</span>
+                      <Sparkline values={history.get(key) ?? []} />
+                      <span className="uc-history-row-snr">{s.snr ?? '--'}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ))
+          ))}
+        </div>
       )}
       <p className="ds-hint">Ultimas {HISTORY_LENGTH} lecturas de C/N0 - util para ver un satelite intermitente que las barras no muestran.</p>
     </div>
@@ -645,35 +673,59 @@ export interface UCenterConnectionProps {
   onRetryMockLocation: () => void;
   btDevices: { address: string; name: string | null }[];
   onGrantBluetoothPermission: () => void;
-  onToggleBluetooth: (address: string) => void;
-  usbDevices: { deviceId: number; name: string | null }[];
-  selectedUsbDeviceId: number | null;
-  onSelectUsbDevice: (id: number) => void;
+  usbDevices: UsbDeviceInfo[];
   baudRate: number;
   onUpdateBaudRate: (value: number) => void;
-  onToggleUsb: () => void;
 }
 
+function StatusDot({ on }: { on: boolean }) {
+  return <span className={`uc-status-dot${on ? ' uc-status-dot--on' : ''}`} />;
+}
+
+// baud real entre el HC-05 y el UART2 del receptor - fijado UNA VEZ por hardware en el
+// aprovisionamiento (AT+UART en el HC-05 + CFG-PRT de UART2 en u-center, ver README), nunca
+// leido ni aplicado desde aqui: RFCOMM (Bluetooth Classic) no tiene ningun concepto de baud rate,
+// asi que Android no tiene forma de consultarlo ni cambiarlo. Puramente informativo - si algun dia
+// se reconfigura el HC-05 a otro valor, este numero hay que actualizarlo aqui a mano tambien.
+const BLUETOOTH_UART_BAUD_RATE = 115200;
+
+// fila de "Baud rate" de solo lectura - misma forma visual para Bluetooth y USB nativo, ninguno
+// de los dos puede aplicarse desde la app (ver comentario en BLUETOOTH_UART_BAUD_RATE y
+// UsbSerialDriver.hasFixedBaud en el lado nativo)
+function ReadOnlyBaudRow({ value, note }: { value: string; note: string }) {
+  return (
+    <div className="uc-baud-row">
+      <span className="ds-label">Baud rate</span>
+      <span className="uc-baud-value">
+        {value}
+        <span className="uc-baud-value-note">{note}</span>
+      </span>
+    </div>
+  );
+}
+
+// Pura vista de estado - sin nada que elegir ni desconectar. La prioridad de transporte (USB gana,
+// Bluetooth es respaldo automatico) y la conexion misma viven enteramente del lado nativo
+// (RtkNtripPlugin.applyTransportPriority), disparadas por eventos del sistema (attach USB, enlace
+// Bluetooth disponible) - nunca por una accion de esta pantalla. Dejar elegir aqui solo invitaba a
+// error humano (con un solo receptor real, jamas hay nada genuino que elegir) y un boton de
+// "Desconectar" contradice el objetivo: el RTK debe seguir alimentando posicion sin que nadie
+// tenga que acordarse de apagarlo.
 function ReceiverSection({ status, connection }: { status: RtkStatus; connection: UCenterConnectionProps }) {
+  // el receptor USB conectado ahora mismo (o, si ninguno esta conectado todavia, el primero
+  // detectado) - solo para saber si tiene baud fijo o no, nunca para elegir cual usar
+  const usbDevice =
+    connection.usbDevices.find((d) => d.deviceId === status.connectedUsbDeviceId) ?? connection.usbDevices[0] ?? null;
+
   return (
     <section className="uc-config-section">
       <h4 className="uc-config-title">Receptor</h4>
 
       {!status.mockLocationAllowed && (
-        <div className="ds-hint" style={{ border: '1px solid #d29922', borderRadius: 6, padding: 10 }}>
+        <div className="uc-warning-box">
           <p>
-            <strong>Pendiente:</strong> esta tableta todavia no esta configurada como app de
-            ubicacion simulada - necesario para que el receptor RTK reemplace el GPS interno.
-          </p>
-          {!connection.kioskStatus.developerOptionsEnabled && (
-            <p>
-              1. Activa Opciones de desarrollador: Ajustes de Android {'>'} Acerca de la tableta
-              {' > '}toca 7 veces "Numero de compilacion".
-            </p>
-          )}
-          <p>
-            {connection.kioskStatus.developerOptionsEnabled ? '' : '2. '}En Opciones de desarrollador, en
-            "Seleccionar app de ubicacion falsa", elige <strong>GAGA Operador</strong>.
+            <strong>Pendiente:</strong> falta seleccionar esta app como ubicacion simulada para que
+            el RTK reemplace el GPS interno.
           </p>
           <div className="ds-actions">
             <button onClick={connection.onOpenDeveloperOptions}>Abrir Ajustes de Android</button>
@@ -681,87 +733,61 @@ function ReceiverSection({ status, connection }: { status: RtkStatus; connection
               {connection.mockLocationBusy ? 'Verificando…' : 'Ya lo hice, verificar'}
             </button>
           </div>
+          {!connection.kioskStatus.developerOptionsEnabled && (
+            <p className="uc-mini-hint">
+              Antes: Opciones de desarrollador (Ajustes {'>'} Acerca de la tableta, toca 7 veces
+              "Numero de compilacion") {'>'} "Seleccionar app de ubicacion falsa" {'>'} GAGA Operador.
+            </p>
+          )}
         </div>
       )}
 
       <h5 className="uc-config-subtitle">Bluetooth</h5>
-      <div className="ds-actions">
-        <span className="ds-status">
+      <div className="uc-status-row">
+        <StatusDot on={status.bluetoothConnected} />
+        <span className="uc-status-text" title={status.bluetoothConnected ? status.connectedBluetoothName ?? undefined : undefined}>
           {status.bluetoothConnected
-            ? `Conectado - ${status.connectedBluetoothName ?? 'Bluetooth'} - ${formatRate(status.bluetoothDataRateBps)} - ${formatTotalBytes(status.bluetoothTotalBytes)} total`
-            : 'Sin conectar'}
+            ? `${status.connectedBluetoothName ?? 'Conectado'} · ${formatRate(status.bluetoothDataRateBps)} · ${formatTotalBytes(status.bluetoothTotalBytes)} total`
+            : 'Sin conectar - se conecta solo al modulo vinculado'}
         </span>
       </div>
       {!status.bluetoothPermissionGranted && (
-        <div className="ds-actions">
-          <button onClick={connection.onGrantBluetoothPermission}>Permitir Bluetooth</button>
-        </div>
+        <button className="uc-link-button" onClick={connection.onGrantBluetoothPermission}>
+          Permitir Bluetooth
+        </button>
       )}
       {status.bluetoothPermissionGranted && !status.bluetoothEnabled && (
-        <p className="ds-hint">El Bluetooth de la tableta esta apagado. Enciendelo en Ajustes de Android.</p>
+        <p className="uc-mini-hint">Bluetooth apagado - enciendelo en Ajustes de Android.</p>
       )}
-      {connection.btDevices.map((d) => {
-        const isSelected = status.bluetoothConnected && status.connectedBluetoothAddress === d.address;
-        return (
-          <label className="ds-usb-option" key={d.address}>
-            <input
-              type="radio"
-              name="uc-btDevice"
-              checked={isSelected}
-              onChange={() => connection.onToggleBluetooth(d.address)}
-            />
-            {d.name ?? d.address}
-          </label>
-        );
-      })}
-      {connection.btDevices.length === 0 && status.bluetoothPermissionGranted && (
-        <p className="ds-hint">
-          Ningun modulo vinculado todavia. Vincula el HC-05 desde Ajustes de Android (codigo 1234) y aparecera solo aqui.
-        </p>
+      {status.bluetoothPermissionGranted && status.bluetoothEnabled && connection.btDevices.length === 0 && (
+        <p className="uc-mini-hint">Vincula el HC-05 en Ajustes de Android (codigo 1234) y se conectara solo.</p>
       )}
-      <p className="ds-hint">
-        Se conecta solo al modulo vinculado y reintenta si se cae el enlace. El baud rate no se configura aqui: vive entre el HC-05 y el receptor.
-      </p>
+      <ReadOnlyBaudRow value={`${BLUETOOTH_UART_BAUD_RATE}`} note="fijo en el HC-05 - ver README" />
 
       <h5 className="uc-config-subtitle">USB</h5>
-      <div className="ds-actions">
-        <span className="ds-status">
+      <div className="uc-status-row">
+        <StatusDot on={status.usbConnected} />
+        <span className="uc-status-text">
           {status.usbConnected
-            ? `Conectado - ${status.connectedUsbDeviceName ?? 'USB'} - ${formatRate(status.usbDataRateBps)} - ${formatTotalBytes(status.usbTotalBytes)} total`
+            ? `Conectado · ${formatRate(status.usbDataRateBps)} · ${formatTotalBytes(status.usbTotalBytes)} total`
             : 'Sin conectar'}
         </span>
       </div>
-      {connection.usbDevices.map((d) => {
-        // "seleccionado" no depende solo del clic manual - el receptor se auto-conecta solo al
-        // enchufarlo, asi que tambien cuenta como seleccionada la fila que coincide con el
-        // dispositivo YA conectado
-        const isSelected =
-          connection.selectedUsbDeviceId === d.deviceId ||
-          (status.usbConnected && status.connectedUsbDeviceId === d.deviceId);
-        return (
-          <label className="ds-usb-option" key={d.deviceId}>
+      {usbDevice &&
+        (usbDevice.hasFixedBaud ? (
+          <ReadOnlyBaudRow value="Sin baud rate" note="puerto USB nativo del receptor" />
+        ) : (
+          <div className="uc-baud-row">
+            <label className="ds-label">Baud rate</label>
             <input
-              type="radio"
-              name="uc-usbDevice"
-              checked={isSelected}
-              onChange={() => connection.onSelectUsbDevice(d.deviceId)}
+              type="number"
+              value={connection.baudRate}
+              onChange={(e) => connection.onUpdateBaudRate(Number(e.target.value))}
             />
-            {d.name ?? `USB ${d.deviceId}`}
-          </label>
-        );
-      })}
-      {connection.usbDevices.length === 0 && <p className="ds-hint">Ningun dispositivo USB detectado todavia.</p>}
-      <label className="ds-label">Baud rate</label>
-      <input
-        type="number"
-        value={connection.baudRate}
-        onChange={(e) => connection.onUpdateBaudRate(Number(e.target.value))}
-      />
-      <div className="ds-actions">
-        <button onClick={connection.onToggleUsb} disabled={!status.usbConnected && connection.selectedUsbDeviceId == null}>
-          {status.usbConnected ? 'Desconectar' : 'Conectar'}
-        </button>
-      </div>
+          </div>
+        ))}
+
+      <p className="uc-mini-hint">USB tiene prioridad sobre Bluetooth - conecta solo al que este disponible.</p>
     </section>
   );
 }
@@ -973,6 +999,7 @@ interface UCenterViewProps {
 // cada satelite sobre el globo (ver satelliteSubpoint()), nunca se usa para navegar.
 export function UCenterView({ status, onClose, connection, ntrip }: UCenterViewProps) {
   const mode = fixModeLabel(status);
+  const precision = formatHeaderPrecision(status.lastFix);
   return (
     <div className="ds-modal-overlay" onClick={onClose}>
       <div className="uc-shell" onClick={(e) => e.stopPropagation()}>
@@ -980,8 +1007,11 @@ export function UCenterView({ status, onClose, connection, ntrip }: UCenterViewP
           <div>
             <h3>u-center</h3>
             {status.lastFix && (
-              <span className="uc-header-status" style={{ color: fixBadgeColor(status.lastFix.fixLabel) }}>
-                {fixBadgeLabel(status.lastFix.fixLabel)} · {mode.text}
+              <span className="uc-header-status">
+                <span style={{ color: fixBadgeColor(status.lastFix.fixLabel) }}>
+                  {fixBadgeLabel(status.lastFix.fixLabel)} · {mode.text}
+                </span>
+                {precision && <span className="uc-header-precision"> · {precision}</span>}
               </span>
             )}
           </div>
@@ -996,14 +1026,14 @@ export function UCenterView({ status, onClose, connection, ntrip }: UCenterViewP
           </div>
 
           <section className="uc-panels-main">
+            {/* fila 1: Satellite Position (1 col) + World Position (uc-panel-wide, 2 col) = 3.
+                fila 2: Satellite Level + Data + Satellite Level History, 1 col cada uno = 3. */}
             <h4 className="uc-group-title">Satelites</h4>
             <SatellitePositionPanel status={status} />
-            <SatelliteLevelPanel status={status} />
-            <SatelliteLevelHistoryPanel status={status} />
-
-            <h4 className="uc-group-title">Posicion</h4>
             <WorldPositionPanel status={status} />
+            <SatelliteLevelPanel status={status} />
             <DataPanel status={status} />
+            <SatelliteLevelHistoryPanel status={status} />
 
             <h4 className="uc-group-title">Instrumentos</h4>
             <CompassPanel status={status} />

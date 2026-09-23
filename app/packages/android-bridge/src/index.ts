@@ -48,6 +48,10 @@ export interface UsbDeviceInfo {
   vendorId: number;
   productId: number;
   name: string | null;
+  // true = puerto CDC-ACM nativo (el USB propio del receptor u-blox, sin chip puente detras) - el
+  // firmware no tiene concepto de baud rate ahi, cambiarlo no hace nada real. false = un chip
+  // puente de verdad (FTDI/CP210x/CH340/Prolific), donde el baud si importa.
+  hasFixedBaud: boolean;
 }
 
 // modulo Bluetooth del receptor RTK (HC-05 sobre SPP) - solo dispositivos YA vinculados desde

@@ -80,8 +80,7 @@ Ajustes tiene un botón **"u-center"** (dentro de "Receptor RTK y corrección NT
 
 - **Receptor** - conexión Bluetooth/USB, permiso de ubicación simulada, baud rate. Movido aquí desde Ajustes.
 - **NTRIP Client** - perfiles, conectar/desconectar, editor de mount point. Movido aquí desde Ajustes.
-- **Satelites** - Satellite Position (sky plot polar, centro = cenit), Satellite Level (barras de C/N0 por constelación), Satellite Level History (sparkline de las últimas 30 lecturas por satélite, útil para ver uno intermitente que las barras no muestran).
-- **Posición** - Data (longitud, latitud, altitud MSL y elipsoidal, TTFF, Fix Mode, 3D/2D Acc, PDOP, HDOP, satélites).
+- **Satelites** - Satellite Position (sky plot polar, centro = cenit, 1 columna) + World Position (subpunto sobre un mapa mundial, 2 columnas, misma fila) - luego Satellite Level (barras de C/N0 por constelación) + Data (longitud, latitud, altitud MSL y elipsoidal, TTFF, Fix Mode, 3D/2D Acc, PDOP, HDOP, satélites) + Satellite Level History (sparkline de las últimas 30 lecturas por satélite, útil para ver uno intermitente que las barras no muestran), los tres a 1 columna cada uno en la fila siguiente.
 - **Instrumentos** - Compass (rumbo), Speed Meter, Altitude Meter, Watch (hora UTC real del GPS, de RMC - no el reloj de la tableta).
 
 **"World Position" muestra el subpunto de cada satélite sobre un mapa mundial simplificado** (contorno de baja resolución, la misma fidelidad que el propio panel de u-center) - punto grande es la posición del receptor, puntos chicos son los satélites. Deliberadamente NO es el mapa real del Operador (MapView, con tiles reales) - es puramente informativo dentro de este menú de diagnóstico, nunca se usa para navegar. El subpunto se calcula con geometría esférica real (elevación/azimut del satélite + posición propia + altitud orbital típica por constelación - fórmula estándar de seguimiento satelital, la inversa de calcular Az/El desde una posición orbital conocida), no es decorativo. Aproximado a propósito (altitud fija por constelación, Tierra esférica no elipsoidal) - sirve para "más o menos dónde", no para navegación.
@@ -91,6 +90,28 @@ Ajustes tiene un botón **"u-center"** (dentro de "Receptor RTK y corrección NT
 **TTFF es una aproximación, no el valor real de u-blox.** El TTFF verdadero se mide desde el power-on del chip vía `UBX-NAV-STATUS` (protocolo binario, que esta app no parsea - UART2 solo emite NMEA). Lo que se muestra es tiempo desde que se estableció el enlace actual (USB o Bluetooth) hasta el primer fix - se reinicia en cada reconexión. Si el receptor sigue prendido y solo se reconectó el transporte, el número se parece a un "hot start" real; no es exacto pero sí informativo.
 
 **3D/2D Acc requieren `GST` habilitado** en el puerto del receptor (ver el paso 4 de arriba) - sin él, el panel muestra `--` en esas dos filas.
+
+### Baud rate del USB - por qué normalmente no hace nada
+
+El ZED-F9P expone su propio puerto USB como **CDC-ACM nativo**, sin un chip puente FTDI/CP210x/CH340 detrás - lo mismo que u-center: su propia vista de puertos no tiene campo de baud rate cuando el target es USB (a diferencia de UART1/UART2, que sí lo tienen). El firmware del receptor no tiene ningún concepto de "baud rate" en ese puerto - es puro USB, sin trama serial real detrás que framear.
+
+La app detecta esto (`UsbSerialDriver is CdcAcmSerialDriver`) y, cuando el dispositivo conectado es el propio u-blox, **oculta el campo de baud rate** y muestra en su lugar "Baud fijo - puerto nativo del receptor". Si algún día se conecta un receptor distinto a través de un chip puente real, el campo aparece y **se aplica de inmediato a la conexión ya abierta** (antes solo se guardaba para la siguiente conexión, cambiar el valor con el puerto ya conectado no hacía nada hasta desconectar y reconectar).
+
+El baud real del Bluetooth (entre el HC-05 y el UART2 del receptor) tampoco se controla desde la app - es un límite real de la API de Bluetooth Classic de Android: RFCOMM no tiene ningún concepto de baud rate, esa velocidad vive físicamente entre el HC-05 y el receptor. Se configura una sola vez por hardware, en el paso 1 y 4 del aprovisionamiento de arriba.
+
+**Por eso la app ya no muestra ningún campo editable de baud rate para el caso normal** - ni para USB nativo ni para Bluetooth, porque ninguno de los dos puede aplicarse desde ahí. En su lugar se muestra el valor real como solo lectura: `115200` para Bluetooth (una constante fija en el código, `BLUETOOTH_UART_BAUD_RATE` - **si algún día se reconfigura el HC-05 a otro valor, hay que actualizar esa constante a mano también**, no se lee del hardware) y "Sin baud rate" para USB nativo. El campo editable solo reaparece si algún día se conecta un receptor distinto a través de un chip puente real (FTDI/CP210x/CH340), caso en el que sí importa y sí aplica en vivo.
+
+### Receptor - pura vista de estado, sin nada que elegir ni desconectar
+
+La sección Receptor de u-center ya no deja elegir entre USB/Bluetooth ni tiene botón de desconectar. **Con un solo receptor real, nunca hubo nada genuino que elegir** - la conexión siempre fue automática del lado nativo (`RtkNtripPlugin.applyTransportPriority()`: USB conectado tiene prioridad y desconecta Bluetooth solo; sin USB, Bluetooth se reconecta solo). El selector manual solo invitaba a error humano y contradecía el objetivo del sistema - un botón de "Desconectar" no tiene sentido cuando la meta es que el RTK siga alimentando posición sin que nadie tenga que acordarse de apagarlo. La pantalla ahora solo muestra el estado real: conectado/sin conectar, tasa en vivo, total transferido en la sesión, y el baud rate de solo lectura.
+
+### Precisión en el encabezado
+
+Junto al estado del fix (`RTK FIJO · 3D/RTK FIJO`) se muestra la precisión actual, con formato dinámico: centímetros cuando importa la resolución fina (RTK FIJO/FLOTANTE, típicamente bajo 1 m), metros para el resto. Prefiere la medición real del receptor (GST) - si GST no está habilitado, cae a la estimación por categoría de fix y lo marca con `~` para no presentar una estimación como si fuera una medición real.
+
+### Satellite Level History - constelaciones en fila, satélites en 2 columnas por constelación
+
+Se probó primero una matriz de color satélites×tiempo (una celda por lectura) - resultó confusa, revertida. Luego cada satélite como columna angosta - también revertido. Diseño final: **cada constelación es un bloque** (BeiDou, luego Galileo a su derecha, luego GLONASS, sin envolver a una fila nueva - `flex-wrap: nowrap` + `overflow-x: auto` como salida si algún día no caben todas) y **dentro de cada constelación, los satélites se apilan verticalmente en 2 columnas** (CSS multi-column: llena la primera de arriba a abajo, sigue en la segunda) - una fila por satélite (ID + gráfica de línea de 52×40 + último valor). Evita que una constelación con muchos satélites (ej. GPS con 10+) haga el panel excesivamente alto. Panel de **ancho completo** (`uc-panel-full`), movido al final del menú.
 
 El procedimiento completo de armado y configuración está en [Aprovisionamiento de un receptor RTK nuevo](#aprovisionamiento-de-un-receptor-rtk-nuevo-hardware--u-center).
 

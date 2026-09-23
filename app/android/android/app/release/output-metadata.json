@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 66,
-      "versionName": "1.0.60-ucenter-worldmap-layout",
+      "versionCode": 80,
+      "versionName": "1.0.73-ucenter-grid-layout",
       "outputFile": "app-release.apk"
     }
   ],

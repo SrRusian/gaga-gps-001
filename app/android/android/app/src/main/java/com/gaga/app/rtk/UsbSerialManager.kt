@@ -8,11 +8,20 @@ import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
+import com.hoho.android.usbserial.driver.CdcAcmSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
 import com.hoho.android.usbserial.util.SerialInputOutputManager
 import java.util.concurrent.Executors
+
+// El ZED-F9P expone su propio puerto USB como CDC-ACM nativo (sin un chip puente FTDI/CP210x/CH340
+// detras) - u-center mismo lo confirma: su vista de Ports (PRT) no tiene campo de baud rate cuando
+// el target es USB, a diferencia de UART1/UART2, que si lo tienen. El "baud rate" que pide
+// UsbSerialPort.setParameters() en ese caso es un parametro USB (SET_LINE_CODING) que el firmware
+// del receptor simplemente ignora - no hay ninguna trama serial real detras que framear a esa
+// velocidad. Solo importa de verdad con un chip puente real (otro receptor conectado via FTDI/etc).
+fun UsbSerialDriver.hasFixedBaud(): Boolean = this is CdcAcmSerialDriver
 
 // nombre amigable para mostrar en la UI - manufacturerName/productName vienen de los descriptores
 // USB cacheados por el sistema (no siempre presentes, algunos chips baratos no los declaran), asi
@@ -201,6 +210,20 @@ class UsbSerialManager(private val context: Context) {
             port?.write(data, 1000)
         } catch (e: Exception) {
             listener?.onError("Error escribiendo al receptor: ${e.message}")
+        }
+    }
+
+    // aplica el baud rate a la conexion YA ABIERTA (bug real: antes solo se guardaba en
+    // SharedPreferences y recien aplicaba en la siguiente conexion - cambiar el valor con el
+    // puerto conectado no hacia nada hasta desconectar y reconectar). Con un puerto CDC-ACM
+    // (ver hasFixedBaud()) esto es inofensivo pero no cambia nada real - el firmware lo ignora.
+    fun updateBaudRate(baudRate: Int) {
+        pendingBaudRate = baudRate
+        val openPort = port ?: return
+        try {
+            openPort.setParameters(baudRate, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+        } catch (e: Exception) {
+            listener?.onError("No se pudo aplicar el baud rate: ${e.message}")
         }
     }
 

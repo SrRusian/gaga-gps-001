@@ -283,7 +283,8 @@ class RtkNtripPlugin : Plugin() {
                     .put("deviceId", d.deviceId)
                     .put("vendorId", d.vendorId)
                     .put("productId", d.productId)
-                    .put("name", d.friendlyLabel()),
+                    .put("name", d.friendlyLabel())
+                    .put("hasFixedBaud", driver.hasFixedBaud()),
             )
         }
         val ret = JSObject()
@@ -315,6 +316,7 @@ class RtkNtripPlugin : Plugin() {
     fun setBaudRate(call: PluginCall) {
         val baud = call.getInt("baudRate") ?: return call.reject("baudRate requerido")
         RtkPrefs.setBaudRate(context, baud)
+        usb.updateBaudRate(baud) // aplica de inmediato si ya hay un puerto USB abierto
         call.resolve()
     }
 

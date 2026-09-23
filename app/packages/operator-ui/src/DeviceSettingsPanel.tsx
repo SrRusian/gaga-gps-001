@@ -10,6 +10,7 @@ import {
   type TraccarLogEntry,
   type TraccarSendSettings,
   type TraccarServer,
+  type UsbDeviceInfo,
 } from '@gaga-gps/android-bridge';
 import {
   deleteServerProfile,
@@ -161,8 +162,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
 
   const activeNtripProfile = ntripProfiles.find((p) => p.id === ntripActiveProfileId) ?? null;
 
-  const [usbDevices, setUsbDevices] = useState<{ deviceId: number; name: string | null }[]>([]);
-  const [selectedUsbDeviceId, setSelectedUsbDeviceId] = useState<number | null>(null);
+  const [usbDevices, setUsbDevices] = useState<UsbDeviceInfo[]>([]);
   const [btDevices, setBtDevices] = useState<{ address: string; name: string | null }[]>([]);
   const [showUCenter, setShowUCenter] = useState(false);
 
@@ -459,32 +459,11 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   }
 
   // el baud rate se persiste al cambiarlo, no solo al conectar - el auto-conectar al enchufar el
-  // receptor (siempre activo, del lado nativo) corre sin pasar por connectUsb(), asi que necesita
-  // el valor ya guardado de antemano
+  // receptor (siempre activo, del lado nativo) corre sin pasar por esta pantalla en absoluto, asi
+  // que necesita el valor ya guardado de antemano
   async function updateBaudRate(value: number) {
     setBaudRateInput(value);
     await RtkNtrip.setBaudRate({ baudRate: value });
-  }
-
-  async function connectUsb() {
-    if (selectedUsbDeviceId == null) return;
-    await RtkNtrip.connectUsb({ deviceId: selectedUsbDeviceId, baudRate });
-  }
-
-  async function toggleUsbConnection() {
-    if (rtkStatus.usbConnected) {
-      await RtkNtrip.disconnectUsb();
-      return;
-    }
-    await connectUsb();
-  }
-
-  async function toggleBluetoothConnection(address: string) {
-    if (rtkStatus.bluetoothConnected && rtkStatus.connectedBluetoothAddress === address) {
-      await RtkNtrip.disconnectBluetooth();
-      return;
-    }
-    await RtkNtrip.connectBluetooth({ address });
   }
 
   async function grantBluetoothPermission() {
@@ -600,10 +579,8 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   async function activateGnssService() {
     setGnssBusy(true);
     try {
-      if (selectedUsbDeviceId != null && !rtkStatus.usbConnected) {
-        await connectUsb();
-        await new Promise((resolve) => setTimeout(resolve, 800));
-      }
+      // el transporte (USB o Bluetooth, el que este disponible, USB con prioridad) se conecta solo
+      // del lado nativo - ya no hace falta pedirle a esta funcion que "conecte" nada primero
       if (activeNtripProfile) await applyNtripConfig(activeNtripProfile);
       await RtkNtrip.startNtrip().catch(() => {});
       await RtkNtrip.startMockLocation().catch(() => {});
@@ -1042,13 +1019,9 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
                 onRetryMockLocation: retryMockLocationCheck,
                 btDevices,
                 onGrantBluetoothPermission: grantBluetoothPermission,
-                onToggleBluetooth: toggleBluetoothConnection,
                 usbDevices,
-                selectedUsbDeviceId,
-                onSelectUsbDevice: setSelectedUsbDeviceId,
                 baudRate,
                 onUpdateBaudRate: updateBaudRate,
-                onToggleUsb: toggleUsbConnection,
               }}
               ntrip={{
                 profiles: ntripProfiles,
@@ -1199,17 +1172,11 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
         <section className="ds-section">
           <h3>Servicio GNSS</h3>
           <div className="ds-actions">
-            <button onClick={activateGnssService} disabled={gnssBusy}>
-              Activar todo
-            </button>
-            <button className="ds-remove" onClick={deactivateGnssService} disabled={gnssBusy}>
-              Desactivar todo
-            </button>
             <button onClick={restartGnssService} disabled={gnssBusy}>
               Reiniciar
             </button>
           </div>
-          <p className="ds-hint">Activa/apaga USB + NTRIP + ubicacion simulada juntos.</p>
+          <p className="ds-hint">Reinicia USB + NTRIP + ubicacion simulada juntos - util si algo quedo en mal estado.</p>
           <div className="ds-actions">
             <button className="ds-remove" onClick={handleRestoreDefaults}>
               Restaurar valores por defecto
