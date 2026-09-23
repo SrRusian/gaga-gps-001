@@ -50,6 +50,14 @@ export interface UsbDeviceInfo {
   name: string | null;
 }
 
+// modulo Bluetooth del receptor RTK (HC-05 sobre SPP) - solo dispositivos YA vinculados desde
+// Ajustes de Android; la app nunca descubre ni empareja, por eso no pide BLUETOOTH_SCAN
+export interface BluetoothDeviceInfo {
+  address: string;
+  name: string | null;
+  connected: boolean;
+}
+
 export type NtripVersion = 'v1' | 'v2';
 
 export interface NtripConfig {
@@ -68,11 +76,45 @@ export interface RtkFix {
   // los campos (satelites/hdop/fixLabel) siguen siendo reales aunque todavia no haya posicion
   latitude: number | null;
   longitude: number | null;
+  // hora UTC real del GPS (de RMC) - distinta del reloj de la tableta, util para confirmar que
+  // el receptor tiene hora GPS real en vez de comparar contra si mismo sin decir nada util
+  gpsTimeMs: number | null;
+  // altitud MSL (nivel del mar), tal cual la GGA. Ver ellipsoidalAltitudeMeters para la otra.
+  altitude: number | null;
+  // altitud sobre el elipsoide WGS84 - lo que u-center llama "Altitude" a secas (distinto de
+  // "Altitude (msl)"). null si la GGA no trae separacion geoidal (siempre deberia traerla)
+  ellipsoidalAltitudeMeters: number | null;
+  // rumbo/velocidad del ultimo fix - null hasta el primer RMC. Igual que el resto de este puente,
+  // separado del canal rapido rtkFix (RtkFixEvent) - este es para el panel de diagnostico (1/seg),
+  // no para el marcador propio en el mapa (hasta 10/seg)
+  speedMps: number | null;
+  courseDeg: number | null;
   fixQuality: number;
   fixLabel: RtkFixLabel;
   satellites: number;
   hdop: number | null;
   accuracyMeters: number;
+  // error horizontal REAL del receptor (GST). null si GST no esta habilitado en el receptor, y
+  // entonces accuracyMeters cae a una estimacion por tipo de fix en vez de una medicion
+  horizontalStdMeters: number | null;
+  // error 3D (horizontal + vertical) real del receptor (GST). Mismo criterio que horizontalStdMeters
+  fullStdMeters: number | null;
+  // segundos desde la ultima correccion aplicada, y estacion base que la emitio (campos 14 y 15
+  // de la GGA). Arriba de 2-5s el RTK se degrada aunque el NTRIP siga "conectado"
+  correctionAgeSeconds: number | null;
+  stationId: string | null;
+}
+
+// un satelite a la vista. signalId distingue la banda (1 = L1C/A, 6 = GPS L2 CL, 3 = GLONASS
+// L2 OF...), asi que un mismo satelite aparece dos veces si se rastrea en dos frecuencias
+export interface SatelliteInfo {
+  constellation: string;
+  id: number;
+  elevation: number | null;
+  azimuth: number | null;
+  snr: number | null; // dB-Hz. RTK necesita 35-45; null = rastreado sin medida
+  signalId: number;
+  used: boolean; // entra al calculo de posicion (viene de GSA)
 }
 
 // "ntrip" es el unico modo funcional hoy - pointperfect/usb_serial existen para que el selector no
@@ -101,6 +143,16 @@ export interface RtkStatus {
   connectedUsbDeviceId: number | null;
   usbDataRateBps: number;
   usbTotalBytes: number;
+  // transporte Bluetooth, alternativa al cable USB. El baud rate no aparece aqui a proposito: vive
+  // entre el HC-05 y el UART2 del receptor, Android solo abre el socket serial.
+  bluetoothSupported: boolean;
+  bluetoothEnabled: boolean;
+  bluetoothPermissionGranted: boolean;
+  bluetoothConnected: boolean;
+  connectedBluetoothName: string | null;
+  connectedBluetoothAddress: string | null;
+  bluetoothDataRateBps: number;
+  bluetoothTotalBytes: number;
   ntripConnected: boolean;
   ntripError: string | null;
   ntripDataRateBps: number;
@@ -115,6 +167,16 @@ export interface RtkStatus {
   swMapsPort: number;
   correctionMode: CorrectionMode;
   lastFix?: RtkFix;
+  // solo vienen en getStatus(), nunca en el evento rtkStatus - ese sale hasta 10 veces por segundo
+  // y la lista de satelites es pesada de cruzar el puente a esa frecuencia
+  satellites?: SatelliteInfo[];
+  pdop?: number | null;
+  hdop?: number | null;
+  vdop?: number | null;
+  // 2 o 3 (de GSA), null si nunca llego un GSA valido
+  dimension?: number | null;
+  // TTFF aproximado desde que se establecio el enlace actual - ver comentario en RtkNtripPlugin.kt
+  ttffMs?: number | null;
 }
 
 // una fila "STR;..." de la sourcetable NTRIP estandar - GET / (sin mountpoint) contra cualquier
@@ -134,6 +196,11 @@ export interface RtkNtripPlugin {
   listUsbDevices(): Promise<{ devices: UsbDeviceInfo[] }>;
   connectUsb(options: { deviceId: number; baudRate?: number }): Promise<void>;
   disconnectUsb(): Promise<void>;
+  listBluetoothDevices(): Promise<{ devices: BluetoothDeviceInfo[] }>;
+  connectBluetooth(options: { address: string }): Promise<void>;
+  disconnectBluetooth(): Promise<void>;
+  // en una tableta Device Owner se concede sin dialogo; si no, abre el dialogo normal de Android
+  requestBluetoothPermission(): Promise<void>;
   getBaudRate(): Promise<{ baudRate: number }>;
   setBaudRate(options: { baudRate: number }): Promise<void>;
   setNtripConfig(options: NtripConfig): Promise<void>;
@@ -159,6 +226,10 @@ export interface RtkNtripPlugin {
   addListener(
     eventName: 'usbDevicesChanged',
     listenerFunc: (data: { devices: UsbDeviceInfo[] }) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'bluetoothDevicesChanged',
+    listenerFunc: (data: { devices: BluetoothDeviceInfo[] }) => void,
   ): Promise<PluginListenerHandle>;
   addListener(
     eventName: 'rtkFix',
@@ -203,6 +274,10 @@ const webRtkFallback: RtkNtripPlugin = {
   listUsbDevices: async () => ({ devices: [] }),
   connectUsb: async () => unavailable('RtkNtrip'),
   disconnectUsb: async () => unavailable('RtkNtrip'),
+  listBluetoothDevices: async () => ({ devices: [] }),
+  connectBluetooth: async () => unavailable('RtkNtrip'),
+  disconnectBluetooth: async () => unavailable('RtkNtrip'),
+  requestBluetoothPermission: async () => unavailable('RtkNtrip'),
   getBaudRate: async () => ({ baudRate: 460800 }),
   setBaudRate: async () => unavailable('RtkNtrip'),
   setNtripConfig: async () => unavailable('RtkNtrip'),
@@ -223,6 +298,14 @@ const webRtkFallback: RtkNtripPlugin = {
     connectedUsbDeviceId: null,
     usbDataRateBps: 0,
     usbTotalBytes: 0,
+    bluetoothSupported: false,
+    bluetoothEnabled: false,
+    bluetoothPermissionGranted: false,
+    bluetoothConnected: false,
+    connectedBluetoothName: null,
+    connectedBluetoothAddress: null,
+    bluetoothDataRateBps: 0,
+    bluetoothTotalBytes: 0,
     ntripConnected: false,
     ntripError: null,
     ntripDataRateBps: 0,

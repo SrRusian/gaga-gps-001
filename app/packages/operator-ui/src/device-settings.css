@@ -325,6 +325,381 @@
   flex-wrap: wrap;
 }
 
+/* Panel de satelites - replica la vista de señal de u-center */
+.ds-sat-group {
+  margin-top: 12px;
+}
+
+.ds-sat-group-title {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e6e9ee;
+  margin-bottom: 6px;
+}
+
+.ds-sat-group-title span {
+  font-weight: 400;
+  color: #8b93a1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-sat-bars {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.ds-sat-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  width: 26px;
+}
+
+.ds-sat-bar-track {
+  width: 100%;
+  height: 56px;
+  background: #1b1f27;
+  border-radius: 3px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.ds-sat-bar-fill {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  transition: height 240ms ease;
+}
+
+.ds-sat-bar-snr,
+.ds-sat-bar-id {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.ds-sat-bar-snr {
+  color: #e6e9ee;
+}
+
+.ds-sat-bar-id {
+  color: #8b93a1;
+}
+
+/* Vista u-center - réplica del panel de datos, comparte overlay con .ds-modal-overlay */
+/* Ocupa toda la pantalla disponible (el overlay .ds-modal-overlay ya le da ~20px de margen) en vez
+   de una caja centrada chica - con muchos paneles, una sola columna angosta obligaba a scrollear
+   demasiado. */
+.uc-shell {
+  background: #0b0d10;
+  border: 1px solid #262b33;
+  border-radius: 10px;
+  width: 100%;
+  height: 100%;
+  max-width: 1400px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+.uc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid #262b33;
+  flex: 0 0 auto;
+}
+
+.uc-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e8eaed;
+  margin: 0;
+}
+
+.uc-close {
+  background: none;
+  border: none;
+  color: #8b93a1;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.uc-close:hover {
+  color: #e8eaed;
+}
+
+.uc-header-status {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.uc-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  /* flex:1 + min-height:0 es obligatorio para que un hijo con overflow-y scrollee de verdad dentro
+     de un contenedor flex de altura fija - sin min-height:0 el hijo se estira y nunca hace scroll */
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Receptor / NTRIP Client lado a lado en pantallas anchas (tableta en landscape) - cada uno es su
+   propia tarjeta en vez de solo un bloque con linea divisoria, ya que ya no van siempre apilados */
+.uc-config-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .uc-config-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.uc-config-section {
+  background: #14171c;
+  border: 1px solid #262b33;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.uc-config-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8eaed;
+  margin: 0 0 8px;
+}
+
+.uc-config-subtitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8b93a1;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 14px 0 6px;
+}
+
+.uc-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4f8ff0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 4px 0 -2px;
+}
+
+/* Grid responsivo en vez de una sola columna - en una tableta landscape se ven varios paneles a
+   la vez, en vez de scrollear uno por uno. Los titulos de grupo ocupan todo el ancho (grid-column
+   1/-1) para actuar como divisor entre secciones dentro del mismo grid. */
+.uc-panels-main {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.uc-panels-main .uc-group-title {
+  grid-column: 1 / -1;
+}
+
+.uc-panel-wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 640px) {
+  .uc-panel-wide {
+    grid-column: 1 / -1;
+  }
+}
+
+.uc-panel {
+  background: #14171c;
+  border: 1px solid #262b33;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.uc-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b93a1;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+}
+
+.uc-data-grid {
+  display: flex;
+  flex-direction: column;
+}
+
+.uc-data-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #1b1f27;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.uc-data-row:last-child {
+  border-bottom: none;
+}
+
+.uc-data-row span:first-child {
+  color: #8b93a1;
+}
+
+.uc-data-row span:last-child {
+  color: #e8eaed;
+  font-weight: 500;
+}
+
+.uc-value-danger {
+  color: #ef4444 !important;
+}
+
+/* Sky plot (Satellite Position) y gauges circulares (Compass/Speed/Altitude) - misma familia visual */
+.uc-sky-plot,
+.uc-gauge {
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  margin: 4px auto 8px;
+}
+
+.uc-sky-ring,
+.uc-gauge-ring,
+.uc-gauge-track {
+  fill: none;
+  stroke: #262b33;
+  stroke-width: 1;
+}
+
+.uc-sky-axis {
+  stroke: #1b1f27;
+  stroke-width: 1;
+}
+
+.uc-sky-label,
+.uc-gauge-tick {
+  fill: #8b93a1;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.uc-sky-sat-id {
+  fill: #0b0d10;
+  font-size: 8px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.uc-gauge-needle {
+  stroke: #ef4444;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* Satellite Level History */
+/* Grid en vez de una lista vertical - con 20-30 satelites en varias constelaciones, una sola
+   columna obligaba a scrollear muchisimo. En varias columnas cabe todo con mucho menos alto. */
+.uc-history-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 6px 10px;
+}
+
+.uc-history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.uc-history-id {
+  width: 24px;
+  font-size: 11px;
+  color: #8b93a1;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.uc-sparkline {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 22px;
+  background: #1b1f27;
+  border-radius: 3px;
+}
+
+.uc-history-snr {
+  width: 26px;
+  text-align: right;
+  font-size: 11px;
+  color: #e8eaed;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+/* Watch */
+.uc-watch-time {
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #e8eaed;
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* World Position - mapa equirectangular simplificado */
+.uc-world-map {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #0b0d10;
+  border-radius: 4px;
+  margin: 4px 0 8px;
+}
+
+.uc-world-grid {
+  stroke: #1b1f27;
+  stroke-width: 1;
+}
+
+.uc-world-land {
+  fill: #262b33;
+  stroke: #363c46;
+  stroke-width: 0.5;
+}
+
+.uc-world-receiver-ring {
+  fill: none;
+  stroke: #4f8ff0;
+  stroke-width: 1.5;
+}
+
+.uc-world-receiver-dot {
+  fill: #4f8ff0;
+}
+
 .ds-switch-row {
   display: flex;
   align-items: center;

@@ -58,6 +58,42 @@ No hay SDK de Android, Gradle nativo ni `adb` instalados en este entorno - solo 
 
 La mayoría de las tabletas solo tienen un puerto USB-C. Si lo usas para el cable de depuración no queda libre para el receptor RTK. Para desarrollar cómodo: activa "Depuración inalámbrica" en Opciones de desarrollador (Android 11+) y deja el puerto físico libre para el receptor.
 
+### Receptor RTK por Bluetooth (recomendado sobre USB)
+
+El receptor puede hablarle a la tableta por un módulo **HC-05 (SPP)** en vez del cable USB. Esto resuelve en hardware el problema de que el receptor siga drenando la batería de la tableta con el vehículo apagado: la tarjeta se alimenta del vehículo, no del puerto USB.
+
+**El cable tiene prioridad, el Bluetooth es el respaldo.** Los dos alimentan el mismo camino (NMEA → ubicación simulada → envío al servidor) y no hay nada que elegir en ningún ajuste: si el USB está conectado, la app cierra el Bluetooth sola; si el cable se va, lo retoma. **Nunca los dos a la vez** - alimentarían el mismo fix dos veces y duplicarían el RTCM de salida. Se prefiere el cable por latencia (~1 ms contra 10-40 ms de SPP) y porque no se cae por interferencia de 2.4 GHz.
+
+### Cable USB sin alimentación (data-only) para no drenar la tableta
+
+El motivo original de pasar a Bluetooth era que el receptor seguía chupando corriente del puerto USB de la tableta con el vehículo apagado, y [eso no se puede cortar por software](#limitaciones-conocidas-honestas). Hay una solución de hardware más simple que conserva el cable:
+
+**Corta el cable rojo (VBUS, 5 V) del USB. Deja intactos D+ (verde), D− (blanco) y GND (negro).**
+
+Funciona porque el receptor se alimenta del vehículo: al ser un dispositivo autoalimentado, él mismo hace el pull-up en D+ para que el host lo enumere, sin necesitar los 5 V del puerto. La tierra **tiene que quedar conectada** - sin referencia común las líneas de datos no significan nada.
+
+Con eso, al apagarse el vehículo el receptor muere, el USB se desconecta y la tableta no alimenta nada. Es el mismo resultado que el Bluetooth pero conservando la latencia y estabilidad del cable.
+
+### Panel u-center dentro de la app
+
+Ajustes tiene un botón **"u-center"** (dentro de "Receptor RTK y corrección NTRIP") que abre una réplica completa del programa real, para no necesitar una laptop en campo. Consolida todo lo relevante al receptor en un solo overlay con scroll (sin intentar replicar el manejo de ventanas acopladas de un programa de escritorio, no tiene sentido en una tableta):
+
+- **Receptor** - conexión Bluetooth/USB, permiso de ubicación simulada, baud rate. Movido aquí desde Ajustes.
+- **NTRIP Client** - perfiles, conectar/desconectar, editor de mount point. Movido aquí desde Ajustes.
+- **Satelites** - Satellite Position (sky plot polar, centro = cenit), Satellite Level (barras de C/N0 por constelación), Satellite Level History (sparkline de las últimas 30 lecturas por satélite, útil para ver uno intermitente que las barras no muestran).
+- **Posición** - Data (longitud, latitud, altitud MSL y elipsoidal, TTFF, Fix Mode, 3D/2D Acc, PDOP, HDOP, satélites).
+- **Instrumentos** - Compass (rumbo), Speed Meter, Altitude Meter, Watch (hora UTC real del GPS, de RMC - no el reloj de la tableta).
+
+**"World Position" muestra el subpunto de cada satélite sobre un mapa mundial simplificado** (contorno de baja resolución, la misma fidelidad que el propio panel de u-center) - punto grande es la posición del receptor, puntos chicos son los satélites. Deliberadamente NO es el mapa real del Operador (MapView, con tiles reales) - es puramente informativo dentro de este menú de diagnóstico, nunca se usa para navegar. El subpunto se calcula con geometría esférica real (elevación/azimut del satélite + posición propia + altitud orbital típica por constelación - fórmula estándar de seguimiento satelital, la inversa de calcular Az/El desde una posición orbital conocida), no es decorativo. Aproximado a propósito (altitud fija por constelación, Tierra esférica no elipsoidal) - sirve para "más o menos dónde", no para navegación.
+
+**Altitude Meter usa una aguja simple, no el dial de tambores giratorios de u-center** - misma información, sin el costo de un componente de dígitos rotativos que no aporta más valor diagnóstico.
+
+**TTFF es una aproximación, no el valor real de u-blox.** El TTFF verdadero se mide desde el power-on del chip vía `UBX-NAV-STATUS` (protocolo binario, que esta app no parsea - UART2 solo emite NMEA). Lo que se muestra es tiempo desde que se estableció el enlace actual (USB o Bluetooth) hasta el primer fix - se reinicia en cada reconexión. Si el receptor sigue prendido y solo se reconectó el transporte, el número se parece a un "hot start" real; no es exacto pero sí informativo.
+
+**3D/2D Acc requieren `GST` habilitado** en el puerto del receptor (ver el paso 4 de arriba) - sin él, el panel muestra `--` en esas dos filas.
+
+El procedimiento completo de armado y configuración está en [Aprovisionamiento de un receptor RTK nuevo](#aprovisionamiento-de-un-receptor-rtk-nuevo-hardware--u-center).
+
 ### Paso manual obligatorio: mock location
 
 Android bloquea por diseño que cualquier app finja tu ubicación, a menos que la elijas explícitamente. Después de instalar la app una vez:
@@ -65,6 +101,196 @@ Android bloquea por diseño que cualquier app finja tu ubicación, a menos que l
 `Ajustes > Opciones de desarrollador > Seleccionar app de ubicación falsa` → elige **GAGA App**.
 
 Sin este paso, el botón "Activar ubicación simulada" de la pantalla de Integraciones falla con un mensaje claro (ya está manejado en el código, no truena la app) explicando este mismo paso.
+
+## Aprovisionamiento de un receptor RTK nuevo (hardware + u-center)
+
+Procedimiento completo para dejar operando un receptor **simpleRTK2B V3 (ZED-F9P)** con módulo **HC-05** hablándole a una tableta por Bluetooth. Se hace **una sola vez por receptor** y queda guardado en la memoria de la tarjeta.
+
+Necesitas: el receptor, el módulo HC-05 (Steren ARD-305 o equivalente), un cable USB-C, y una PC con [u-center](https://www.u-blox.com/en/product/u-center) (el clásico, no u-center 2).
+
+### Paso 1 - Programar el HC-05 a 115200 baudios
+
+De fábrica viene en 9600, que no alcanza para 10 Hz.
+
+1. Alimenta el pin `EN`/`KEY` con 5 V **antes** de darle corriente al módulo. Así arranca en modo AT (el LED parpadea lento, ~2 s).
+2. Manda: `AT+UART=115200,0,0`
+3. Confirma con `AT+UART?` que responda `+UART:115200,0,0`.
+
+**Gotcha del Steren ARD-305**: las etiquetas **TXD y RXD vienen invertidas de fábrica**. Crúzalas respecto a lo que diga la serigrafía o no vas a tener comunicación.
+
+### Paso 2 - Cableado definitivo al receptor
+
+| HC-05 | ZED-F9P |
+|---|---|
+| TXD | TX2 |
+| RXD | RX2 |
+| VCC | 5 V |
+| GND | GND |
+| `EN` / `KEY` | **desconectado** |
+
+**`EN`/`KEY` debe quedar sin conectar.** Si se deja puesto, el módulo vuelve a arrancar en modo AT y nunca pasa datos.
+
+La tarjeta se alimenta **del vehículo**, no del puerto USB de la tableta. Ese es el punto de usar Bluetooth: el receptor se apaga con el vehículo y deja de drenar la batería de la tableta (ver [Cortar la alimentación por USB](#limitaciones-conocidas-honestas)).
+
+### Paso 3 - Vincular con la tableta
+
+`Ajustes de Android > Bluetooth` → vincular el HC-05, código **`1234`**.
+
+Eso es todo del lado de la tableta. La app detecta sola el módulo ya vinculado, abre el puerto, reintenta si el enlace se cae, y le manda por ahí mismo las correcciones RTCM3 del caster NTRIP. No hay nada que configurar en Ajustes de la app.
+
+En Android 12+ hace falta el permiso `BLUETOOTH_CONNECT`: en una tableta ya aprovisionada como Device Owner la app se lo concede sola sin diálogo; si no lo es, el botón "Permitir Bluetooth" de Ajustes abre el diálogo normal.
+
+### Paso 4 - Configurar el receptor en u-center
+
+Conecta el receptor a la PC por **USB-C** y abre u-center (`Receiver > Connection` → el COM correspondiente, 115200). Después `View > Configuration View`.
+
+**Cada vista necesita su propio botón `Send`.** Dejar las casillas bien en pantalla no aplica nada. En la vista `MSG`, el `Send` aplica **solo el mensaje seleccionado en el dropdown** - si cambias de mensaje sin enviar, pierdes el cambio.
+
+#### RATE (Rates) - tasa de navegación
+
+| Campo | Valor |
+|---|---|
+| Measurement Period | `100` ms (debe mostrar 10.00 Hz) |
+| Navigation Rate | `1` cyc |
+| Time Source | `1 - GPS time` |
+
+Este es un ajuste **global**, independiente de la configuración de puertos. El default de fábrica es 1000 ms (1 Hz) y configurar UART2 **no lo cambia** - es el error más fácil de cometer.
+
+#### NMEA (NMEA Protocol) - precisión de la salida
+
+| Campo | Valor |
+|---|---|
+| NMEA Version | `4.11` |
+| High precision mode | **marcado** |
+| Strict limit 82 chars max | **desmarcado** |
+| Compatibility mode | desmarcado |
+
+**Por qué importa**: el NMEA estándar manda la latitud como `ddmm.mmmmm`, 5 decimales de minuto. Un minuto son 1852 m, así que el escalón es de **1.9 cm** - estarías cuantizando la posición al mismo orden que la precisión del RTK. Con alta precisión pasa a 7 decimales: **0.19 mm**, despreciable. `Strict limit 82` es excluyente con esto: si queda marcado, las sentencias largas salen truncadas.
+
+#### PRT (Ports) - el puerto que va al HC-05
+
+| Campo | Valor |
+|---|---|
+| Target | `2 - UART2` |
+| Protocol in | `0+1+5 - UBX+NMEA+RTCM3` |
+| Protocol out | `1 - NMEA` |
+| Baudrate | `115200` |
+| Databits / Stopbits / Parity | `8` / `1` / `None` |
+
+`in` necesita RTCM3 porque es por donde entran las correcciones que manda la tableta. `out` solo NMEA: el receptor no tiene nada que decirle a la app en UBX, y así el stream llega limpio sin binario de por medio.
+
+No subas de 115200 - el HC-05 se vuelve inestable por encima.
+
+#### MSG (Messages) - qué sentencias salen por UART2
+
+Selecciona cada mensaje en el dropdown y ajusta **solo la casilla de UART2**. `Send` entre cada uno.
+
+| Mensaje | UART2 | Resultado a 10 Hz |
+|---|---|---|
+| `F0-00 NMEA GxGGA` | `1` | 10 por segundo |
+| `F0-04 NMEA GxRMC` | `1` | 10 por segundo |
+| `F0-01 NMEA GxGLL` | `10` | 1 por segundo |
+| `F0-02 NMEA GxGSA` | `10` | 1 por segundo |
+| `F0-03 NMEA GxGSV` | `10` | 1 por segundo |
+| `F0-05 NMEA GxVTG` | `10` | 1 por segundo |
+| `F0-07 NMEA GxGST` | `10` | 1 por segundo |
+
+**`GxGST` viene apagado de fábrica y vale la pena encenderlo**: trae la desviación estándar real de la posición calculada por el receptor. Sin él, el círculo de precisión de la app usa una tabla fija por tipo de fix (3 cm si RTK FIX, 50 cm si FLOAT, 2.5 m si DGPS) - una categoría, no una medición. Con GST activo, la app muestra y envía al servidor el error real, con milímetros de resolución.
+
+**No toques I2C, UART1, USB ni SPI** - déjalos en `1`. En particular, GSV y GSA en USB son lo que alimenta la vista de satélites de u-center; si las apagas ahí te quedas sin diagnóstico.
+
+**Por qué**: la app solo parsea GGA y RMC. Medido sobre tráfico real, una época completa con todas las sentencias pesa ~1,058 bytes; a 10 Hz eso es 10,580 bytes/s contra una capacidad de 11,520 a 115200 baudios - **92% bajo techo con 15 satélites, y afuera con 30 se pasa del 100%**. Con esta tabla el enlace queda en ~30%.
+
+El valor `10` significa "cada 10 soluciones". Si prefieres, `0` las apaga del todo; `10` las conserva a 1 Hz por si algún día quieres ver satélites desde la tableta.
+
+#### GNSS (GNSS Config) - constelaciones
+
+Desmarca **Enable** en:
+
+- **ID 1 SBAS** - con RTK no aporta nada y ocupa 3 canales
+- **ID 5 QZSS** - es regional de Japón, en México no se ve ninguno; ocupa hasta 4 canales
+
+Deja GPS, Galileo, BeiDou y GLONASS habilitados.
+
+**Aviso**: al enviar un cambio de GNSS el receptor reinicia el subsistema de navegación. Pierdes el fix y tarda en readquirir - es normal.
+
+**No uses esta vista para juzgar las señales L2.** `UBX-CFG-GNSS` es un mensaje heredado anterior a los receptores de doble frecuencia: su formato **no tiene campos para L2**, así que aunque el L2 esté activo (y en el F9P lo está de fábrica) esta pantalla siempre muestra solo L1C/A, E1, B1, L1OF. Para comprobar si el L2 se está rastreando de verdad, mira el último campo de las sentencias GSV en `View > Text Console`: `signalId 6` es GPS L2 CL, `signalId 3` es GLONASS L2 OF.
+
+#### NAV5 (Navigation 5) - modelo dinámico
+
+| Campo | Valor |
+|---|---|
+| Dynamic Model | `4 - Automotive` |
+
+El default es "Portable", que asume movimiento genérico. "Automotive" aplica restricciones de aceleración y velocidad vertical propias de un vehículo terrestre, lo que estabiliza la solución y reduce ruido en movimiento.
+
+### Paso 5 - Guardar en memoria
+
+**Nada de lo anterior sobrevive un corte de corriente hasta este paso.**
+
+`CFG (Configuration)` en la lista de la izquierda:
+
+1. Selecciona **Save current configuration**
+2. Marca los 4 dispositivos: **BBR + Flash + I2C-EEPROM + SPI-Flash**
+3. `Send`
+
+### Paso 6 - Verificar
+
+**Alta precisión** - `View > Text Console`, mira una GGA:
+
+```
+$GNGGA,061737.20,1915.2325022,N,10342.9904467,W,2,12,1.22,541.495,M,-17.130,M,1.2,1948*50
+                      ^^^^^^^ 7 decimales de minuto
+```
+
+Si ves solo 5, el `Send` de la vista NMEA no se aplicó.
+
+**10 Hz sostenidos** - en el mismo Text Console, las marcas de tiempo de GGA consecutivas deben ir de 100 en 100 ms:
+
+```
+061737.20 → .30 → .40 → .50 → .60 → .70 → .80 → .90 → 061738.00
+```
+
+Si salen a 150-200 ms, el receptor no está dando abasto y hay que deshabilitar alguna constelación más. **Cuando no puede sostener la tasa, la baja en silencio sin avisar** - por eso hay que comprobarlo explícitamente, y repetirlo a cielo abierto donde rastrea el doble de satélites.
+
+**Que el guardado funcionó** - desconecta el USB, vuelve a conectarlo, y dale `Poll` en la vista RATE. Si sigue en 100 ms, quedó. Si volvió a 1000 ms, repite el Paso 5.
+
+**Edad de las correcciones** - el penúltimo campo de la GGA (`1.2` en el ejemplo) son los segundos desde la última corrección aplicada. Debe estar por debajo de 2-5 s. El último campo (`1948`) es el ID de la estación base que te está corrigiendo.
+
+### Referencia rápida
+
+**LEDs del receptor**
+
+| LED | Estado | Significa |
+|---|---|---|
+| `PVT` verde | parpadea 10 veces/seg | 10 Hz sano |
+| `PVT` verde | apagado | sin solución de posición (no ve satélites) |
+| `NO RTK` rojo | fijo encendido | autónomo, sin correcciones aplicándose |
+| `NO RTK` rojo | parpadeando | RTK FLOAT |
+| `NO RTK` rojo | **apagado** | **RTK FIX** |
+
+El parpadeo del LED rojo es ~1 Hz fijo y **no indica la tasa de navegación**. El del PVT sí.
+
+**Calidad de fix** (campo 6 de la GGA) y precisión esperada
+
+| Valor | Fix | Precisión horizontal |
+|---|---|---|
+| `1` | Autónomo | 1.5 - 3 m |
+| `2` | DGNSS | 0.5 - 1.5 m |
+| `5` | RTK FLOAT | 0.2 - 0.5 m |
+| `4` | RTK FIX | 1 cm + 1 ppm |
+
+El `+1 ppm` del RTK FIX es 1 mm por km de línea base: a 50 km de la base son 5 cm extra, así que un FIX real da ~6 cm, no 1 cm.
+
+### Qué limita la precisión, por orden de impacto
+
+1. **Distancia a la estación base.** Bajo 10 km el FIX es rápido y confiable; entre 30 y 50 km es marginal (FLOAT confiable, FIX intermitente); arriba de 50 km casi nunca hay FIX.
+2. **Vista al cielo y multipath.** El RTK necesita fase de portadora, mucho más frágil que el código. **Bajo techo nunca vas a pasar de DGNSS**, por bueno que sea el NTRIP: hacen falta 35-45 dB-Hz en varios satélites y en las dos frecuencias.
+3. **Antena y plano de tierra.** La antena de la simpleRTK2B necesita un plano de tierra metálico. El techo de la cabina sirve de plano de tierra y de punto de montaje con vista despejada a la vez - es el lugar correcto.
+4. **Edad de las correcciones.** Bajo 2 s.
+5. **Tasa de navegación.** No afecta la exactitud de cada época. Los 10 Hz son para que la tableta dibuje su posición fluida, no para medir mejor.
+
+Si a cielo abierto sigues en DGNSS sin ningún L2, revisa en el `Packet Console` que el mount point mande observables de fase: necesitas `1005`/`1006` (posición de la base) más alguno de `1074`/`1084`/`1094`/`1124` o sus variantes. Un stream de solo código nunca puede dar RTK.
 
 ## Cómo se actualiza el contenido web dentro del APK
 

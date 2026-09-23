@@ -6,7 +6,6 @@ import {
   type AppUpdateStatus,
   type KioskStatus,
   type NtripMountpoint,
-  type RtkFixLabel,
   type RtkStatus,
   type TraccarLogEntry,
   type TraccarSendSettings,
@@ -33,6 +32,7 @@ import {
   type ServerProfile,
 } from '@gaga-gps/client';
 import { useEffect, useState } from 'react';
+import { UCenterView } from './UCenterView';
 import './device-settings.css';
 import {
   deleteNtripProfile,
@@ -85,45 +85,6 @@ function formatLogTime(ts: number): string {
   return new Date(ts).toLocaleTimeString();
 }
 
-function formatRate(bytesPerSecond: number): string {
-  if (bytesPerSecond < 1024) return `${bytesPerSecond.toFixed(0)} B/s`;
-  return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
-}
-
-function formatTotalBytes(totalBytes: number): string {
-  if (totalBytes < 1024) return `${totalBytes} B`;
-  if (totalBytes < 1024 * 1024) return `${(totalBytes / 1024).toFixed(1)} KB`;
-  return `${(totalBytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-function fixBadgeColor(label: RtkFixLabel): string {
-  switch (label) {
-    case 'RTK_FIX':
-      return '#3fb950';
-    case 'RTK_FLOAT':
-      return '#f0a83c';
-    case 'DGPS':
-    case 'GPS':
-      return '#4f8ff0';
-    default:
-      return '#565d68';
-  }
-}
-
-function fixBadgeLabel(label: RtkFixLabel): string {
-  switch (label) {
-    case 'RTK_FIX':
-      return 'RTK FIJO';
-    case 'RTK_FLOAT':
-      return 'RTK FLOTANTE';
-    case 'DGPS':
-      return 'DGPS';
-    case 'GPS':
-      return 'GPS';
-    default:
-      return 'SIN FIX - buscando satelites';
-  }
-}
 
 const EMPTY_UPDATE_STATUS: AppUpdateStatus = {
   enabled: false,
@@ -142,6 +103,14 @@ const EMPTY_RTK_STATUS: RtkStatus = {
   connectedUsbDeviceId: null,
   usbDataRateBps: 0,
   usbTotalBytes: 0,
+  bluetoothSupported: false,
+  bluetoothEnabled: false,
+  bluetoothPermissionGranted: false,
+  bluetoothConnected: false,
+  connectedBluetoothName: null,
+  connectedBluetoothAddress: null,
+  bluetoothDataRateBps: 0,
+  bluetoothTotalBytes: 0,
   ntripConnected: false,
   ntripError: null,
   ntripDataRateBps: 0,
@@ -194,9 +163,13 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
 
   const [usbDevices, setUsbDevices] = useState<{ deviceId: number; name: string | null }[]>([]);
   const [selectedUsbDeviceId, setSelectedUsbDeviceId] = useState<number | null>(null);
+  const [btDevices, setBtDevices] = useState<{ address: string; name: string | null }[]>([]);
+  const [showUCenter, setShowUCenter] = useState(false);
+
   const [baudRate, setBaudRateInput] = useState(460800);
   const [gnssBusy, setGnssBusy] = useState(false);
   const [rtkStatus, setRtkStatus] = useState<RtkStatus>(EMPTY_RTK_STATUS);
+
   const [mountpoints, setMountpoints] = useState<NtripMountpoint[]>([]);
   const [mountpointsLoading, setMountpointsLoading] = useState(false);
   const [mountpointsError, setMountpointsError] = useState('');
@@ -326,10 +299,29 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     AppUpdate.getStatus().then(setUpdateStatus);
     RtkNtrip.getBaudRate().then((r) => setBaudRateInput(r.baudRate));
     RtkNtrip.listUsbDevices().then((r) => setUsbDevices(r.devices));
+    RtkNtrip.listBluetoothDevices().then((r) => setBtDevices(r.devices));
     RtkNtrip.getStatus().then(setRtkStatus);
 
-    const rtkListenerPromise = RtkNtrip.addListener('rtkStatus', (status) => setRtkStatus(status));
+    // 'rtkStatus' dispara hasta 10 veces/seg (una por cada bloque de bytes) y NUNCA trae
+    // satellites/pdop/hdop/vdop/dimension/ttffMs (solo viajan en getStatus(), ver
+    // buildStatus(includeSatellites) en RtkNtripPlugin.kt) - reemplazar el estado completo con
+    // cada push borraba esos campos milisegundos despues de que el poll de 1s los trajera. Se
+    // conservan del estado previo cuando el push no los incluye.
+    const rtkListenerPromise = RtkNtrip.addListener('rtkStatus', (status) =>
+      setRtkStatus((prev) => ({
+        ...status,
+        satellites: status.satellites ?? prev.satellites,
+        pdop: status.pdop ?? prev.pdop,
+        hdop: status.hdop ?? prev.hdop,
+        vdop: status.vdop ?? prev.vdop,
+        dimension: status.dimension ?? prev.dimension,
+        ttffMs: status.ttffMs ?? prev.ttffMs,
+      })),
+    );
     const usbListenerPromise = RtkNtrip.addListener('usbDevicesChanged', (data) => setUsbDevices(data.devices));
+    const btListenerPromise = RtkNtrip.addListener('bluetoothDevicesChanged', (data) =>
+      setBtDevices(data.devices),
+    );
     // 1s (antes 4s) - bug real reportado: con el envio real pasando cada segundo, un poll de 4s
     // hacia que la bitacora de Ajustes mostrara "rafagas" de 3-4 entradas de golpe seguidas de
     // silencio, dando la impresion de que el envio era irregular cuando en realidad los timestamps
@@ -341,6 +333,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
       clearInterval(interval);
       rtkListenerPromise.then((h) => h.remove());
       usbListenerPromise.then((h) => h.remove());
+      btListenerPromise.then((h) => h.remove());
     };
     // operatorMode: si se activa durante esta misma sesion (sin cerrar el panel), este efecto
     // debe correr una vez de verdad en ese momento, no solo al montar
@@ -484,6 +477,20 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
       return;
     }
     await connectUsb();
+  }
+
+  async function toggleBluetoothConnection(address: string) {
+    if (rtkStatus.bluetoothConnected && rtkStatus.connectedBluetoothAddress === address) {
+      await RtkNtrip.disconnectBluetooth();
+      return;
+    }
+    await RtkNtrip.connectBluetooth({ address });
+  }
+
+  async function grantBluetoothPermission() {
+    await RtkNtrip.requestBluetoothPermission();
+    const devices = await RtkNtrip.listBluetoothDevices();
+    setBtDevices(devices.devices);
   }
 
   async function applyNtripConfig(profile: NtripProfile) {
@@ -1020,221 +1027,51 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
 
         <section className="ds-section">
           <h3>Receptor RTK y correccion NTRIP</h3>
-          <p className="ds-hint">Modo de correccion: NTRIP Client.</p>
-
-          {!rtkStatus.mockLocationAllowed && (
-            <div className="ds-hint" style={{ border: '1px solid #d29922', borderRadius: 6, padding: 10 }}>
-              <p>
-                <strong>Pendiente:</strong> esta tableta todavia no esta configurada como app de
-                ubicacion simulada - necesario para que el receptor RTK reemplace el GPS interno.
-              </p>
-              {!kioskStatus.developerOptionsEnabled && (
-                <p>
-                  1. Activa Opciones de desarrollador: Ajustes de Android {'>'} Acerca de la tableta
-                  {' > '}toca 7 veces "Numero de compilacion".
-                </p>
-              )}
-              <p>
-                {kioskStatus.developerOptionsEnabled ? '' : '2. '}En Opciones de desarrollador, en
-                "Seleccionar app de ubicacion falsa", elige <strong>GAGA Operador</strong>.
-              </p>
-              <div className="ds-actions">
-                <button onClick={openDeveloperOptionsSettings}>Abrir Ajustes de Android</button>
-                <button onClick={retryMockLocationCheck} disabled={mockLocationBusy}>
-                  {mockLocationBusy ? 'Verificando…' : 'Ya lo hice, verificar'}
-                </button>
-              </div>
-            </div>
-          )}
+          <p className="ds-hint">Todo lo del receptor y las correcciones vive en u-center.</p>
           <div className="ds-actions">
-            <button onClick={openCreateNtripProfileModal}>+ Nueva configuracion NTRIP</button>
-            {ntripProfileMessage && <span className="ds-saved">{ntripProfileMessage}</span>}
+            <button onClick={() => setShowUCenter(true)}>u-center</button>
           </div>
-
-          {ntripProfiles.length === 0 && (
-            <p className="ds-hint">Sin configuraciones NTRIP guardadas todavia.</p>
-          )}
-          <div className="ds-profile-list">
-            {ntripProfiles.map((p) => {
-              const isActive = p.id === ntripActiveProfileId;
-              return (
-                <div className={`ds-profile-card${isActive ? ' ds-profile-active' : ''}`} key={p.id}>
-                  <button className="ds-profile-select" onClick={() => selectNtripProfile(p.id)}>
-                    <span className="ds-profile-top">
-                      <span className="ds-profile-name">{p.name}</span>
-                      {isActive && <span className="ds-profile-badge">Activa</span>}
-                    </span>
-                    <span className="ds-profile-summary">
-                      {p.host || '(sin servidor)'}:{p.port}
-                    </span>
-                    <span className="ds-profile-summary">Mount point: {p.mountpoint || '(sin elegir)'}</span>
-                  </button>
-                  <div className="ds-profile-actions">
-                    <button onClick={() => openEditNtripProfileModal(p)}>Editar</button>
-                    <button className="ds-remove" onClick={() => removeNtripProfile(p.id)}>
-                      Eliminar
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="ds-actions">
-            <button onClick={toggleNtrip} disabled={!activeNtripProfile}>
-              {rtkStatus.ntripConnected ? 'Detener NTRIP' : 'Conectar NTRIP'}
-            </button>
-            <span className="ds-status">
-              {rtkStatus.ntripConnected
-                ? `Conectado - ${formatRate(rtkStatus.ntripDataRateBps)} - ${formatTotalBytes(rtkStatus.ntripTotalBytes)} total`
-                : 'Sin conectar'}
-            </span>
-          </div>
-          {rtkStatus.ntripError && <div className="ds-error-block">{rtkStatus.ntripError}</div>}
-
-          <h4 className="ds-subheading">Receptor RTK (USB)</h4>
-          <div className="ds-actions">
-            <span className="ds-status">
-              {rtkStatus.usbConnected
-                ? `Conectado - ${rtkStatus.connectedUsbDeviceName ?? 'USB'} - ${formatRate(rtkStatus.usbDataRateBps)} - ${formatTotalBytes(rtkStatus.usbTotalBytes)} total`
-                : 'Sin conectar'}
-            </span>
-          </div>
-          {usbDevices.map((d) => {
-            // "seleccionado" no depende solo del clic manual (selectedUsbDeviceId) - el receptor
-            // se auto-conecta solo al enchufarlo, sin que nadie haga clic en la lista, asi que
-            // tambien cuenta como seleccionada la fila que coincide con el dispositivo YA conectado
-            const isSelected =
-              selectedUsbDeviceId === d.deviceId ||
-              (rtkStatus.usbConnected && rtkStatus.connectedUsbDeviceId === d.deviceId);
-            return (
-              <label className="ds-usb-option" key={d.deviceId}>
-                <input
-                  type="radio"
-                  name="usbDevice"
-                  checked={isSelected}
-                  onChange={() => setSelectedUsbDeviceId(d.deviceId)}
-                />
-                {d.name ?? `USB ${d.deviceId}`}
-              </label>
-            );
-          })}
-          {usbDevices.length === 0 && <p className="ds-hint">Ningun dispositivo USB detectado todavia.</p>}
-          <label className="ds-label">Baud rate</label>
-          <input type="number" value={baudRate} onChange={(e) => updateBaudRate(Number(e.target.value))} />
-          <div className="ds-actions">
-            <button onClick={toggleUsbConnection} disabled={!rtkStatus.usbConnected && selectedUsbDeviceId == null}>
-              {rtkStatus.usbConnected ? 'Desconectar' : 'Conectar'}
-            </button>
-          </div>
-        </section>
-
-        {showNtripProfileModal && ntripProfileForm && (
-          <div className="ds-modal-overlay" onClick={closeNtripProfileModal}>
-            <div className="ds-modal" onClick={(e) => e.stopPropagation()}>
-              <h3>
-                {ntripProfiles.some((p) => p.id === ntripProfileForm.id)
-                  ? 'Editar configuracion NTRIP'
-                  : 'Nueva configuracion NTRIP'}
-              </h3>
-              <label className="ds-label">Nombre</label>
-              <input
-                placeholder="Ej. Caster EarthScope"
-                value={ntripProfileForm.name}
-                onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, name: e.target.value })}
-              />
-              <div className="ds-row">
-                <input
-                  placeholder="NTRIP address"
-                  value={ntripProfileForm.host}
-                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, host: e.target.value })}
-                />
-                <input
-                  placeholder="Puerto"
-                  type="number"
-                  value={ntripProfileForm.port}
-                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, port: Number(e.target.value) })}
-                />
-              </div>
-              <div className="ds-row">
-                <input
-                  placeholder="Mount point"
-                  value={ntripProfileForm.mountpoint}
-                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, mountpoint: e.target.value })}
-                />
-                <button onClick={searchNtripMountpoints} disabled={!ntripProfileForm.host || mountpointsLoading}>
-                  {mountpointsLoading ? 'Buscando...' : 'Buscar puntos de montura'}
-                </button>
-              </div>
-              {mountpointsError && <div className="ds-error-block">{mountpointsError}</div>}
-              {mountpoints.length > 0 && (
-                <select
-                  value=""
-                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, mountpoint: e.target.value })}
-                >
-                  <option value="" disabled>
-                    {mountpoints.length} puntos de montura disponibles - elige uno
-                  </option>
-                  {mountpoints.map((m) => (
-                    <option key={m.mountpoint} value={m.mountpoint}>
-                      {m.mountpoint} - {m.identifier || m.format} ({m.country}){m.nmeaRequired ? ' - pide GGA' : ''}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <div className="ds-row">
-                <input
-                  placeholder="Usuario"
-                  value={ntripProfileForm.username}
-                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, username: e.target.value })}
-                />
-                <input
-                  placeholder="Contrasena"
-                  type="password"
-                  value={ntripProfileForm.password}
-                  onChange={(e) => setNtripProfileForm({ ...ntripProfileForm, password: e.target.value })}
-                />
-              </div>
-              <label className="ds-label">Version NTRIP</label>
-              <select
-                value={ntripProfileForm.version}
-                onChange={(e) =>
-                  setNtripProfileForm({ ...ntripProfileForm, version: e.target.value as NtripProfile['version'] })
-                }
-              >
-                <option value="v1">V1</option>
-                <option value="v2">V2</option>
-              </select>
-              <p className="ds-hint">V2 es el default (recomendado) - usa V1 solo si el caster lo pide.</p>
-              {ntripProfileFormError && <div className="ds-error-block">{ntripProfileFormError}</div>}
-              <div className="ds-actions">
-                <button onClick={saveNtripProfileModal}>Guardar</button>
-                <button className="ds-remove" onClick={closeNtripProfileModal}>
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <section className="ds-section">
-          <h3>Estado del fix GNSS</h3>
-          {rtkStatus.lastFix ? (
-            <div className="ds-fix-card">
-              <span
-                className="ds-fix-badge"
-                style={{ background: fixBadgeColor(rtkStatus.lastFix.fixLabel) }}
-              >
-                {fixBadgeLabel(rtkStatus.lastFix.fixLabel)}
-              </span>
-              <div className="ds-fix-details">
-                <span>{rtkStatus.lastFix.satellites} satelites</span>
-                <span>HDOP {rtkStatus.lastFix.hdop != null ? rtkStatus.lastFix.hdop.toFixed(1) : '--'}</span>
-                <span>precision {rtkStatus.lastFix.accuracyMeters}m</span>
-              </div>
-            </div>
-          ) : (
-            <p className="ds-hint">Sin datos del receptor todavia - conecta el USB para ver el estado del fix.</p>
+          {showUCenter && (
+            <UCenterView
+              status={rtkStatus}
+              onClose={() => setShowUCenter(false)}
+              connection={{
+                kioskStatus,
+                mockLocationBusy,
+                onOpenDeveloperOptions: openDeveloperOptionsSettings,
+                onRetryMockLocation: retryMockLocationCheck,
+                btDevices,
+                onGrantBluetoothPermission: grantBluetoothPermission,
+                onToggleBluetooth: toggleBluetoothConnection,
+                usbDevices,
+                selectedUsbDeviceId,
+                onSelectUsbDevice: setSelectedUsbDeviceId,
+                baudRate,
+                onUpdateBaudRate: updateBaudRate,
+                onToggleUsb: toggleUsbConnection,
+              }}
+              ntrip={{
+                profiles: ntripProfiles,
+                activeProfileId: ntripActiveProfileId,
+                activeProfile: activeNtripProfile,
+                message: ntripProfileMessage,
+                onCreate: openCreateNtripProfileModal,
+                onSelect: selectNtripProfile,
+                onEdit: openEditNtripProfileModal,
+                onRemove: removeNtripProfile,
+                onToggleConnect: toggleNtrip,
+                showModal: showNtripProfileModal,
+                form: ntripProfileForm,
+                onFormChange: setNtripProfileForm,
+                onSearchMountpoints: searchNtripMountpoints,
+                mountpointsLoading,
+                mountpointsError,
+                mountpoints,
+                formError: ntripProfileFormError,
+                onSave: saveNtripProfileModal,
+                onCloseModal: closeNtripProfileModal,
+              }}
+            />
           )}
         </section>
 

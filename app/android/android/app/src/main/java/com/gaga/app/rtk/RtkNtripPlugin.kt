@@ -1,6 +1,11 @@
 package com.gaga.app.rtk
 
+import android.Manifest
 import android.location.Location
+import android.os.Build
+import androidx.core.app.ActivityCompat
+import com.gaga.app.kiosk.KioskManager
+import com.gaga.app.power.PowerPrefs
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -24,16 +29,18 @@ class RtkNtripPlugin : Plugin() {
         // ninguno de los dos conozca los detalles internos del otro
         @Volatile private var instance: RtkNtripPlugin? = null
 
-        // desconectar USB ya en cascada apaga mock location y NTRIP (ver onDisconnected() abajo) -
-        // no hace falta duplicar esa logica aqui
+        // desconectar el transporte ya en cascada apaga mock location y NTRIP (ver
+        // onReceiverDisconnected() abajo) - no hace falta duplicar esa logica aqui
         fun suspend() {
             instance?.usb?.disconnect()
+            instance?.bt?.disconnect()
         }
 
-        // intenta reconectar al mismo receptor que ya estaba enchufado (si sigue ahi) - mismo
-        // camino que un attach fisico nuevo, sin duplicar logica
+        // intenta reconectar al mismo receptor que ya estaba (si sigue ahi) - mismo camino que un
+        // attach fisico nuevo o que el modulo Bluetooth volviendo a rango, sin duplicar logica
         fun resume() {
             instance?.connectToAvailableUsbDevice()
+            instance?.applyTransportPriority()
         }
 
         // TraccarSenderService llama esto con el MISMO Location que acaba de mandar al servidor
@@ -58,16 +65,32 @@ class RtkNtripPlugin : Plugin() {
     }
 
     private lateinit var usb: UsbSerialManager
+    private lateinit var bt: BluetoothSerialManager
     private lateinit var mockLocation: MockLocationFeeder
     private var ntrip: NtripClient? = null
     private val swMapsServer = SwMapsOutputServer()
 
     private val usbRate = RateTracker()
+    private val btRate = RateTracker()
     private val ntripRate = RateTracker()
     private val pluginScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private var lastFix: NmeaFix? = null
+
+    // TTFF aproximado: tiempo desde que se establecio ESTE enlace (USB o Bluetooth) hasta el
+    // primer fix real. No es el TTFF verdadero de u-blox (que mide desde el power-on del chip via
+    // UBX-NAV-STATUS, protocolo binario que no se parsea aqui) - es la mejor aproximacion posible
+    // solo con NMEA. Se reinicia en cada conexion nueva (attach fisico, reconexion Bluetooth,
+    // cambio de transporte) - un enlace que reconecta rapido mientras el receptor sigue prendido
+    // se parece a un TTFF "hot start" real, asi que el numero sigue siendo informativo.
+    @Volatile private var connectionStartedAtMs: Long = 0L
+    @Volatile private var ttffMs: Long? = null
+
+    // ultima GGA cruda del receptor - el caster la necesita para saber donde estamos (obligatorio
+    // en mountpoints VRS/red, que generan una base virtual junto al rover a partir de esto)
+    @Volatile private var lastGgaSentence: String? = null
     private var usbConnected = false
+    private var btConnected = false
     private var ntripConnected = false
     private var ntripError: String? = null
     private var lineBuffer = StringBuilder()
@@ -75,31 +98,19 @@ class RtkNtripPlugin : Plugin() {
     override fun load() {
         instance = this
         usb = UsbSerialManager(context)
+        bt = BluetoothSerialManager(context)
         mockLocation = MockLocationFeeder(context)
         usb.listener = object : UsbSerialManager.Listener {
             override fun onConnected() {
                 usbConnected = true
                 usbRate.reset() // total acumulado es "de esta conexion", no de toda la vida de la app
-                mockLocation.start() // siempre - si ya estaba activo no hace nada
-                // arranca NTRIP solo, siempre - sin flag "modo automatico" que alguien pueda
-                // olvidar activar (pedido explicito: el auto-conectar nunca debe ser opcional)
-                val config = RtkPrefs.getNtripConfig(context)
-                if (config != null && config.mountpoint.isNotBlank()) {
-                    startNtripInternal(config)
-                }
-                emitStatus()
+                applyTransportPriority()
+                onReceiverConnected()
             }
             override fun onDisconnected() {
                 usbConnected = false
-                // sin receptor no hay nada real que alimentar - se regresa al GPS de la tableta en
-                // vez de dejar la ultima posicion RTK "congelada" para siempre
-                mockLocation.stop()
-                if (ntrip != null) {
-                    ntrip?.disconnect()
-                    ntrip = null
-                    ntripConnected = false
-                }
-                emitStatus()
+                applyTransportPriority() // el cable se fue - que retome el Bluetooth
+                onReceiverDisconnected()
             }
             override fun onDataReceived(data: ByteArray) {
                 usbRate.addBytes(data.size)
@@ -120,6 +131,28 @@ class RtkNtripPlugin : Plugin() {
                 connectToAvailableUsbDevice()
             }
         }
+        bt.listener = object : BluetoothSerialManager.Listener {
+            override fun onConnected() {
+                btConnected = true
+                btRate.reset()
+                onReceiverConnected()
+            }
+            override fun onDisconnected() {
+                btConnected = false
+                onReceiverDisconnected()
+            }
+            override fun onDataReceived(data: ByteArray) {
+                btRate.addBytes(data.size)
+                handleReceiverData(data)
+            }
+            override fun onError(message: String) {
+                ntripError = message
+                emitStatus()
+            }
+            override fun onDeviceListChanged() {
+                emitBluetoothDevices()
+            }
+        }
         // el receptor puede ya estar conectado desde antes de que la app arrancara (reinicio de
         // la app sin mover el cable) - ACTION_USB_DEVICE_ATTACHED solo dispara en un attach fisico
         // nuevo, nunca en este caso. Bug real: sin esto, el auto-conectar (y con el, mock
@@ -127,6 +160,55 @@ class RtkNtripPlugin : Plugin() {
         // cable - el checklist de "ubicacion simulada" en Ajustes volvia a pedir verificar en
         // cada reapertura de la app aunque el receptor nunca se hubiera movido.
         connectToAvailableUsbDevice()
+        // el modulo Bluetooth ya vinculado se toma solo, sin clic ni ajuste (mismo criterio que el
+        // USB). En una tableta Device Owner el permiso se concede sin dialogo.
+        if (!BluetoothSerialManager.hasConnectPermission(context)) {
+            KioskManager.grantSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
+        }
+        applyTransportPriority()
+    }
+
+    // El cable manda: menos latencia (~1ms contra 10-40ms de SPP), sin caidas por interferencia de
+    // 2.4GHz y mas ancho de banda. Bluetooth es el respaldo automatico. NUNCA los dos a la vez -
+    // alimentarian handleReceiverData con el mismo fix dos veces y duplicarian el RTCM de salida.
+    private fun applyTransportPriority() {
+        if (usb.isConnected()) {
+            if (bt.isConnected()) bt.disconnect()
+        } else {
+            bt.autoConnect()
+        }
+    }
+
+    // USB y Bluetooth llegan al mismo punto: hay receptor hablando, se enciende todo lo que depende
+    // de eso. Idempotente - si los dos estuvieran conectados a la vez no pasa nada raro.
+    private fun onReceiverConnected() {
+        connectionStartedAtMs = System.currentTimeMillis()
+        ttffMs = null
+        mockLocation.start() // siempre - si ya estaba activo no hace nada
+        // arranca NTRIP solo, siempre - sin flag "modo automatico" que alguien pueda olvidar
+        // activar (pedido explicito: el auto-conectar nunca debe ser opcional)
+        val config = RtkPrefs.getNtripConfig(context)
+        if (config != null && config.mountpoint.isNotBlank() && ntrip == null) {
+            startNtripInternal(config)
+        }
+        emitStatus()
+    }
+
+    // solo se apaga si NINGUN transporte queda vivo - sin receptor no hay nada real que alimentar y
+    // se regresa al GPS de la tableta, en vez de dejar la ultima posicion RTK congelada para siempre
+    private fun onReceiverDisconnected() {
+        if (usbConnected || btConnected) {
+            emitStatus()
+            return
+        }
+        mockLocation.stop()
+        NmeaParser.resetDiagnostics() // sin receptor, los satelites en memoria ya no son reales
+        if (ntrip != null) {
+            ntrip?.disconnect()
+            ntrip = null
+            ntripConnected = false
+        }
+        emitStatus()
     }
 
     // siempre agarra el receptor solo al detectarlo - sin flag que preguntar, sin clic manual
@@ -134,6 +216,12 @@ class RtkNtripPlugin : Plugin() {
     // de attach fisico y la comprobacion al arrancar la app (ver load()).
     private fun connectToAvailableUsbDevice() {
         if (usb.isConnected()) return
+        // En suspension por perdida de corriente NO se reconecta. Sin esto, cualquier evento de
+        // attach del USB (o una reapertura de la app) volvia a abrir el puerto, relanzaba NTRIP y
+        // la ubicacion simulada, deshaciendo la suspension y dejando al receptor hablando - que es
+        // justo lo que mas energia consume de la tableta cuando ya no hay corriente del vehiculo.
+        // Al volver la corriente, RtkNtripPlugin.resume() reconecta por el mismo camino.
+        if (PowerPrefs.getSuspended(context)) return
         val drivers = usb.listDevices()
         // prefiere el u-blox si hay varios USB conectados a la vez; si no hay ninguno con ese
         // vendor id (otro modelo de receptor, por ejemplo) usa el primero disponible
@@ -142,21 +230,33 @@ class RtkNtripPlugin : Plugin() {
     }
 
     private fun handleReceiverData(data: ByteArray) {
+        mockLocation.noteReceiverAlive() // llegan bytes = el receptor vive, aunque todavia no tenga fix
         // el receptor manda NMEA en ASCII linea por linea - se acumula hasta el salto de linea
         lineBuffer.append(String(data, Charsets.ISO_8859_1))
         var newlineIdx: Int
         while (lineBuffer.indexOf("\n").also { newlineIdx = it } >= 0) {
-            val line = lineBuffer.substring(0, newlineIdx).trim()
+            val raw = lineBuffer.substring(0, newlineIdx)
             lineBuffer.delete(0, newlineIdx + 1)
+            // el receptor mezcla NMEA (ASCII) con UBX binario en el mismo stream, y un mensaje UBX
+            // puede traer un 0x0A que parte la linea a la mitad - se descarta todo lo anterior al
+            // ultimo '$' y se ignora cualquier trozo que no traiga ninguno
+            val dollarIdx = raw.lastIndexOf('$')
+            if (dollarIdx < 0) continue
+            val line = raw.substring(dollarIdx).trim()
             if (line.isEmpty()) continue
 
             if (swMapsServer.isRunning) swMapsServer.broadcastLine(line)
 
             NmeaParser.parseRmc(line)
+            NmeaParser.parseGst(line) // error real del receptor, si GST esta habilitado
+            NmeaParser.parseGsa(line) // satelites en uso + DOP
+            NmeaParser.parseGsv(line) // satelites a la vista + SNR
             val fix = NmeaParser.parseGga(line)
             if (fix != null) {
                 lastFix = fix // se guarda igual sin fix (lat/lon null) - para mostrar "buscando satelites"
+                if (fix.latitude != null) lastGgaSentence = line // sin posicion no le sirve al caster
                 if (fix.latitude != null && fix.longitude != null) {
+                    if (ttffMs == null) ttffMs = System.currentTimeMillis() - connectionStartedAtMs
                     mockLocation.feed(fix)
                     emitFix(fix)
                 }
@@ -221,6 +321,65 @@ class RtkNtripPlugin : Plugin() {
     @PluginMethod
     fun disconnectUsb(call: PluginCall) {
         usb.disconnect()
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun listBluetoothDevices(call: PluginCall) {
+        call.resolve(buildBluetoothDevicesObject())
+    }
+
+    private fun buildBluetoothDevicesObject(): JSObject {
+        val arr = JSArray()
+        bt.listBondedDevices().forEach { device ->
+            arr.put(
+                JSObject()
+                    .put("address", device.address)
+                    .put("name", bt.deviceLabel(device))
+                    .put("connected", device.address == bt.connectedDeviceAddress),
+            )
+        }
+        val ret = JSObject()
+        ret.put("devices", arr)
+        return ret
+    }
+
+    private fun emitBluetoothDevices() {
+        notifyListeners("bluetoothDevicesChanged", buildBluetoothDevicesObject())
+    }
+
+    @PluginMethod
+    fun connectBluetooth(call: PluginCall) {
+        val address = call.getString("address") ?: return call.reject("address requerido")
+        bt.connect(address)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun disconnectBluetooth(call: PluginCall) {
+        RtkPrefs.clearBluetoothAddress(context) // sin esto el auto-conectar lo volveria a tomar
+        bt.disconnect()
+        call.resolve()
+    }
+
+    // Device Owner se lo concede solo, sin dialogo; si no lo es, cae al dialogo normal de Android
+    @PluginMethod
+    fun requestBluetoothPermission(call: PluginCall) {
+        if (BluetoothSerialManager.hasConnectPermission(context)) {
+            bt.autoConnect()
+            return call.resolve()
+        }
+        if (KioskManager.grantSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)) {
+            bt.autoConnect()
+            return call.resolve()
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            activity?.let {
+                ActivityCompat.requestPermissions(
+                    it, arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 7341,
+                )
+            }
+        }
         call.resolve()
     }
 
@@ -304,20 +463,24 @@ class RtkNtripPlugin : Plugin() {
         val client = NtripClient(
             onRtcmData = { bytes ->
                 ntripRate.addBytes(bytes.size)
-                // si el USB no esta conectado, UsbSerialManager.write() simplemente no hace nada
-                // (no truena) - se descarta la correccion en vez de bloquear NTRIP por completo,
-                // util para probar el caster/credenciales sin depender de tener el receptor a mano
-                if (usb.isConnected()) usb.write(bytes)
+                writeToReceiver(bytes)
             },
             onStatus = { connected, error ->
                 ntripConnected = connected
                 ntripError = error
                 emitStatus()
             },
-            currentGga = { null }, // se manda el GGA real del receptor, no uno sintetico
+            currentGga = { lastGgaSentence }, // la GGA real del receptor, nunca una sintetica
         )
         ntrip = client
         client.connect(config)
+    }
+
+    // el RTCM va por el transporte que este vivo. Sin ninguno la correccion se descarta sin tronar,
+    // util para probar caster/credenciales sin el receptor a la mano.
+    private fun writeToReceiver(bytes: ByteArray) {
+        if (usb.isConnected()) usb.write(bytes)
+        if (bt.isConnected()) bt.write(bytes)
     }
 
     @PluginMethod
@@ -390,16 +553,26 @@ class RtkNtripPlugin : Plugin() {
 
     @PluginMethod
     fun getStatus(call: PluginCall) {
-        call.resolve(buildStatus())
+        call.resolve(buildStatus(includeSatellites = true))
     }
 
-    private fun buildStatus(): JSObject {
+    // la lista de satelites solo viaja en getStatus (el panel de Ajustes lo pollea 1/seg), nunca en
+    // el evento rtkStatus - ese sale en cada bloque de bytes, hasta 10 veces por segundo
+    private fun buildStatus(includeSatellites: Boolean = false): JSObject {
         val ret = JSObject()
         ret.put("usbConnected", usbConnected)
         ret.put("connectedUsbDeviceName", usb.connectedDeviceName)
         ret.put("connectedUsbDeviceId", usb.connectedDeviceId)
         ret.put("usbDataRateBps", usbRate.currentBytesPerSecond())
         ret.put("usbTotalBytes", usbRate.totalBytes)
+        ret.put("bluetoothSupported", bt.isSupported())
+        ret.put("bluetoothEnabled", bt.isEnabled())
+        ret.put("bluetoothPermissionGranted", BluetoothSerialManager.hasConnectPermission(context))
+        ret.put("bluetoothConnected", btConnected)
+        ret.put("connectedBluetoothName", bt.connectedDeviceName)
+        ret.put("connectedBluetoothAddress", bt.connectedDeviceAddress)
+        ret.put("bluetoothDataRateBps", btRate.currentBytesPerSecond())
+        ret.put("bluetoothTotalBytes", btRate.totalBytes)
         ret.put("ntripConnected", ntripConnected)
         ret.put("ntripError", ntripError)
         ret.put("ntripDataRateBps", ntripRate.currentBytesPerSecond())
@@ -414,12 +587,44 @@ class RtkNtripPlugin : Plugin() {
             val fixObj = JSObject()
             fixObj.put("latitude", fix.latitude)
             fixObj.put("longitude", fix.longitude)
+            fixObj.put("altitude", fix.altitude) // MSL, tal cual GGA - nunca viajaba antes por el puente
+            fixObj.put("ellipsoidalAltitudeMeters", fix.ellipsoidalAltitudeMeters)
+            fixObj.put("gpsTimeMs", fix.gpsTimeMs)
+            fix.speedMps?.let { fixObj.put("speedMps", it) }
+            fix.courseDeg?.let { fixObj.put("courseDeg", it) }
             fixObj.put("fixQuality", fix.fixQuality)
             fixObj.put("fixLabel", fix.fixLabel)
             fixObj.put("satellites", fix.satellites)
             fixObj.put("hdop", fix.hdop)
             fixObj.put("accuracyMeters", fix.accuracyMeters)
+            fixObj.put("horizontalStdMeters", fix.horizontalStdMeters)
+            fixObj.put("fullStdMeters", fix.fullStdMeters)
+            fixObj.put("correctionAgeSeconds", fix.correctionAgeSeconds)
+            fixObj.put("stationId", fix.stationId)
             ret.put("lastFix", fixObj)
+        }
+
+        if (includeSatellites) {
+            val diag = NmeaParser.diagnostics()
+            val arr = JSArray()
+            diag.satellites.forEach { s ->
+                arr.put(
+                    JSObject()
+                        .put("constellation", s.constellation)
+                        .put("id", s.id)
+                        .put("elevation", s.elevation)
+                        .put("azimuth", s.azimuth)
+                        .put("snr", s.snr)
+                        .put("signalId", s.signalId)
+                        .put("used", s.used),
+                )
+            }
+            ret.put("satellites", arr)
+            ret.put("pdop", diag.pdop)
+            ret.put("hdop", diag.hdop)
+            ret.put("vdop", diag.vdop)
+            ret.put("dimension", diag.dimension)
+            ret.put("ttffMs", ttffMs)
         }
         return ret
     }

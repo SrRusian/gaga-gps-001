@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 58,
-      "versionName": "1.0.52-fix-dead-gps-listener",
+      "versionCode": 66,
+      "versionName": "1.0.60-ucenter-worldmap-layout",
       "outputFile": "app-release.apk"
     }
   ],

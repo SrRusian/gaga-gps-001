@@ -25,6 +25,22 @@ object KioskManager {
 
     fun isDeviceOwner(context: Context): Boolean = devicePolicyManager(context).isDeviceOwnerApp(context.packageName)
 
+    // un Device Owner puede concederse permisos de runtime a si mismo sin ningun dialogo - se usa
+    // para el permiso de Bluetooth del receptor RTK. false = no es Device Owner, hay que pedirlo normal
+    fun grantSelfPermission(context: Context, permission: String): Boolean {
+        if (!isDeviceOwner(context)) return false
+        return try {
+            devicePolicyManager(context).setPermissionGrantState(
+                adminComponent(context),
+                context.packageName,
+                permission,
+                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED,
+            )
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     // ActivityManager.getLockTaskModeState() (no un metodo de Activity, error real encontrado al
     // compilar por primera vez) - unico lugar que expone si Lock Task esta realmente activo ahora
     fun isLockTaskActive(activity: Activity): Boolean {

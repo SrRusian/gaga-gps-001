@@ -141,5 +141,11 @@
          este permiso otorgado automaticamente al instalar, sin dialogo - pero solo si esta
          declarado aqui. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- receptor RTK por Bluetooth (modulo HC-05 sobre SPP). El vinculado se hace en Ajustes de
+         Android, la app solo abre el puerto contra un dispositivo YA vinculado - por eso no hace
+         falta BLUETOOTH_SCAN ni descubrimiento. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
 </manifest>

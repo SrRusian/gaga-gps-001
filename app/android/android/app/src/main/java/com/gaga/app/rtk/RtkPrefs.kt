@@ -68,6 +68,14 @@ object RtkPrefs {
         prefs(context).edit().putString("correction_mode", mode.key).apply()
     }
 
+    // MAC del modulo Bluetooth del receptor (HC-05) ya vinculado - null hasta que se elija uno
+    fun getBluetoothAddress(context: Context): String? = prefs(context).getString("bt_address", null)
+
+    fun setBluetoothAddress(context: Context, address: String) =
+        prefs(context).edit().putString("bt_address", address).apply()
+
+    fun clearBluetoothAddress(context: Context) = prefs(context).edit().remove("bt_address").apply()
+
     fun getSwMapsPort(context: Context): Int = prefs(context).getInt("sw_maps_port", DEFAULT_SW_MAPS_PORT)
     fun setSwMapsPort(context: Context, port: Int) = prefs(context).edit().putInt("sw_maps_port", port).apply()
 }

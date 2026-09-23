@@ -24,27 +24,45 @@ import com.gaga.app.traccar.TraccarSenderService
 // por software (proteccion anti-spoofing real, no un permiso que se pueda pedir en runtime).
 class MockLocationFeeder(private val context: Context) {
     companion object {
-        // sin un fix RTK real en este tiempo se suelta GPS_PROVIDER y vuelve el GPS de la tableta.
-        // Bug real de campo (17 sep): basta UN fix para secuestrar GPS_PROVIDER, y si el receptor
-        // deja de entregar despues (crash del USB, antena sin cielo, receptor sin lock) el
-        // proveedor se quedaba secuestrado y VACIO - el GPS real huerfano y la tableta ciega, sin
-        // ningun error visible. Eso dejaba al respaldo por red como unica fuente de posicion.
-        private const val FIX_STALE_MS = 6_000L
+        // Receptor MUDO (ni un byte): se suelta GPS_PROVIDER rapido. Bug real de campo (17 sep):
+        // basta UN fix para secuestrar GPS_PROVIDER, y si el receptor deja de entregar despues
+        // (crash del USB, cable suelto) el proveedor se quedaba secuestrado y VACIO - el GPS real
+        // huerfano y la tableta ciega, sin ningun error visible.
+        private const val RECEIVER_SILENT_MS = 6_000L
+
+        // Receptor VIVO pero sin fix (GGA sin coordenadas): margen mucho mas amplio. Con 6s se
+        // soltaba y retomaba el proveedor en cada bache corto de fix, haciendo parpadear la
+        // notificacion de ubicacion falsa de Android y mezclando posiciones RTK con las del GPS
+        // interno en la misma ruta. Ademas, si el receptor (antena en el techo) no ve cielo, el GPS
+        // interno de la tableta (dentro de la cabina) tampoco - caer a el ahi no gana nada.
+        private const val NO_FIX_GRACE_MS = 30_000L
+
         private const val WATCHDOG_PERIOD_MS = 2_000L
     }
 
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private var providerAdded = false
     @Volatile private var lastFedAtMs = 0L
+    @Volatile private var lastDataAtMs = 0L
     private val watchdogHandler = Handler(Looper.getMainLooper())
 
     private val staleWatchdog = object : Runnable {
         override fun run() {
-            if (providerAdded && System.currentTimeMillis() - lastFedAtMs > FIX_STALE_MS) {
-                releaseProvider() // requested sigue en true - el proximo fix real lo vuelve a tomar
+            if (providerAdded) {
+                val now = System.currentTimeMillis()
+                val silent = now - lastDataAtMs > RECEIVER_SILENT_MS
+                val noFix = now - lastFedAtMs > NO_FIX_GRACE_MS
+                // requested sigue en true - el proximo fix real vuelve a tomar el proveedor solo
+                if (silent || noFix) releaseProvider()
             }
             if (requested) watchdogHandler.postDelayed(this, WATCHDOG_PERIOD_MS)
         }
+    }
+
+    // el receptor sigue hablando aunque no tenga fix - lo llama handleReceiverData en cada bloque
+    // de bytes, sin importar si se logro parsear algo
+    fun noteReceiverAlive() {
+        lastDataAtMs = System.currentTimeMillis()
     }
 
     // true solo mientras el usuario/checklist pidio "ubicacion simulada" (entre start() y stop()) -
@@ -99,6 +117,7 @@ class MockLocationFeeder(private val context: Context) {
             }
             locationManager.setTestProviderEnabled(LocationManager.GPS_PROVIDER, true)
             providerAdded = true
+            lastFedAtMs = System.currentTimeMillis() // sin esto el watchdog podria soltarlo antes del primer feed
             // addTestProvider() reemplaza el GPS_PROVIDER real - cualquier LocationListener ya
             // registrado contra el proveedor anterior (TraccarSenderService) queda huerfano sin
             // aviso, sin error. Sin esto el envio continuo se quedaba mudo cada vez que RTK
