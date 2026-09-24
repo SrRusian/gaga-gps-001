@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 86,
-      "versionName": "1.0.79-ntrip-fetch-from-server",
+      "versionCode": 87,
+      "versionName": "1.0.80-usb-reconnect-debounce",
       "outputFile": "app-release.apk"
     }
   ],

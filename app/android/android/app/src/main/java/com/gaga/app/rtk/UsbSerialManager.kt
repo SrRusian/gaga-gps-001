@@ -41,10 +41,19 @@ fun UsbDevice.friendlyLabel(): String {
 class UsbSerialManager(private val context: Context) {
     companion object {
         private const val ACTION_USB_PERMISSION = "com.gaga.app.rtk.USB_PERMISSION"
-        // mismo intervalo que BluetoothSerialManager.RETRY_DELAY_MS - el enlace USB puede caerse
-        // con el cable todavia puesto (glitch electrico, timeout de una transferencia) y sin este
-        // reintento se quedaba mudo para siempre hasta desconectar/reconectar el cable a mano
+        // cadencia normal de reintento, ya avisado "desconectado" de verdad - mismo intervalo que
+        // BluetoothSerialManager.RETRY_DELAY_MS
         private const val RETRY_DELAY_MS = 4000L
+        // reintento rapido mientras todavia no se avisa "desconectado" (ver DISCONNECT_NOTIFY_GRACE_MS)
+        // - cubre el caso real de que el receptor tarde un instante en asentarse justo despues de
+        // reconectar, sin esperar los 4s completos
+        private const val FAST_RETRY_DELAY_MS = 1000L
+        // ventana de gracia antes de avisar "desconectado" de verdad (lo que dispara reiniciar
+        // NTRIP/ubicacion simulada en RtkNtripPlugin) - un enlace que se recupera solo dentro de
+        // esta ventana nunca llega a avisarse. Bug real de campo: desconectar/reconectar el cable
+        // a mano generaba hasta 5 ciclos visibles de conectado/desconectado mientras el receptor
+        // se asentaba, cada uno reiniciando NTRIP y ubicacion simulada de mas.
+        private const val DISCONNECT_NOTIFY_GRACE_MS = 3000L
     }
 
     interface Listener {
@@ -65,6 +74,10 @@ class UsbSerialManager(private val context: Context) {
     private val retryHandler = Handler(Looper.getMainLooper())
     @Volatile private var shouldStayConnected = false
     private var lastDeviceId: Int? = null
+    private var retryRunnable: Runnable? = null
+    // no nulo mientras estamos dentro de DISCONNECT_NOTIFY_GRACE_MS sin haber avisado
+    // "desconectado" todavia - tambien senaliza "seguir reintentando rapido" mientras exista
+    private var disconnectNotifyRunnable: Runnable? = null
 
     var connectedDeviceName: String? = null
         private set
@@ -116,6 +129,7 @@ class UsbSerialManager(private val context: Context) {
     fun connect(deviceId: Int, baudRate: Int) {
         shouldStayConnected = true
         lastDeviceId = deviceId
+        cancelPendingDisconnectNotify()
         val driver = listDevices().find { it.device.deviceId == deviceId }
         if (driver == null) {
             listener?.onError("Dispositivo USB no encontrado (desconectado?)")
@@ -184,6 +198,8 @@ class UsbSerialManager(private val context: Context) {
         } catch (_: Exception) {
         }
         port = serialPort
+        cancelPendingDisconnectNotify()
+        cancelRetry() // una conexion real ya no necesita ningun reintento huerfano de un ciclo anterior
 
         val manager = SerialInputOutputManager(
             serialPort,
@@ -242,7 +258,8 @@ class UsbSerialManager(private val context: Context) {
     // cae solo, aqui NO se reintenta despues
     fun disconnect() {
         shouldStayConnected = false
-        retryHandler.removeCallbacksAndMessages(null)
+        cancelRetry()
+        cancelPendingDisconnectNotify()
         teardown()
         listener?.onDisconnected()
     }
@@ -266,13 +283,45 @@ class UsbSerialManager(private val context: Context) {
     private fun handleConnectionLost(message: String) {
         listener?.onError(message)
         teardown()
-        listener?.onDisconnected()
+        scheduleDisconnectNotifyIfNeeded()
         if (shouldStayConnected) scheduleRetry()
     }
 
+    // avisa "desconectado" de verdad (dispara reiniciar NTRIP/ubicacion simulada en
+    // RtkNtripPlugin) solo si el enlace sigue caido pasada DISCONNECT_NOTIFY_GRACE_MS - un fallo
+    // que se recupera solo (reintento rapido, o un reattach real del cable) nunca llega a
+    // avisarse, asi que nunca reinicia nada de mas
+    private fun scheduleDisconnectNotifyIfNeeded() {
+        if (disconnectNotifyRunnable != null) return // ya hay uno programado, no reiniciar la cuenta
+        val runnable = Runnable {
+            disconnectNotifyRunnable = null
+            listener?.onDisconnected()
+        }
+        disconnectNotifyRunnable = runnable
+        retryHandler.postDelayed(runnable, DISCONNECT_NOTIFY_GRACE_MS)
+    }
+
+    private fun cancelPendingDisconnectNotify() {
+        disconnectNotifyRunnable?.let { retryHandler.removeCallbacks(it) }
+        disconnectNotifyRunnable = null
+    }
+
+    private fun cancelRetry() {
+        retryRunnable?.let { retryHandler.removeCallbacks(it) }
+        retryRunnable = null
+    }
+
     private fun scheduleRetry() {
-        retryHandler.removeCallbacksAndMessages(null)
-        retryHandler.postDelayed({ retryLastDevice() }, RETRY_DELAY_MS)
+        cancelRetry()
+        // rapido mientras todavia no se aviso "desconectado" (probablemente el receptor
+        // asentandose) - la cadencia normal de 4s solo aplica una vez ya avisado de verdad
+        val delay = if (disconnectNotifyRunnable != null) FAST_RETRY_DELAY_MS else RETRY_DELAY_MS
+        val runnable = Runnable {
+            retryRunnable = null
+            retryLastDevice()
+        }
+        retryRunnable = runnable
+        retryHandler.postDelayed(runnable, delay)
     }
 
     private fun retryLastDevice() {
