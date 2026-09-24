@@ -184,50 +184,50 @@ function DataPanel({ status }: { status: RtkStatus }) {
   const fix = status.lastFix;
   const mode = fixModeLabel(status);
   return (
-    <div className="uc-panel">
-      <h4 className="uc-panel-title">Data</h4>
-      <div className="uc-data-grid">
-        <div className="uc-data-row">
+    <div className="cfg-panel">
+      <h4 className="cfg-panel-title">Data</h4>
+      <div className="cfg-data-grid">
+        <div className="cfg-data-row">
           <span>Longitude</span>
           <span>{formatCoord(fix?.longitude)}</span>
         </div>
-        <div className="uc-data-row">
+        <div className="cfg-data-row">
           <span>Latitude</span>
           <span>{formatCoord(fix?.latitude)}</span>
         </div>
-        <div className="uc-data-row">
+        <div className="cfg-data-row">
           <span>Altitude</span>
           <span>{formatMeters(fix?.ellipsoidalAltitudeMeters)}</span>
         </div>
-        <div className="uc-data-row">
+        <div className="cfg-data-row">
           <span>Altitude (msl)</span>
           <span>{formatMeters(fix?.altitude)}</span>
         </div>
-        <div className="uc-data-row">
+        <div className="cfg-data-row">
           <span>TTFF</span>
           <span>{status.ttffMs != null ? `${(status.ttffMs / 1000).toFixed(1)} s` : '--'}</span>
         </div>
-        <div className="uc-data-row">
+        <div className="cfg-data-row">
           <span>Fix Mode</span>
           <span className={mode.danger ? 'uc-value-danger' : undefined}>{mode.text}</span>
         </div>
-        <div className="uc-data-row">
+        <div className="cfg-data-row">
           <span>3D Acc. [m]</span>
           <span>{formatMeters(fix?.fullStdMeters, 3)}</span>
         </div>
-        <div className="uc-data-row">
+        <div className="cfg-data-row">
           <span>2D Acc. [m]</span>
           <span>{formatMeters(fix?.horizontalStdMeters, 3)}</span>
         </div>
-        <div className="uc-data-row">
+        <div className="cfg-data-row">
           <span>PDOP</span>
           <span>{formatDop(status.pdop)}</span>
         </div>
-        <div className="uc-data-row">
+        <div className="cfg-data-row">
           <span>HDOP</span>
           <span>{formatDop(status.hdop)}</span>
         </div>
-        <div className="uc-data-row">
+        <div className="cfg-data-row">
           <span>Satellites</span>
           <span>{fix?.satellites ?? '--'}</span>
         </div>
@@ -246,8 +246,8 @@ function DataPanel({ status }: { status: RtkStatus }) {
 function SatelliteLevelPanel({ status }: { status: RtkStatus }) {
   const groups = useMemo(() => groupByConstellation(status.satellites), [status.satellites]);
   return (
-    <div className="uc-panel">
-      <h4 className="uc-panel-title">Satellite Level</h4>
+    <div className="cfg-panel">
+      <h4 className="cfg-panel-title">Satellite Level</h4>
       {groups.length === 0 ? (
         <p className="ds-hint">Sin satelites reportados. Requiere que GSV este habilitado en el puerto del receptor.</p>
       ) : (
@@ -306,8 +306,8 @@ function SatellitePositionPanel({ status }: { status: RtkStatus }) {
   const sats = (status.satellites ?? []).filter((s) => s.elevation != null && s.azimuth != null);
 
   return (
-    <div className="uc-panel">
-      <h4 className="uc-panel-title">Satellite Position</h4>
+    <div className="cfg-panel">
+      <h4 className="cfg-panel-title">Satellite Position</h4>
       <svg viewBox={`0 0 ${size} ${size}`} className="uc-sky-plot">
         {[0, 30, 60].map((deg) => (
           <circle key={deg} cx={center} cy={center} r={(maxR * (90 - deg)) / 90} className="uc-sky-ring" />
@@ -434,8 +434,8 @@ function WorldPositionPanel({ status }: { status: RtkStatus }) {
   }, [receiverLat, receiverLon, sats]);
 
   return (
-    <div className="uc-panel uc-panel-wide">
-      <h4 className="uc-panel-title">World Position</h4>
+    <div className="cfg-panel uc-panel-wide">
+      <h4 className="cfg-panel-title">World Position</h4>
       <svg viewBox={`0 0 ${width} ${height}`} className="uc-world-map">
         <defs>
           {/* oceano con un leve gradiente vertical (mas claro cerca del ecuador) en vez de un
@@ -575,7 +575,7 @@ function Sparkline({ values }: { values: number[] }) {
 }
 
 // Vuelto al visual de tarjeta+sparkline original (mas legible que la matriz de color en cuadros,
-// que resulto confusa en la practica). Panel de una sola columna (no uc-panel-full) - dentro de su
+// que resulto confusa en la practica). Panel de una sola columna (no cfg-panel-full) - dentro de su
 // propio ancho, las constelaciones (uc-history-groups) siguen agregandose hacia la derecha con
 // scroll horizontal si no caben todas, en vez de estirar el panel entero.
 function SatelliteLevelHistoryPanel({ status }: { status: RtkStatus }) {
@@ -583,8 +583,8 @@ function SatelliteLevelHistoryPanel({ status }: { status: RtkStatus }) {
   const groups = useMemo(() => groupByConstellation(status.satellites), [status.satellites]);
 
   return (
-    <div className="uc-panel">
-      <h4 className="uc-panel-title">Satellite Level History</h4>
+    <div className="cfg-panel">
+      <h4 className="cfg-panel-title">Satellite Level History</h4>
       {groups.length === 0 ? (
         <p className="ds-hint">Sin historial todavia.</p>
       ) : (
@@ -662,8 +662,8 @@ function CompassPanel({ status }: { status: RtkStatus }) {
   const needleTip = course != null ? polarPoint(center, center, r * 0.85, course) : null;
 
   return (
-    <div className="uc-panel">
-      <h4 className="uc-panel-title">Compass</h4>
+    <div className="cfg-panel">
+      <h4 className="cfg-panel-title">Compass</h4>
       <svg viewBox={`0 0 ${size} ${size}`} className="uc-gauge">
         <circle cx={center} cy={center} r={r} className="uc-gauge-ring" fill="none" />
         <text x={center} y={16} textAnchor="middle" className="uc-sky-label">
@@ -692,8 +692,8 @@ function CompassPanel({ status }: { status: RtkStatus }) {
 function SpeedMeterPanel({ status }: { status: RtkStatus }) {
   const kmh = status.lastFix?.speedMps != null ? status.lastFix.speedMps * 3.6 : null;
   return (
-    <div className="uc-panel">
-      <h4 className="uc-panel-title">Speed Meter</h4>
+    <div className="cfg-panel">
+      <h4 className="cfg-panel-title">Speed Meter</h4>
       <ArcGauge value={kmh} max={250} labels={[0, 50, 100, 150, 200, 250]} />
       <p className="ds-hint">{kmh != null ? `${kmh.toFixed(1)} km/h` : 'Sin dato de velocidad'}</p>
     </div>
@@ -703,8 +703,8 @@ function SpeedMeterPanel({ status }: { status: RtkStatus }) {
 function AltitudeMeterPanel({ status }: { status: RtkStatus }) {
   const alt = status.lastFix?.ellipsoidalAltitudeMeters ?? status.lastFix?.altitude ?? null;
   return (
-    <div className="uc-panel">
-      <h4 className="uc-panel-title">Altitude Meter</h4>
+    <div className="cfg-panel">
+      <h4 className="cfg-panel-title">Altitude Meter</h4>
       {/* aguja simple en vez del dial de tambores giratorios de u-center - misma informacion, sin
           el costo de un componente de digitos rotativos que no aporta mas valor diagnostico */}
       <ArcGauge value={alt} max={3000} labels={[0, 750, 1500, 2250, 3000]} />
@@ -728,8 +728,8 @@ function WatchPanel({ status }: { status: RtkStatus }) {
   const driftSeconds = gpsTimeMs != null ? Math.abs((Date.now() - gpsTimeMs) / 1000) : null;
 
   return (
-    <div className="uc-panel">
-      <h4 className="uc-panel-title">Watch</h4>
+    <div className="cfg-panel">
+      <h4 className="cfg-panel-title">Watch</h4>
       <div className="uc-watch-time">{gpsDate ? `${gpsDate.toISOString().substring(11, 19)} UTC` : '--:--:-- UTC'}</div>
       <p className="ds-hint">
         {gpsDate
@@ -755,7 +755,7 @@ export interface UCenterConnectionProps {
 }
 
 function StatusDot({ on }: { on: boolean }) {
-  return <span className={`uc-status-dot${on ? ' uc-status-dot--on' : ''}`} />;
+  return <span className={`cfg-status-dot${on ? ' cfg-status-dot--on' : ''}`} />;
 }
 
 // baud real entre el HC-05 y el UART2 del receptor - fijado UNA VEZ por hardware en el
@@ -772,9 +772,9 @@ function ReadOnlyBaudRow({ value, note }: { value: string; note: string }) {
   return (
     <div className="uc-baud-row">
       <span className="ds-label">Baud rate</span>
-      <span className="uc-baud-value">
+      <span className="cfg-chip">
         {value}
-        <span className="uc-baud-value-note">{note}</span>
+        <span className="cfg-chip-note">{note}</span>
       </span>
     </div>
   );
@@ -798,7 +798,7 @@ function ReceiverSection({ status, connection }: { status: RtkStatus; connection
       <h4 className="uc-config-title">Receptor</h4>
 
       {!status.mockLocationAllowed && (
-        <div className="uc-warning-box">
+        <div className="cfg-warning-box">
           <p>
             <strong>Pendiente:</strong> falta seleccionar esta app como ubicacion simulada para que
             el RTK reemplace el GPS interno.
@@ -810,7 +810,7 @@ function ReceiverSection({ status, connection }: { status: RtkStatus; connection
             </button>
           </div>
           {!connection.kioskStatus.developerOptionsEnabled && (
-            <p className="uc-mini-hint">
+            <p className="cfg-mini-hint">
               Antes: Opciones de desarrollador (Ajustes {'>'} Acerca de la tableta, toca 7 veces
               "Numero de compilacion") {'>'} "Seleccionar app de ubicacion falsa" {'>'} GAGA Operador.
             </p>
@@ -819,9 +819,9 @@ function ReceiverSection({ status, connection }: { status: RtkStatus; connection
       )}
 
       <h5 className="uc-config-subtitle">Bluetooth</h5>
-      <div className="uc-status-row">
+      <div className="cfg-status-row">
         <StatusDot on={status.bluetoothConnected} />
-        <span className="uc-status-text" title={status.bluetoothConnected ? status.connectedBluetoothName ?? undefined : undefined}>
+        <span className="cfg-status-text" title={status.bluetoothConnected ? status.connectedBluetoothName ?? undefined : undefined}>
           {status.bluetoothConnected
             ? `${status.connectedBluetoothName ?? 'Conectado'} · ${formatRate(status.bluetoothDataRateBps)} · ${formatTotalBytes(status.bluetoothTotalBytes)} total`
             : 'Sin conectar - se conecta solo al modulo vinculado'}
@@ -833,17 +833,17 @@ function ReceiverSection({ status, connection }: { status: RtkStatus; connection
         </button>
       )}
       {status.bluetoothPermissionGranted && !status.bluetoothEnabled && (
-        <p className="uc-mini-hint">Bluetooth apagado - enciendelo en Ajustes de Android.</p>
+        <p className="cfg-mini-hint">Bluetooth apagado - enciendelo en Ajustes de Android.</p>
       )}
       {status.bluetoothPermissionGranted && status.bluetoothEnabled && connection.btDevices.length === 0 && (
-        <p className="uc-mini-hint">Vincula el HC-05 en Ajustes de Android (codigo 1234) y se conectara solo.</p>
+        <p className="cfg-mini-hint">Vincula el HC-05 en Ajustes de Android (codigo 1234) y se conectara solo.</p>
       )}
       <ReadOnlyBaudRow value={`${BLUETOOTH_UART_BAUD_RATE}`} note="fijo en el HC-05 - ver README" />
 
       <h5 className="uc-config-subtitle">USB</h5>
-      <div className="uc-status-row">
+      <div className="cfg-status-row">
         <StatusDot on={status.usbConnected} />
-        <span className="uc-status-text">
+        <span className="cfg-status-text">
           {status.usbConnected
             ? `Conectado · ${formatRate(status.usbDataRateBps)} · ${formatTotalBytes(status.usbTotalBytes)} total`
             : 'Sin conectar'}
@@ -863,7 +863,7 @@ function ReceiverSection({ status, connection }: { status: RtkStatus; connection
           </div>
         ))}
 
-      <p className="uc-mini-hint">USB tiene prioridad sobre Bluetooth - conecta solo al que este disponible.</p>
+      <p className="cfg-mini-hint">USB tiene prioridad sobre Bluetooth - conecta solo al que este disponible.</p>
     </section>
   );
 }
@@ -1000,7 +1000,7 @@ function NtripProfileModal({
           </button>
         </div>
         {fetchFromServerError && <div className="ds-error-block">{fetchFromServerError}</div>}
-        <p className="uc-mini-hint">
+        <p className="cfg-mini-hint">
           Trae host/puerto/usuario/contraseña/mount point de fabrica desde el servidor - requiere
           que el token de telemetria de esta tableta ya funcione (revisa la bitacora de envio).
         </p>
@@ -1049,9 +1049,9 @@ function NtripSection({ status, ntrip }: { status: RtkStatus; ntrip: UCenterNtri
           receptor (USB o Bluetooth) aparece/desaparece (ver onReceiverConnected/Disconnected en
           RtkNtripPlugin.kt), mismo criterio que Receptor: con eso ya cubierto, un boton manual de
           Conectar/Detener solo invitaria a un estado inconsistente sin necesidad real */}
-      <div className="uc-status-row">
+      <div className="cfg-status-row">
         <StatusDot on={status.ntripConnected} />
-        <span className="uc-status-text">
+        <span className="cfg-status-text">
           {status.ntripConnected
             ? `Conectado - ${formatRate(status.ntripDataRateBps)} - ${formatTotalBytes(status.ntripTotalBytes)} total`
             : 'Sin conectar - se conecta solo cuando el receptor esta activo'}
@@ -1101,12 +1101,12 @@ export function UCenterView({ status, onClose, connection, ntrip }: UCenterViewP
   const precision = formatHeaderPrecision(status.lastFix);
   return (
     <div className="ds-modal-overlay" onClick={onClose}>
-      <div className="uc-shell" onClick={(e) => e.stopPropagation()}>
-        <div className="uc-header">
+      <div className="cfg-shell" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-header">
           <div>
             <h3>u-center</h3>
             {status.lastFix && (
-              <span className="uc-header-status">
+              <span className="cfg-header-status">
                 <span style={{ color: fixBadgeColor(status.lastFix.fixLabel) }}>
                   {fixBadgeLabel(status.lastFix.fixLabel)} · {mode.text}
                 </span>
@@ -1114,27 +1114,27 @@ export function UCenterView({ status, onClose, connection, ntrip }: UCenterViewP
               </span>
             )}
           </div>
-          <button className="uc-close" onClick={onClose} aria-label="Cerrar">
+          <button className="cfg-close" onClick={onClose} aria-label="Cerrar">
             ×
           </button>
         </div>
-        <div className="uc-body">
+        <div className="cfg-body">
           <div className="uc-config-row">
             <ReceiverSection status={status} connection={connection} />
             <NtripSection status={status} ntrip={ntrip} />
           </div>
 
-          <section className="uc-panels-main">
+          <section className="uc-grid">
             {/* fila 1: Satellite Position (1 col) + World Position (uc-panel-wide, 2 col) = 3.
                 fila 2: Satellite Level + Data + Satellite Level History, 1 col cada uno = 3. */}
-            <h4 className="uc-group-title">Satelites</h4>
+            <h4 className="cfg-group-title">Satelites</h4>
             <SatellitePositionPanel status={status} />
             <WorldPositionPanel status={status} />
             <SatelliteLevelPanel status={status} />
             <DataPanel status={status} />
             <SatelliteLevelHistoryPanel status={status} />
 
-            <h4 className="uc-group-title">Instrumentos</h4>
+            <h4 className="cfg-group-title">Instrumentos</h4>
             <CompassPanel status={status} />
             <SpeedMeterPanel status={status} />
             <AltitudeMeterPanel status={status} />

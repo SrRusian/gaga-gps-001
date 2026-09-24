@@ -378,11 +378,15 @@
   color: #8b93a1;
 }
 
-/* Vista u-center - réplica del panel de datos, comparte overlay con .ds-modal-overlay */
-/* Ocupa toda la pantalla disponible (el overlay .ds-modal-overlay ya le da ~20px de margen) en vez
-   de una caja centrada chica - con muchos paneles, una sola columna angosta obligaba a scrollear
-   demasiado. */
-.uc-shell {
+/* ===== Sistema de paneles compartido (Ajustes + u-center) ===== */
+/* Piezas visuales genericas (tarjeta a pantalla completa, panel, fila de estado, hint chico, caja
+   de aviso, fila de dato) que usan tanto Ajustes (DeviceSettingsPanel, el componente principal)
+   como u-center (UCenterView, el secundario que se abre desde ahi) - nombradas "cfg" y no "uc"
+   porque el estilo compartido no puede llevar el nombre de la pantalla secundaria. La disposicion
+   en columnas de cada pantalla SI es propia de cada una (ver .uc-grid vs .cfg-columns mas abajo) -
+   u-center necesita paneles alineados en pares (graficas), Ajustes no tiene graficas y necesita
+   empacar filas de texto/botones de alto muy distinto sin dejar huecos. */
+.cfg-shell {
   background: #0b0d10;
   border: 1px solid #262b33;
   border-radius: 10px;
@@ -394,7 +398,7 @@
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
 }
 
-.uc-header {
+.cfg-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -403,14 +407,14 @@
   flex: 0 0 auto;
 }
 
-.uc-header h3 {
+.cfg-header h3 {
   font-size: 14px;
   font-weight: 600;
   color: #e8eaed;
   margin: 0;
 }
 
-.uc-close {
+.cfg-close {
   background: none;
   border: none;
   color: #8b93a1;
@@ -420,11 +424,11 @@
   padding: 2px 6px;
 }
 
-.uc-close:hover {
+.cfg-close:hover {
   color: #e8eaed;
 }
 
-.uc-header-status {
+.cfg-header-status {
   display: block;
   font-size: 11px;
   font-weight: 600;
@@ -432,14 +436,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* precision separada del color de estado (RTK FIJO/FLOTANTE/etc ya tiene su propio color) - un
-   dato numerico neutro, no otro estado mas */
-.uc-header-precision {
-  color: #8b93a1;
-  font-weight: 500;
-}
-
-.uc-body {
+.cfg-body {
   padding: 16px 18px;
   overflow-y: auto;
   /* flex:1 + min-height:0 es obligatorio para que un hijo con overflow-y scrollee de verdad dentro
@@ -451,8 +448,219 @@
   gap: 16px;
 }
 
-/* Receptor / NTRIP Client lado a lado en pantallas anchas (tableta en landscape) - cada uno es su
-   propia tarjeta en vez de solo un bloque con linea divisoria, ya que ya no van siempre apilados */
+.cfg-panel {
+  background: #14171c;
+  border: 1px solid #262b33;
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.cfg-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b93a1;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+}
+
+/* divisor de grupo - full width por defecto (bloque normal); grid-column solo hace falta dentro
+   de .uc-grid (u-center), donde el navegador lo ignora fuera de un contenedor grid */
+.cfg-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4f8ff0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 4px 0 -2px;
+  grid-column: 1 / -1;
+}
+
+/* valor de solo lectura en caja (version instalada, baud rate nativo, etc) - mismo look en
+   Ajustes y u-center, en vez de texto plano suelto */
+.cfg-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  color: #e8eaed;
+  font-variant-numeric: tabular-nums;
+  background: #1b1f27;
+  border: 1px solid #262b33;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.cfg-chip-note {
+  font-size: 11px;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.cfg-version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+.cfg-version-row span:first-child {
+  font-size: 12px;
+  color: #8b93a1;
+}
+
+.cfg-status-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 4px 0;
+}
+
+.cfg-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #565d68;
+  flex: 0 0 auto;
+}
+
+.cfg-status-dot--on {
+  background: #3fb950;
+  box-shadow: 0 0 4px rgba(63, 185, 80, 0.6);
+}
+
+/* patron para "icono + texto que debe truncarse" dentro de un flex row - flex-basis:0% (no
+   "auto") le dice al flexbox que reparta el espacio disponible ANTES de mirar el ancho intrinseco
+   del contenido, y display:block explicito evita depender de que el motor "blockifique" un <span>
+   (inline por defecto) para que text-overflow:ellipsis funcione de verdad. Con "auto" en vez de
+   "0%" este texto llegó a renderear en un ancho calculado de 0 (invisible) en vez de truncarse
+   con "..." - bug real, no solo teorico. Aplicar el mismo patron a cualquier fila nueva similar. */
+.cfg-status-text {
+  display: block;
+  flex: 1 1 0%;
+  min-width: 0;
+  font-size: 13px;
+  color: #e8eaed;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* hints de una sola linea, mas discretos que .ds-hint (que se usa en parrafos largos en otras
+   partes de Ajustes) - deliberadamente mas chicos y sin caja, para no competir visualmente */
+.cfg-mini-hint {
+  font-size: 11px;
+  color: #6b7280;
+  margin: 4px 0;
+  line-height: 1.4;
+}
+
+.cfg-warning-box {
+  border: 1px solid #d29922;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 4px 0 10px;
+  font-size: 12px;
+}
+
+.cfg-warning-box p {
+  margin: 0 0 8px;
+}
+
+.cfg-data-grid {
+  display: flex;
+  flex-direction: column;
+}
+
+.cfg-data-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #1b1f27;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cfg-data-row:last-child {
+  border-bottom: none;
+}
+
+.cfg-data-row span:first-child {
+  color: #8b93a1;
+}
+
+.cfg-data-row span:last-child {
+  color: #e8eaed;
+  font-weight: 500;
+}
+
+.uc-value-danger {
+  color: #ef4444 !important;
+}
+
+/* ===== Ajustes (DeviceSettingsPanel) - columnas armadas a mano, no grid/masonry automatico ===== */
+/* Se probaron 2 mecanismos automaticos antes de esto y los dos fallaron para este contenido en
+   particular: un grid de filas parejas (v1) forzaba a un panel corto a compartir fila con uno
+   largo, dejando un hueco vacio enorme al lado; CSS multi-column con column-fill:balance (v2)
+   evitaba eso pero el algoritmo de balance del navegador reparte el alto de forma poco predecible
+   con solo 3-4 bloques de tamaño muy distinto, dejando espacio suelto arriba/abajo de un panel
+   corto. Fix real: cada grupo ("Conexion"/"Sistema") es un `.cfg-row` (flex, align-items:
+   flex-start para que NINGUNA columna se estire a la altura de su vecina) con 2-3 `.cfg-col`
+   (flex, columna vertical) - los paneles se asignan a mano a la columna que les toca, balanceando
+   el contenido por ojo (ej. "Bloqueo de ajustes" + "Servicio GNSS", ambos cortos, comparten una
+   columna con "Actualizacion automatica" y "Modo Kiosko" cada uno solo en la suya). Sin heuristica
+   de navegador de por medio, el resultado es 100% predecible: cada panel mide exactamente su
+   contenido, nunca de mas. */
+.cfg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.cfg-col {
+  flex: 1 1 0;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ===== u-center - grid de 3 columnas fijas, propio de esta pantalla ===== */
+/* Satellite Position (1 col) + World Position (uc-panel-wide, 2 col) deben quedar en la misma
+   fila real, cosa que un masonry por columnas no garantiza - por eso u-center sigue en grid en vez
+   de compartir .cfg-columns con Ajustes. Breakpoints angostos caen a 2 y luego 1 columna. */
+.uc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.uc-panel-wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 900px) {
+  .uc-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .uc-grid {
+    grid-template-columns: 1fr;
+  }
+  .uc-panel-wide {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Receptor / NTRIP Client lado a lado en pantallas anchas (u-center unicamente) - cada uno es su
+   propia tarjeta en vez de solo un bloque con linea divisoria */
 .uc-config-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -471,9 +679,6 @@
   border: 1px solid #262b33;
   border-radius: 8px;
   padding: 12px 14px;
-  /* mismo gotcha que .uc-device-option span, un nivel arriba: un item de grid en "1fr 1fr" tambien
-     tiene min-width:auto por defecto, asi que el mismo texto largo podia estirar la tarjeta entera
-     mas alla de su columna en vez de truncarse adentro */
   min-width: 0;
 }
 
@@ -493,56 +698,6 @@
   margin: 14px 0 6px;
 }
 
-/* Receptor - status compacto (punto + texto) en vez de una frase larga tipo "Conectado - nombre -
-   tasa - total" - el detalle de bytes totales ya no se muestra siempre, es curiosidad diagnostica
-   menor, no algo que valga la pena ver de un vistazo cada vez */
-.uc-status-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 4px 0;
-}
-
-.uc-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #565d68;
-  flex: 0 0 auto;
-}
-
-.uc-status-dot--on {
-  background: #3fb950;
-  box-shadow: 0 0 4px rgba(63, 185, 80, 0.6);
-}
-
-/* patron para "icono + texto que debe truncarse" dentro de un flex row - flex-basis:0% (no
-   "auto") le dice al flexbox que reparta el espacio disponible ANTES de mirar el ancho intrinseco
-   del contenido, y display:block explicito evita depender de que el motor "blockifique" un <span>
-   (inline por defecto) para que text-overflow:ellipsis funcione de verdad. Con "auto" en vez de
-   "0%" este texto llegó a renderear en un ancho calculado de 0 (invisible) en vez de truncarse
-   con "..." - bug real, no solo teorico. Aplicar el mismo patron a cualquier fila nueva similar. */
-.uc-status-text {
-  display: block;
-  flex: 1 1 0%;
-  min-width: 0;
-  font-size: 13px;
-  color: #e8eaed;
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* hints de una sola linea, mas discretos que .ds-hint (que se usa en parrafos largos en otras
-   partes de Ajustes) - deliberadamente mas chicos y sin caja, para no competir visualmente */
-.uc-mini-hint {
-  font-size: 11px;
-  color: #6b7280;
-  margin: 4px 0;
-  line-height: 1.4;
-}
-
 .uc-link-button {
   background: none;
   border: none;
@@ -558,16 +713,11 @@
   text-decoration: underline;
 }
 
-.uc-warning-box {
-  border: 1px solid #d29922;
-  border-radius: 6px;
-  padding: 10px 12px;
-  margin: 4px 0 10px;
-  font-size: 12px;
-}
-
-.uc-warning-box p {
-  margin: 0 0 8px;
+/* precision separada del color de estado (RTK FIJO/FLOTANTE/etc ya tiene su propio color) - un
+   dato numerico neutro, no otro estado mas */
+.uc-header-precision {
+  color: #8b93a1;
+  font-weight: 500;
 }
 
 .uc-baud-row {
@@ -584,121 +734,6 @@
 
 .uc-baud-row input {
   width: 100px;
-}
-
-/* valor de solo lectura (Bluetooth y USB nativo, ninguno de los dos se puede aplicar desde la
-   app) - misma altura/forma que un input real para que la fila no salte al alternar entre un
-   dispositivo con baud editable y uno sin el */
-.uc-baud-value {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: 13px;
-  color: #e8eaed;
-  font-variant-numeric: tabular-nums;
-  background: #1b1f27;
-  border: 1px solid #262b33;
-  border-radius: 6px;
-  padding: 6px 10px;
-}
-
-.uc-baud-value-note {
-  font-size: 11px;
-  font-weight: 400;
-  color: #6b7280;
-}
-
-.uc-group-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #4f8ff0;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 4px 0 -2px;
-}
-
-/* Grid de 3 columnas fijas (pedido explicito, para poder ubicar cada panel por su ancho exacto -
-   Satellite Position 1 + World Position 2 llenan una fila, Satellite Level + Data + Satellite
-   Level History llenan la siguiente) en vez del auto-fill anterior. Los titulos de grupo ocupan
-   todo el ancho (grid-column 1/-1) para actuar como divisor entre secciones dentro del mismo
-   grid. Breakpoints angostos caen a 2 y luego 1 columna - la tableta siempre corre en landscape a
-   pantalla completa, pero sin esto un ancho angosto dejaria paneles apachurrados. */
-.uc-panels-main {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  align-items: start;
-}
-
-.uc-panels-main .uc-group-title {
-  grid-column: 1 / -1;
-}
-
-.uc-panel-wide {
-  grid-column: span 2;
-}
-
-@media (max-width: 900px) {
-  .uc-panels-main {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 640px) {
-  .uc-panels-main {
-    grid-template-columns: 1fr;
-  }
-  .uc-panel-wide {
-    grid-column: 1 / -1;
-  }
-}
-
-.uc-panel {
-  background: #14171c;
-  border: 1px solid #262b33;
-  border-radius: 8px;
-  padding: 12px 14px;
-  min-width: 0; /* mismo gotcha de grid-item que .uc-config-section - defensivo */
-}
-
-.uc-panel-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: #8b93a1;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin: 0 0 8px;
-}
-
-.uc-data-grid {
-  display: flex;
-  flex-direction: column;
-}
-
-.uc-data-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 6px 0;
-  border-bottom: 1px solid #1b1f27;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-
-.uc-data-row:last-child {
-  border-bottom: none;
-}
-
-.uc-data-row span:first-child {
-  color: #8b93a1;
-}
-
-.uc-data-row span:last-child {
-  color: #e8eaed;
-  font-weight: 500;
-}
-
-.uc-value-danger {
-  color: #ef4444 !important;
 }
 
 /* Sky plot (Satellite Position) y gauges circulares (Compass/Speed/Altitude) - misma familia visual */

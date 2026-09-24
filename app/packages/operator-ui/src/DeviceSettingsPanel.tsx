@@ -883,332 +883,14 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     );
   }
 
-  return (
-    <div className="ds-overlay">
-      <div className="ds-card">
-        <button className="ds-close" onClick={onClose} aria-label="Cerrar" title="Cerrar">
-          X
-        </button>
-        <h2>Configuracion del dispositivo</h2>
-
-        {operatorMode ? (
-          <>
-        <p className="ds-hint">Modo operador: Activado - no se puede desactivar sin reinstalar la app.</p>
-
-        <section className="ds-section">
-          <h3>Servidor e identidad</h3>
-          <div className="ds-actions">
-            <button onClick={openCreateProfileModal}>+ Nueva configuracion</button>
-            {profileMessage && <span className="ds-saved">{profileMessage}</span>}
-          </div>
-
-          {profiles.length === 0 && (
-            <p className="ds-hint">Sin configuraciones guardadas todavia - agrega una para poder enviar posicion.</p>
-          )}
-          <div className="ds-profile-list">
-            {profiles.map((p) => {
-              const isActive = p.id === activeProfileId;
-              return (
-                <div className={`ds-profile-card${isActive ? ' ds-profile-active' : ''}`} key={p.id}>
-                  <button className="ds-profile-select" onClick={() => selectProfile(p.id)}>
-                    <span className="ds-profile-top">
-                      <span className="ds-profile-name">{p.name}</span>
-                      {isActive && <span className="ds-profile-badge">Activa</span>}
-                    </span>
-                    <span className="ds-profile-summary">{p.serverUrl || '(sin servidor)'}</span>
-                    <span className="ds-profile-summary">ID: {p.deviceId || '(sin identificador)'}</span>
-                  </button>
-                  <div className="ds-profile-actions">
-                    <button onClick={() => openEditProfileModal(p)}>Editar</button>
-                    <button className="ds-remove" onClick={() => removeProfile(p.id)}>
-                      Eliminar
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <p className="ds-hint">
-            {activeProfile
-              ? `El envio de posicion manda a ${buildMainServerUrl(activeProfile.serverUrl, activeProfile.token)}`
-              : 'Sin configuracion activa - elige o crea una para poder enviar posicion.'}
-          </p>
-
-          <div className="ds-actions">
-            <button onClick={handleSendNow}>Enviar ubicacion ahora</button>
-            {sendNowMessage && <span className="ds-saved">{sendNowMessage}</span>}
-          </div>
-
-          <div className="ds-switch-row">
-            <label className="ds-switch">
-              <input type="checkbox" checked={senderRunning} onChange={toggleSender} />
-              <span className="ds-switch-track" />
-            </label>
-            <span className="ds-switch-label">Envio continuo</span>
-            <span className="ds-switch-spacer" />
-            {sendSettings && (
-              <div className="ds-inline-field">
-                <label className="ds-label">Intervalo (s)</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={sendSettings.intervalSeconds}
-                  onChange={(e) => updateSendSettings({ intervalSeconds: Number(e.target.value) })}
-                />
-              </div>
-            )}
-          </div>
-          <div className="ds-actions">
-            <span className="ds-status">
-              {senderRunning ? 'Enviando' : 'Detenido'}
-              {bufferedCount > 0 && ` - ${bufferedCount} en buffer sin conexion`}
-              {senderError && <span className="ds-error"> - {senderError}</span>}
-            </span>
-          </div>
-
-          <button className="ds-add" onClick={() => setShowLog((v) => !v)}>
-            {showLog ? 'Ocultar bitacora' : 'Mostrar bitacora de envios'}
+  if (!operatorMode) {
+    return (
+      <div className="ds-overlay">
+        <div className="ds-card">
+          <button className="ds-close" onClick={onClose} aria-label="Cerrar" title="Cerrar">
+            X
           </button>
-          {showLog && (
-            <div className="ds-log">
-              {logEntries.length === 0 && <div className="ds-log-empty">Sin envios registrados todavia</div>}
-              {logEntries.map((entry, i) => (
-                <div className={`ds-log-row ${entry.success ? 'ds-log-ok' : 'ds-log-fail'}`} key={i}>
-                  <span className="ds-log-time">{formatLogTime(entry.timestamp)}</span>
-                  <span className="ds-log-server">{entry.serverUrl}</span>
-                  <span className="ds-log-message">{entry.message}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {showProfileModal && profileForm && (
-          <div className="ds-modal-overlay" onClick={closeProfileModal}>
-            <div className="ds-modal" onClick={(e) => e.stopPropagation()}>
-              <h3>{profiles.some((p) => p.id === profileForm.id) ? 'Editar configuracion' : 'Nueva configuracion'}</h3>
-              <label className="ds-label">Nombre</label>
-              <input
-                placeholder="Ej. Servidor de pruebas"
-                value={profileForm.name}
-                onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
-              />
-              <label className="ds-label">Servidor GAGA GPS</label>
-              <input
-                placeholder="http://192.168.1.50:3001"
-                value={profileForm.serverUrl}
-                onChange={(e) => setProfileForm({ ...profileForm, serverUrl: e.target.value })}
-              />
-              <label className="ds-label">Token de telemetria</label>
-              <input
-                placeholder="TELEMETRY_SHARED_SECRET del servidor"
-                value={profileForm.token}
-                onChange={(e) => setProfileForm({ ...profileForm, token: e.target.value })}
-              />
-              <label className="ds-label">Identificador del dispositivo</label>
-              <input
-                placeholder="Igual que en Traccar Client"
-                value={profileForm.deviceId}
-                onChange={(e) => setProfileForm({ ...profileForm, deviceId: e.target.value })}
-              />
-              {profileFormError && <div className="ds-error-block">{profileFormError}</div>}
-              <div className="ds-actions">
-                <button onClick={saveProfileModal}>Guardar</button>
-                <button className="ds-remove" onClick={closeProfileModal}>
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <section className="ds-section">
-          <h3>Receptor RTK y correccion NTRIP</h3>
-          <p className="ds-hint">Todo lo del receptor y las correcciones vive en u-center.</p>
-          <div className="ds-actions">
-            <button onClick={() => setShowUCenter(true)}>u-center</button>
-          </div>
-          {showUCenter && (
-            <UCenterView
-              status={rtkStatus}
-              onClose={() => setShowUCenter(false)}
-              connection={{
-                kioskStatus,
-                mockLocationBusy,
-                onOpenDeveloperOptions: openDeveloperOptionsSettings,
-                onRetryMockLocation: retryMockLocationCheck,
-                btDevices,
-                onGrantBluetoothPermission: grantBluetoothPermission,
-                usbDevices,
-                baudRate,
-                onUpdateBaudRate: updateBaudRate,
-              }}
-              ntrip={{
-                profiles: ntripProfiles,
-                activeProfileId: ntripActiveProfileId,
-                activeProfile: activeNtripProfile,
-                message: ntripProfileMessage,
-                onCreate: openCreateNtripProfileModal,
-                onSelect: selectNtripProfile,
-                onEdit: openEditNtripProfileModal,
-                onRemove: removeNtripProfile,
-                showModal: showNtripProfileModal,
-                form: ntripProfileForm,
-                onFormChange: setNtripProfileForm,
-                onSearchMountpoints: searchNtripMountpoints,
-                mountpointsLoading,
-                mountpointsError,
-                mountpoints,
-                formError: ntripProfileFormError,
-                onSave: saveNtripProfileModal,
-                onCloseModal: closeNtripProfileModal,
-                onFetchFromServer: fetchNtripFromServer,
-                fetchFromServerBusy: ntripFetchBusy,
-                fetchFromServerError: ntripFetchError,
-              }}
-            />
-          )}
-        </section>
-
-        <section className="ds-section">
-          <h3>Salidas</h3>
-          <label className="ds-toggle-row">
-            <input type="checkbox" checked={rtkStatus.mockLocationActive} disabled readOnly />
-            Ubicacion simulada (mock location)
-          </label>
-        </section>
-
-        <section className="ds-section">
-          <h3>Bloqueo de ajustes</h3>
-          <p className="ds-hint">
-            {hasSettingsPassword()
-              ? 'Los ajustes estan protegidos con contrasena.'
-              : 'Sin contrasena - cualquiera puede abrir y cambiar los ajustes.'}
-          </p>
-          <input
-            type="password"
-            placeholder="Nueva contrasena (vacio = quitar bloqueo)"
-            value={lockPasswordInput}
-            onChange={(e) => setLockPasswordInput(e.target.value)}
-          />
-          <div className="ds-actions">
-            <button onClick={handleSetLockPassword}>
-              {hasSettingsPassword() ? 'Cambiar / quitar contrasena' : 'Bloquear con contrasena'}
-            </button>
-            {lockSavedMessage && <span className="ds-saved">{lockSavedMessage}</span>}
-          </div>
-        </section>
-
-        <section className="ds-section">
-          <h3>Modo Kiosko</h3>
-          <p className="ds-hint">
-            {kioskStatus.isDeviceOwner
-              ? 'Tableta aprovisionada (Device Owner) - Modo Kiosko disponible.'
-              : 'Tableta sin aprovisionar - hace falta el comando adb (o QR) antes de activar el Modo Kiosko.'}
-          </p>
-          {!hasSettingsPassword() && (
-            <p className="ds-hint">Ponle contrasena en "Bloqueo de ajustes" antes de activar el kiosko.</p>
-          )}
-          <div className="ds-switch-row">
-            <label className="ds-switch">
-              <input
-                type="checkbox"
-                checked={kioskStatus.enabled}
-                onChange={toggleKiosk}
-                disabled={kioskBusy || (!kioskStatus.enabled && !kioskStatus.isDeviceOwner)}
-              />
-              <span className="ds-switch-track" />
-            </label>
-            <span className="ds-switch-label">
-              Modo Kiosko {kioskStatus.active ? '(activo ahora mismo)' : kioskStatus.enabled ? '(se activa al reabrir la app)' : ''}
-            </span>
-          </div>
-          {kioskError && <div className="ds-error-block">{kioskError}</div>}
-          <p className="ds-hint">
-            Bloquea la tableta dentro de la app. Para salir: vuelve aqui con la contrasena y apaga
-            el switch.
-          </p>
-          {!kioskStatus.exactAlarmsGranted && (
-            <div className="ds-hint" style={{ border: '1px solid #d29922', borderRadius: 6, padding: 10 }}>
-              <p>
-                <strong>Pendiente:</strong> falta conceder "Alarmas y recordatorios" - sin esto, la
-                suspension por perdida de corriente y la actualizacion automatica pueden tardar
-                varios segundos/minutos mas de lo configurado.
-              </p>
-              <div className="ds-actions">
-                <button onClick={openExactAlarmSettings}>Abrir Ajustes de Android</button>
-              </div>
-            </div>
-          )}
-          {kioskStatus.isDeviceOwner && (
-            <div className="ds-actions" style={{ marginTop: 10 }}>
-              <button onClick={releaseDeviceOwner} disabled={kioskBusy}>
-                Liberar Device Owner (para desinstalar)
-              </button>
-              <p className="ds-hint">
-                Solo si necesitas desinstalar la app - hay que reaprovisionar con adb para
-                recuperar Kiosko/actualizaciones despues.
-              </p>
-            </div>
-          )}
-        </section>
-
-        <section className="ds-section">
-          <h3>Actualizacion automatica</h3>
-          <p className="ds-hint">
-            Version instalada: {updateStatus.currentVersionName || '?'} (build {updateStatus.currentVersionCode || '?'})
-            {updateStatus.latestVersionCode !== null && (
-              <>
-                {' '}- ultima publicada: {updateStatus.latestVersionName} (build {updateStatus.latestVersionCode})
-              </>
-            )}
-          </p>
-          <div className="ds-switch-row">
-            <label className="ds-switch">
-              <input
-                type="checkbox"
-                checked={updateStatus.enabled}
-                onChange={toggleAppUpdate}
-                disabled={updateBusy}
-              />
-              <span className="ds-switch-track" />
-            </label>
-            <span className="ds-switch-label">
-              Actualizacion automatica {updateStatus.checking ? '(revisando ahora)' : ''}
-            </span>
-          </div>
-          <div className="ds-actions">
-            <button onClick={checkForUpdateNow} disabled={updateBusy}>
-              Buscar actualizacion ahora
-            </button>
-          </div>
-          {updateStatus.lastCheckAt && (
-            <p className="ds-hint">Ultima revision: {new Date(updateStatus.lastCheckAt).toLocaleString()}</p>
-          )}
-          {(updateError || updateStatus.lastError) && (
-            <div className="ds-error-block">{updateError || updateStatus.lastError}</div>
-          )}
-          <p className="ds-hint">Revisa el servidor y se actualiza sola, sin avisos en pantalla.</p>
-        </section>
-
-        <section className="ds-section">
-          <h3>Servicio GNSS</h3>
-          <div className="ds-actions">
-            <button onClick={restartGnssService} disabled={gnssBusy}>
-              Reiniciar
-            </button>
-          </div>
-          <p className="ds-hint">Reinicia USB + NTRIP + ubicacion simulada juntos - util si algo quedo en mal estado.</p>
-          <div className="ds-actions">
-            <button className="ds-remove" onClick={handleRestoreDefaults}>
-              Restaurar valores por defecto
-            </button>
-          </div>
-          <p className="ds-hint">Regresa servidor, NTRIP y envio a los valores de fabrica.</p>
-        </section>
-          </>
-        ) : (
+          <h2>Ajustes</h2>
           <section className="ds-section">
             <h3>Modo operador</h3>
             <p className="ds-hint">Modo basico - sin envio de datos. Activa el modo operador con el codigo del equipo.</p>
@@ -1223,8 +905,356 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
             </div>
             {operatorModeError && <div className="ds-error-block">{operatorModeError}</div>}
           </section>
-        )}
+        </div>
       </div>
+    );
+  }
+
+  const receiverConnected = rtkStatus.usbConnected || rtkStatus.bluetoothConnected;
+
+  return (
+    <div className="ds-overlay">
+      <div className="cfg-shell">
+        <div className="cfg-header">
+          <div>
+            <h3>Ajustes</h3>
+            <span className="cfg-header-status" style={{ color: '#4f8ff0' }}>
+              Modo operador activo (permanente)
+            </span>
+          </div>
+          <button className="cfg-close" onClick={onClose} aria-label="Cerrar" title="Cerrar">
+            ×
+          </button>
+        </div>
+
+        <div className="cfg-body">
+          <h4 className="cfg-group-title">Conexion</h4>
+          <div className="cfg-row">
+            <div className="cfg-col">
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">Servidor e identidad</h4>
+                <div className="ds-actions">
+                  <button onClick={openCreateProfileModal}>+ Nueva configuracion</button>
+                  {profileMessage && <span className="ds-saved">{profileMessage}</span>}
+                </div>
+
+                {profiles.length === 0 && (
+                  <p className="cfg-mini-hint">Sin configuraciones guardadas - agrega una para poder enviar posicion.</p>
+                )}
+                <div className="ds-profile-list">
+                  {profiles.map((p) => {
+                    const isActive = p.id === activeProfileId;
+                    return (
+                      <div className={`ds-profile-card${isActive ? ' ds-profile-active' : ''}`} key={p.id}>
+                        <button className="ds-profile-select" onClick={() => selectProfile(p.id)}>
+                          <span className="ds-profile-top">
+                            <span className="ds-profile-name">{p.name}</span>
+                            {isActive && <span className="ds-profile-badge">Activa</span>}
+                          </span>
+                          <span className="ds-profile-summary">{p.serverUrl || '(sin servidor)'}</span>
+                          <span className="ds-profile-summary">ID: {p.deviceId || '(sin identificador)'}</span>
+                        </button>
+                        <div className="ds-profile-actions">
+                          <button onClick={() => openEditProfileModal(p)}>Editar</button>
+                          <button className="ds-remove" onClick={() => removeProfile(p.id)}>
+                            Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="ds-actions">
+                  <button onClick={handleSendNow}>Enviar ubicacion ahora</button>
+                  {sendNowMessage && <span className="ds-saved">{sendNowMessage}</span>}
+                </div>
+
+                <div className="ds-switch-row">
+                  <label className="ds-switch">
+                    <input type="checkbox" checked={senderRunning} onChange={toggleSender} />
+                    <span className="ds-switch-track" />
+                  </label>
+                  <span className="ds-switch-label">Envio continuo</span>
+                  <span className="ds-switch-spacer" />
+                  {sendSettings && (
+                    <div className="ds-inline-field">
+                      <label className="ds-label">Intervalo (s)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={sendSettings.intervalSeconds}
+                        onChange={(e) => updateSendSettings({ intervalSeconds: Number(e.target.value) })}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="cfg-status-row">
+                  <span className={`cfg-status-dot${senderRunning ? ' cfg-status-dot--on' : ''}`} />
+                  <span className="cfg-status-text">
+                    {senderRunning ? 'Enviando' : 'Detenido'}
+                    {bufferedCount > 0 && ` - ${bufferedCount} en buffer`}
+                    {senderError && ` - ${senderError}`}
+                  </span>
+                </div>
+
+                <button className="ds-add" onClick={() => setShowLog((v) => !v)}>
+                  {showLog ? 'Ocultar bitacora' : 'Mostrar bitacora'}
+                </button>
+                {showLog && (
+                  <div className="ds-log">
+                    {logEntries.length === 0 && <div className="ds-log-empty">Sin envios registrados</div>}
+                    {logEntries.map((entry, i) => (
+                      <div className={`ds-log-row ${entry.success ? 'ds-log-ok' : 'ds-log-fail'}`} key={i}>
+                        <span className="ds-log-time">{formatLogTime(entry.timestamp)}</span>
+                        <span className="ds-log-server">{entry.serverUrl}</span>
+                        <span className="ds-log-message">{entry.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="cfg-col">
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">Receptor RTK y NTRIP</h4>
+                <div className="cfg-status-row">
+                  <span className={`cfg-status-dot${receiverConnected ? ' cfg-status-dot--on' : ''}`} />
+                  <span className="cfg-status-text">Receptor {receiverConnected ? 'conectado' : 'sin conectar'}</span>
+                </div>
+                <div className="cfg-status-row">
+                  <span className={`cfg-status-dot${rtkStatus.ntripConnected ? ' cfg-status-dot--on' : ''}`} />
+                  <span className="cfg-status-text">NTRIP {rtkStatus.ntripConnected ? 'conectado' : 'sin conectar'}</span>
+                </div>
+                <div className="ds-actions" style={{ marginTop: 8 }}>
+                  <button onClick={() => setShowUCenter(true)}>Abrir u-center</button>
+                </div>
+                {showUCenter && (
+                  <UCenterView
+                    status={rtkStatus}
+                    onClose={() => setShowUCenter(false)}
+                    connection={{
+                      kioskStatus,
+                      mockLocationBusy,
+                      onOpenDeveloperOptions: openDeveloperOptionsSettings,
+                      onRetryMockLocation: retryMockLocationCheck,
+                      btDevices,
+                      onGrantBluetoothPermission: grantBluetoothPermission,
+                      usbDevices,
+                      baudRate,
+                      onUpdateBaudRate: updateBaudRate,
+                    }}
+                    ntrip={{
+                      profiles: ntripProfiles,
+                      activeProfileId: ntripActiveProfileId,
+                      activeProfile: activeNtripProfile,
+                      message: ntripProfileMessage,
+                      onCreate: openCreateNtripProfileModal,
+                      onSelect: selectNtripProfile,
+                      onEdit: openEditNtripProfileModal,
+                      onRemove: removeNtripProfile,
+                      showModal: showNtripProfileModal,
+                      form: ntripProfileForm,
+                      onFormChange: setNtripProfileForm,
+                      onSearchMountpoints: searchNtripMountpoints,
+                      mountpointsLoading,
+                      mountpointsError,
+                      mountpoints,
+                      formError: ntripProfileFormError,
+                      onSave: saveNtripProfileModal,
+                      onCloseModal: closeNtripProfileModal,
+                      onFetchFromServer: fetchNtripFromServer,
+                      fetchFromServerBusy: ntripFetchBusy,
+                      fetchFromServerError: ntripFetchError,
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+
+          <h4 className="cfg-group-title">Sistema</h4>
+          <div className="cfg-row">
+            <div className="cfg-col">
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">Actualizacion automatica</h4>
+                <div className="cfg-version-row">
+                  <span>Instalada</span>
+                  <span className="cfg-chip">
+                    {updateStatus.currentVersionName || '?'} ({updateStatus.currentVersionCode || '?'})
+                  </span>
+                </div>
+                {updateStatus.latestVersionCode !== null && (
+                  <div className="cfg-version-row">
+                    <span>Disponible</span>
+                    <span className="cfg-chip">
+                      {updateStatus.latestVersionName} ({updateStatus.latestVersionCode})
+                    </span>
+                  </div>
+                )}
+                <div className="ds-switch-row">
+                  <label className="ds-switch">
+                    <input
+                      type="checkbox"
+                      checked={updateStatus.enabled}
+                      onChange={toggleAppUpdate}
+                      disabled={updateBusy}
+                    />
+                    <span className="ds-switch-track" />
+                  </label>
+                  <span className="ds-switch-label">
+                    Actualizacion automatica{updateStatus.checking ? ' (revisando)' : ''}
+                  </span>
+                </div>
+                <div className="ds-actions">
+                  <button onClick={checkForUpdateNow} disabled={updateBusy}>
+                    Buscar ahora
+                  </button>
+                </div>
+                {updateStatus.lastCheckAt && (
+                  <p className="cfg-mini-hint">Ultima revision: {new Date(updateStatus.lastCheckAt).toLocaleString()}</p>
+                )}
+                {(updateError || updateStatus.lastError) && (
+                  <div className="ds-error-block">{updateError || updateStatus.lastError}</div>
+                )}
+              </div>
+            </div>
+
+            <div className="cfg-col">
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">Bloqueo de ajustes</h4>
+                <p className="cfg-mini-hint">
+                  {hasSettingsPassword() ? 'Protegido con contrasena.' : 'Sin contrasena - cualquiera puede editar.'}
+                </p>
+                <input
+                  type="password"
+                  placeholder="Nueva contrasena (vacio = quitar)"
+                  value={lockPasswordInput}
+                  onChange={(e) => setLockPasswordInput(e.target.value)}
+                />
+                <div className="ds-actions">
+                  <button onClick={handleSetLockPassword}>
+                    {hasSettingsPassword() ? 'Cambiar / quitar' : 'Bloquear'}
+                  </button>
+                  {lockSavedMessage && <span className="ds-saved">{lockSavedMessage}</span>}
+                </div>
+              </div>
+
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">Servicio GNSS</h4>
+                <div className="cfg-status-row">
+                  <span className={`cfg-status-dot${rtkStatus.mockLocationActive ? ' cfg-status-dot--on' : ''}`} />
+                  <span className="cfg-status-text">
+                    Ubicacion simulada {rtkStatus.mockLocationActive ? 'activa' : 'inactiva'}
+                  </span>
+                </div>
+                <div className="ds-actions">
+                  <button onClick={restartGnssService} disabled={gnssBusy}>
+                    Reiniciar
+                  </button>
+                </div>
+                <div className="ds-actions">
+                  <button className="ds-remove" onClick={handleRestoreDefaults}>
+                    Restaurar valores de fabrica
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="cfg-col">
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">Modo Kiosko</h4>
+                <p className="cfg-mini-hint">
+                  {kioskStatus.isDeviceOwner
+                    ? 'Tableta aprovisionada (Device Owner) - disponible.'
+                    : 'Sin aprovisionar - falta el comando adb (o QR) antes de activar.'}
+                </p>
+                {!hasSettingsPassword() && (
+                  <p className="cfg-mini-hint">Ponle contrasena en "Bloqueo de ajustes" antes de activarlo.</p>
+                )}
+                <div className="ds-switch-row">
+                  <label className="ds-switch">
+                    <input
+                      type="checkbox"
+                      checked={kioskStatus.enabled}
+                      onChange={toggleKiosk}
+                      disabled={kioskBusy || (!kioskStatus.enabled && !kioskStatus.isDeviceOwner)}
+                    />
+                    <span className="ds-switch-track" />
+                  </label>
+                  <span className="ds-switch-label">
+                    Modo Kiosko {kioskStatus.active ? '(activo ahora)' : kioskStatus.enabled ? '(se activa al reabrir)' : ''}
+                  </span>
+                </div>
+                {kioskError && <div className="ds-error-block">{kioskError}</div>}
+                <p className="cfg-mini-hint">Para salir: vuelve aqui con la contrasena y apaga el switch.</p>
+                {!kioskStatus.exactAlarmsGranted && (
+                  <div className="cfg-warning-box">
+                    <p>
+                      Falta conceder "Alarmas y recordatorios" - la suspension por perdida de corriente y la
+                      actualizacion automatica pueden tardar mas de lo configurado.
+                    </p>
+                    <div className="ds-actions">
+                      <button onClick={openExactAlarmSettings}>Abrir Ajustes de Android</button>
+                    </div>
+                  </div>
+                )}
+                {kioskStatus.isDeviceOwner && (
+                  <div className="ds-actions" style={{ marginTop: 10 }}>
+                    <button onClick={releaseDeviceOwner} disabled={kioskBusy}>
+                      Liberar Device Owner
+                    </button>
+                  </div>
+                )}
+                {kioskStatus.isDeviceOwner && (
+                  <p className="cfg-mini-hint">Requiere reaprovisionar con adb para recuperar Kiosko/actualizaciones despues.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showProfileModal && profileForm && (
+        <div className="ds-modal-overlay" onClick={closeProfileModal}>
+          <div className="ds-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>{profiles.some((p) => p.id === profileForm.id) ? 'Editar configuracion' : 'Nueva configuracion'}</h3>
+            <label className="ds-label">Nombre</label>
+            <input
+              placeholder="Ej. Servidor de pruebas"
+              value={profileForm.name}
+              onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+            />
+            <label className="ds-label">Servidor GAGA GPS</label>
+            <input
+              placeholder="http://192.168.1.50:3001"
+              value={profileForm.serverUrl}
+              onChange={(e) => setProfileForm({ ...profileForm, serverUrl: e.target.value })}
+            />
+            <label className="ds-label">Token de telemetria</label>
+            <input
+              placeholder="TELEMETRY_SHARED_SECRET del servidor"
+              value={profileForm.token}
+              onChange={(e) => setProfileForm({ ...profileForm, token: e.target.value })}
+            />
+            <label className="ds-label">Identificador del dispositivo</label>
+            <input
+              placeholder="Igual que en Traccar Client"
+              value={profileForm.deviceId}
+              onChange={(e) => setProfileForm({ ...profileForm, deviceId: e.target.value })}
+            />
+            {profileFormError && <div className="ds-error-block">{profileFormError}</div>}
+            <div className="ds-actions">
+              <button onClick={saveProfileModal}>Guardar</button>
+              <button className="ds-remove" onClick={closeProfileModal}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
