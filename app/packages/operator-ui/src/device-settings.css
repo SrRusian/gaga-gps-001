@@ -818,8 +818,9 @@
   display: block;
   width: 100%;
   height: auto;
-  background: #0b0d10;
+  border: 1px solid #262b33; /* lo enmarca como un instrumento propio, no un dibujo suelto */
   border-radius: 4px;
+  overflow: hidden; /* recorta el gradiente/tierra a las esquinas redondeadas de arriba */
   margin: 4px 0 8px;
 }
 
@@ -828,9 +829,16 @@
   stroke-width: 1;
 }
 
+/* ecuador y meridiano de Greenwich (lon/lat = 0) un poco mas visibles que el resto de la
+   graticula - convencion cartografica estandar, ayuda a orientarse de un vistazo */
+.uc-world-grid-main {
+  stroke: #2f3946;
+  stroke-width: 1;
+}
+
 .uc-world-land {
-  fill: #262b33;
-  stroke: #363c46;
+  fill: #2b323c;
+  stroke: #454e5a;
   stroke-width: 0.5;
 }
 
@@ -842,6 +850,34 @@
 
 .uc-world-receiver-dot {
   fill: #4f8ff0;
+}
+
+.uc-world-receiver-halo {
+  fill: #4f8ff0;
+  opacity: 0.18;
+}
+
+/* leyenda compartida por Satellite Position y World Position - solo constelaciones presentes */
+.uc-constellation-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0 2px;
+}
+
+.uc-constellation-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: #8b93a1;
+}
+
+.uc-constellation-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
 }
 
 .ds-switch-row {

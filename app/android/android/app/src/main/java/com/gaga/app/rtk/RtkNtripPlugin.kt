@@ -93,6 +93,13 @@ class RtkNtripPlugin : Plugin() {
     private var btConnected = false
     private var ntripConnected = false
     private var ntripError: String? = null
+    // activado solo mientras el menu u-center esta abierto en Ajustes (ver setDiagnosticsActive) -
+    // hace que el push "rtkStatus" (ya dispara hasta 10 veces/seg por bloque de bytes) tambien
+    // incluya satelites/DOP/TTFF, en vez de solo cuando alguien llama getStatus() a mano. Apagado
+    // por default: nadie paga el costo de cruzar la lista de satelites por el puente 10 veces/seg
+    // si no hay nada visible que lo necesite. Leido desde el hilo de IO del receptor (USB/BT), sin
+    // Looper - @Volatile por la misma razon que shouldStayConnected en los *SerialManager.
+    @Volatile private var diagnosticsActive = false
     private var lineBuffer = StringBuilder()
 
     override fun load() {
@@ -116,12 +123,17 @@ class RtkNtripPlugin : Plugin() {
                 usbRate.addBytes(data.size)
                 handleReceiverData(data)
             }
+            // NO se guarda en ntripError - ese campo es solo del estado real de NTRIP (ver
+            // onStatus mas abajo) y se muestra en la tarjeta de NTRIP Client. Un error de
+            // transporte (USB desconectado, permiso denegado) ya se refleja con el punto de
+            // estado de Receptor - mostrarlo aqui tambien era ruido, y encima aparecia mal
+            // etiquetado bajo la tarjeta equivocada. Bug real reportado: el intento automatico de
+            // respaldo por Bluetooth (ver applyTransportPriority) fallaba con un mensaje crudo que
+            // terminaba en la tarjeta de NTRIP sin relacion alguna con NTRIP.
             override fun onError(message: String) {
-                ntripError = message
                 emitStatus()
             }
             override fun onPermissionDenied() {
-                ntripError = "Permiso USB denegado"
                 emitStatus()
             }
             override fun onDeviceListChanged() {
@@ -145,8 +157,9 @@ class RtkNtripPlugin : Plugin() {
                 btRate.addBytes(data.size)
                 handleReceiverData(data)
             }
+            // mismo criterio que el onError de USB de arriba - un error de transporte no es un
+            // error de NTRIP, no se guarda en ntripError
             override fun onError(message: String) {
-                ntripError = message
                 emitStatus()
             }
             override fun onDeviceListChanged() {
@@ -558,8 +571,19 @@ class RtkNtripPlugin : Plugin() {
         call.resolve(buildStatus(includeSatellites = true))
     }
 
-    // la lista de satelites solo viaja en getStatus (el panel de Ajustes lo pollea 1/seg), nunca en
-    // el evento rtkStatus - ese sale en cada bloque de bytes, hasta 10 veces por segundo
+    // llamado por UCenterView.tsx al abrir/cerrar el overlay - mientras esta activo, el push
+    // "rtkStatus" tambien incluye satelites/DOP/TTFF (ver emitStatus()), asi que esos paneles se
+    // actualizan al mismo ritmo que la posicion (hasta 10Hz) en vez de solo 1/seg. Fuera de
+    // u-center vuelve a apagarse solo, sin que nadie tenga que acordarse.
+    @PluginMethod
+    fun setDiagnosticsActive(call: PluginCall) {
+        diagnosticsActive = call.getBoolean("active", false) ?: false
+        call.resolve()
+    }
+
+    // la lista de satelites viaja en getStatus (llamado 1/seg fuera de u-center) SIEMPRE, y en el
+    // evento rtkStatus (hasta 10 veces por segundo) solo mientras diagnosticsActive este activo -
+    // cruzarla por el puente a esa frecuencia sin que nadie la vea seria puro desperdicio
     private fun buildStatus(includeSatellites: Boolean = false): JSObject {
         val ret = JSObject()
         ret.put("usbConnected", usbConnected)
@@ -632,7 +656,7 @@ class RtkNtripPlugin : Plugin() {
     }
 
     private fun emitStatus() {
-        notifyListeners("rtkStatus", buildStatus())
+        notifyListeners("rtkStatus", buildStatus(includeSatellites = diagnosticsActive))
     }
 
     // evento aparte de "rtkStatus" (que solo se manda al cambiar algo relevante) - este se manda

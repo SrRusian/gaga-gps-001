@@ -59,6 +59,43 @@ function snrColor(snr: number | null): string {
   return '#ef4444';
 }
 
+// paleta categorica para distinguir CONSTELACIONES a simple vista en Satellite Position/World
+// Position - eje distinto al de snrColor() (que sigue codificando calidad de señal en Satellite
+// Level/History). Mismo criterio que el u-center real, que tambien colorea su sky plot por
+// constelacion. Fallback gris para una constelacion no listada (ej. SBAS).
+const CONSTELLATION_COLOR: Record<string, string> = {
+  GPS: '#4f8ff0',
+  GLONASS: '#e0793f',
+  Galileo: '#2dd4bf',
+  BeiDou: '#c084fc',
+  QZSS: '#f4d35e',
+  NavIC: '#f472b6',
+};
+
+function constellationColor(constellation: string): string {
+  return CONSTELLATION_COLOR[constellation] ?? '#9ca3af';
+}
+
+function distinctConstellations(satellites: SatelliteInfo[]): string[] {
+  return [...new Set(satellites.map((s) => s.constellation))].sort();
+}
+
+// leyenda compartida por Satellite Position y World Position - solo lista las constelaciones que
+// de verdad estan presentes ahora, no las 6 posibles siempre
+function ConstellationLegend({ constellations }: { constellations: string[] }) {
+  if (constellations.length === 0) return null;
+  return (
+    <div className="uc-constellation-legend">
+      {constellations.map((c) => (
+        <span className="uc-constellation-legend-item" key={c}>
+          <span className="uc-constellation-dot" style={{ background: constellationColor(c) }} />
+          {c}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 const SIGNAL_NAMES: Record<string, Record<number, string>> = {
   GPS: { 1: 'L1C/A', 5: 'L2 CM', 6: 'L2 CL' },
   GLONASS: { 1: 'L1 OF', 3: 'L2 OF' },
@@ -294,7 +331,7 @@ function SatellitePositionPanel({ status }: { status: RtkStatus }) {
           const { x, y } = polarPoint(center, center, r, s.azimuth as number);
           return (
             <g key={`${s.constellation}-${s.id}-${s.signalId}`} opacity={s.used ? 1 : 0.5}>
-              <circle cx={x} cy={y} r={7} fill={snrColor(s.snr)} stroke="#0b0d10" strokeWidth={1} />
+              <circle cx={x} cy={y} r={7} fill={constellationColor(s.constellation)} stroke="#0b0d10" strokeWidth={1} />
               <text x={x} y={y + 3} textAnchor="middle" className="uc-sky-sat-id">
                 {s.id}
               </text>
@@ -302,6 +339,7 @@ function SatellitePositionPanel({ status }: { status: RtkStatus }) {
           );
         })}
       </svg>
+      <ConstellationLegend constellations={distinctConstellations(sats)} />
       {sats.length === 0 && <p className="ds-hint">Sin satelites con elevacion/azimut todavia.</p>}
       <p className="ds-hint">Centro = cenit (90°), borde = horizonte (0°). Util para ver que parte del cielo esta obstruida.</p>
     </div>
@@ -399,14 +437,43 @@ function WorldPositionPanel({ status }: { status: RtkStatus }) {
     <div className="uc-panel uc-panel-wide">
       <h4 className="uc-panel-title">World Position</h4>
       <svg viewBox={`0 0 ${width} ${height}`} className="uc-world-map">
-        {/* graticula cada 30 grados */}
+        <defs>
+          {/* oceano con un leve gradiente vertical (mas claro cerca del ecuador) en vez de un
+              fondo plano - lee mas a "mapa" que a "vacio" */}
+          <linearGradient id="ucOceanGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#0d1219" />
+            <stop offset="50%" stopColor="#111826" />
+            <stop offset="100%" stopColor="#0d1219" />
+          </linearGradient>
+        </defs>
+        <rect x={0} y={0} width={width} height={height} fill="url(#ucOceanGradient)" />
+        {/* graticula cada 30 grados - ecuador/meridiano de Greenwich (0) un poco mas visibles que
+            el resto, convencion cartografica estandar para orientarse de un vistazo */}
         {[-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150].map((lon) => {
           const x = equirectangular(lon, 0, width, height).x;
-          return <line key={`m${lon}`} x1={x} y1={0} x2={x} y2={height} className="uc-world-grid" />;
+          return (
+            <line
+              key={`m${lon}`}
+              x1={x}
+              y1={0}
+              x2={x}
+              y2={height}
+              className={lon === 0 ? 'uc-world-grid-main' : 'uc-world-grid'}
+            />
+          );
         })}
         {[-60, -30, 0, 30, 60].map((lat) => {
           const y = equirectangular(0, lat, width, height).y;
-          return <line key={`p${lat}`} x1={0} y1={y} x2={width} y2={y} className="uc-world-grid" />;
+          return (
+            <line
+              key={`p${lat}`}
+              x1={0}
+              y1={y}
+              x2={width}
+              y2={y}
+              className={lat === 0 ? 'uc-world-grid-main' : 'uc-world-grid'}
+            />
+          );
         })}
         {WORLD_CONTINENTS.map((poly, i) => (
           <polygon
@@ -418,15 +485,6 @@ function WorldPositionPanel({ status }: { status: RtkStatus }) {
             className="uc-world-land"
           />
         ))}
-        {receiver && (() => {
-          const p = equirectangular(receiver.lon, receiver.lat, width, height);
-          return (
-            <g>
-              <circle cx={p.x} cy={p.y} r={5} className="uc-world-receiver-ring" />
-              <circle cx={p.x} cy={p.y} r={2.5} className="uc-world-receiver-dot" />
-            </g>
-          );
-        })()}
         {subpoints.map(({ lat, lon, sat }) => {
           const p = equirectangular(lon, lat, width, height);
           return (
@@ -434,15 +492,30 @@ function WorldPositionPanel({ status }: { status: RtkStatus }) {
               key={`${sat.constellation}-${sat.id}-${sat.signalId}`}
               cx={p.x}
               cy={p.y}
-              r={3.5}
-              fill={snrColor(sat.snr)}
+              r={4}
+              fill={constellationColor(sat.constellation)}
+              stroke="#0b0d10"
+              strokeWidth={1}
               opacity={sat.used ? 1 : 0.5}
             >
               <title>{signalLabel(sat)}</title>
             </circle>
           );
         })}
+        {receiver && (() => {
+          const p = equirectangular(receiver.lon, receiver.lat, width, height);
+          return (
+            <g>
+              {/* halo suave detras del anillo - le da algo de profundidad sin animacion ni filtros
+                  SVG pesados, solo un circulo extra semi-transparente */}
+              <circle cx={p.x} cy={p.y} r={10} className="uc-world-receiver-halo" />
+              <circle cx={p.x} cy={p.y} r={5} className="uc-world-receiver-ring" />
+              <circle cx={p.x} cy={p.y} r={2.5} className="uc-world-receiver-dot" />
+            </g>
+          );
+        })()}
       </svg>
+      <ConstellationLegend constellations={distinctConstellations(sats)} />
       {!receiver && <p className="ds-hint">Sin posicion propia todavia - necesaria para ubicar los satelites en el mapa.</p>}
       <p className="ds-hint">
         Punto grande = posicion del receptor. Puntos chicos = subpunto aproximado de cada satelite (proyeccion
@@ -454,7 +527,10 @@ function WorldPositionPanel({ status }: { status: RtkStatus }) {
 
 // -- Panel: Satellite Level History (sparkline por satelite) ---------------------------------------
 
-const HISTORY_LENGTH = 30;
+// 300 (no 30) porque desde que u-center activa el modo diagnostico (ver setDiagnosticsActive en
+// DeviceSettingsPanel.tsx), satellites llega hasta a 10Hz - 300 lecturas siguen cubriendo ~30
+// segundos de historial real, igual que antes cuando esto solo llegaba 1 vez/seg
+const HISTORY_LENGTH = 300;
 
 function useSatelliteHistory(satellites: SatelliteInfo[] | undefined) {
   const historyRef = useRef<Map<string, number[]>>(new Map());
@@ -803,7 +879,6 @@ export interface UCenterNtripProps {
   onSelect: (id: string) => void;
   onEdit: (profile: NtripProfile) => void;
   onRemove: (id: string) => void;
-  onToggleConnect: () => void;
   showModal: boolean;
   form: NtripProfile | null;
   onFormChange: (profile: NtripProfile) => void;
@@ -951,14 +1026,16 @@ function NtripSection({ status, ntrip }: { status: RtkStatus; ntrip: UCenterNtri
           );
         })}
       </div>
-      <div className="ds-actions">
-        <button onClick={ntrip.onToggleConnect} disabled={!ntrip.activeProfile}>
-          {status.ntripConnected ? 'Detener NTRIP' : 'Conectar NTRIP'}
-        </button>
-        <span className="ds-status">
+      {/* pura vista de estado, sin boton - la app ya conecta/desconecta NTRIP sola en cuanto el
+          receptor (USB o Bluetooth) aparece/desaparece (ver onReceiverConnected/Disconnected en
+          RtkNtripPlugin.kt), mismo criterio que Receptor: con eso ya cubierto, un boton manual de
+          Conectar/Detener solo invitaria a un estado inconsistente sin necesidad real */}
+      <div className="uc-status-row">
+        <StatusDot on={status.ntripConnected} />
+        <span className="uc-status-text">
           {status.ntripConnected
             ? `Conectado - ${formatRate(status.ntripDataRateBps)} - ${formatTotalBytes(status.ntripTotalBytes)} total`
-            : 'Sin conectar'}
+            : 'Sin conectar - se conecta solo cuando el receptor esta activo'}
         </span>
       </div>
       {status.ntripError && <div className="ds-error-block">{status.ntripError}</div>}

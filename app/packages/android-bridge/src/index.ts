@@ -223,6 +223,10 @@ export interface RtkNtripPlugin {
   startSwMapsOutput(options?: { port?: number }): Promise<void>;
   stopSwMapsOutput(): Promise<void>;
   getStatus(): Promise<RtkStatus>;
+  // mientras esta activo, el evento rtkStatus (hasta 10Hz) tambien trae satelites/DOP/TTFF - solo
+  // se activa mientras el menu u-center esta abierto (ver UCenterView.tsx), apagado el resto del
+  // tiempo para no cruzar esa lista por el puente sin que nadie la vea
+  setDiagnosticsActive(options: { active: boolean }): Promise<void>;
   addListener(
     eventName: 'rtkStatus',
     listenerFunc: (status: RtkStatus) => void,
@@ -296,6 +300,7 @@ const webRtkFallback: RtkNtripPlugin = {
   stopMockLocation: async () => unavailable('RtkNtrip'),
   startSwMapsOutput: async () => unavailable('RtkNtrip'),
   stopSwMapsOutput: async () => unavailable('RtkNtrip'),
+  setDiagnosticsActive: async () => unavailable('RtkNtrip'),
   getStatus: async () => ({
     usbConnected: false,
     connectedUsbDeviceName: null,

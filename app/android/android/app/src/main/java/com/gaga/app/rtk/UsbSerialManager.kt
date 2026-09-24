@@ -8,6 +8,8 @@ import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import com.hoho.android.usbserial.driver.CdcAcmSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
@@ -39,6 +41,10 @@ fun UsbDevice.friendlyLabel(): String {
 class UsbSerialManager(private val context: Context) {
     companion object {
         private const val ACTION_USB_PERMISSION = "com.gaga.app.rtk.USB_PERMISSION"
+        // mismo intervalo que BluetoothSerialManager.RETRY_DELAY_MS - el enlace USB puede caerse
+        // con el cable todavia puesto (glitch electrico, timeout de una transferencia) y sin este
+        // reintento se quedaba mudo para siempre hasta desconectar/reconectar el cable a mano
+        private const val RETRY_DELAY_MS = 4000L
     }
 
     interface Listener {
@@ -55,6 +61,10 @@ class UsbSerialManager(private val context: Context) {
     private var port: UsbSerialPort? = null
     private var ioManager: SerialInputOutputManager? = null
     var listener: Listener? = null
+
+    private val retryHandler = Handler(Looper.getMainLooper())
+    @Volatile private var shouldStayConnected = false
+    private var lastDeviceId: Int? = null
 
     var connectedDeviceName: String? = null
         private set
@@ -104,6 +114,8 @@ class UsbSerialManager(private val context: Context) {
         UsbSerialProber.getDefaultProber().findAllDrivers(usbManager)
 
     fun connect(deviceId: Int, baudRate: Int) {
+        shouldStayConnected = true
+        lastDeviceId = deviceId
         val driver = listDevices().find { it.device.deviceId == deviceId }
         if (driver == null) {
             listener?.onError("Dispositivo USB no encontrado (desconectado?)")
@@ -180,8 +192,7 @@ class UsbSerialManager(private val context: Context) {
                     listener?.onDataReceived(data)
                 }
                 override fun onRunError(e: Exception) {
-                    listener?.onError("Conexion USB perdida: ${e.message}")
-                    disconnect()
+                    handleConnectionLost("Conexion USB perdida: ${e.message}")
                 }
             },
         )
@@ -227,7 +238,16 @@ class UsbSerialManager(private val context: Context) {
         }
     }
 
+    // detencion intencional (ej. "Desactivar todo" en Ajustes) - a diferencia de un enlace que se
+    // cae solo, aqui NO se reintenta despues
     fun disconnect() {
+        shouldStayConnected = false
+        retryHandler.removeCallbacksAndMessages(null)
+        teardown()
+        listener?.onDisconnected()
+    }
+
+    private fun teardown() {
         ioManager?.stop()
         ioManager = null
         try {
@@ -237,7 +257,41 @@ class UsbSerialManager(private val context: Context) {
         port = null
         connectedDeviceName = null
         connectedDeviceId = null
+    }
+
+    // enlace caido con el cable todavia puesto (glitch electrico, timeout de una transferencia) -
+    // a diferencia de disconnect() (intencional), aqui SI se reintenta solo, mismo criterio que
+    // BluetoothSerialManager.scheduleRetry(). Bug real de campo: RTK vivo, USB fisicamente puesto,
+    // tableta sin datos por horas hasta desconectar/reconectar el cable a mano.
+    private fun handleConnectionLost(message: String) {
+        listener?.onError(message)
+        teardown()
         listener?.onDisconnected()
+        if (shouldStayConnected) scheduleRetry()
+    }
+
+    private fun scheduleRetry() {
+        retryHandler.removeCallbacksAndMessages(null)
+        retryHandler.postDelayed({ retryLastDevice() }, RETRY_DELAY_MS)
+    }
+
+    private fun retryLastDevice() {
+        if (!shouldStayConnected || isConnected()) return
+        val deviceId = lastDeviceId ?: return
+        val driver = listDevices().find { it.device.deviceId == deviceId }
+        if (driver == null) {
+            // el cable de verdad se fue - onUsbAttached() lo retoma solo si vuelve a conectarse
+            scheduleRetry()
+            return
+        }
+        val device = driver.device
+        if (usbManager.hasPermission(device)) {
+            openDevice(device)
+        } else {
+            // el permiso ya se habia otorgado antes para este mismo dispositivo - si se perdio por
+            // algun motivo, reintentar mas tarde en vez de disparar otro dialogo de permiso solo
+            scheduleRetry()
+        }
     }
 
     fun isConnected(): Boolean = port != null

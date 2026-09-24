@@ -3,6 +3,11 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   base: '/',
+  // lee el .env de la raiz del monorepo (el mismo que usa el backend), no uno propio de web/ - un
+  // solo archivo de config para todo el proyecto. Seguro: Vite solo expone al bundle las claves
+  // con prefijo VITE_ (ver .env.example "5. APP ANDROID/OPERADOR") - JWT_SECRET/DB_PASSWORD/etc
+  // del resto del archivo nunca llegan al cliente aunque esten en el mismo .env.
+  envDir: '..',
   plugins: [react()],
   server: {
     port: 5173,

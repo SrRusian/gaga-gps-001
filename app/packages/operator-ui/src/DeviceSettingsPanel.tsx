@@ -58,28 +58,39 @@ function buildMainServerUrl(serverUrl: string, token: string): string {
 
 // codigo de "configuracion rapida" - rellena servidor/token/NTRIP conocidos y activa el modo
 // automatico de un golpe, para no tener que escribirlo a mano en cada tableta que se provisiona.
-// El identificador del dispositivo y el mount point NUNCA se llenan solos a proposito (varian por
-// tableta/ubicacion). Para cambiar este codigo, solo pide que se edite aqui.
+// El identificador del dispositivo NUNCA se llena solo a proposito (varia por tableta).
 // codigo interno de "modo operador" - solo el equipo de desarrollo debe conocerlo. Un dispositivo
 // nuevo llega en modo basico (login + panel normal, sin permisos extra); activar modo operador
 // revela todo lo que hay debajo de este comentario y ya no se puede desactivar sin reinstalar la
-// app. Cambiar el codigo aqui si hace falta.
-const OPERATOR_MODE_CODE = '3009';
+// app. Viene de VITE_OPERATOR_MODE_CODE (.env de la raiz, ver seccion 5 de .env.example) - se
+// compila DENTRO del bundle en build time, no es un secreto de servidor, solo evita que se vea a
+// simple vista navegando el codigo fuente en GitHub (el repo es publico). '3009' es el valor de
+// siempre si el .env no lo define.
+const OPERATOR_MODE_CODE = import.meta.env.VITE_OPERATOR_MODE_CODE || '3009';
 
 // id fijo para el perfil de servidor/NTRIP "de fabrica" - se usa tanto al activar Modo Operador
 // por primera vez como desde el boton "Restaurar valores por defecto", asi repetir la accion
 // actualiza el mismo perfil en vez de ir creando duplicados cada vez
 const DEFAULT_PROFILE_ID = 'principal';
 
-// valores NTRIP conocidos que "Restaurar valores por defecto"/activar Modo Operador dejan listos
-// de fabrica (ver applyDefaultProvisioning) - el mount point se queda vacio a proposito, varia por
-// tableta/ubicacion, se elige con "Buscar puntos de montura"
+function envNtripVersion(value: string | undefined): NtripProfile['version'] {
+  return value === 'v1' ? 'v1' : 'v2';
+}
+
+// valores NTRIP "de fabrica" que "Restaurar valores por defecto"/activar Modo Operador dejan
+// listos - vienen de VITE_NTRIP_DEFAULT_* (.env de la raiz, ver seccion 5 de .env.example),
+// nunca hardcodeados aqui: a diferencia de OPERATOR_MODE_CODE, esto SI son credenciales reales de
+// una cuenta NTRIP, y este archivo se sube a un repo publico. Sin definirlos en el .env, cada
+// campo cae a vacio - mismo criterio que el mount point, que ya se dejaba vacio a proposito para
+// llenarse a mano por tableta/ubicacion.
 const DEFAULT_NTRIP_VALUES = {
-  host: 'ntrip.earthscope.org',
-  port: 2101,
-  username: 'nervous_raman',
-  password: 'Lh4lI10A0brg43QO',
-  version: 'v2' as const,
+  name: import.meta.env.VITE_NTRIP_DEFAULT_NAME || 'Principal',
+  host: import.meta.env.VITE_NTRIP_DEFAULT_HOST || '',
+  port: Number(import.meta.env.VITE_NTRIP_DEFAULT_PORT) || 2101,
+  username: import.meta.env.VITE_NTRIP_DEFAULT_USERNAME || '',
+  password: import.meta.env.VITE_NTRIP_DEFAULT_PASSWORD || '',
+  version: envNtripVersion(import.meta.env.VITE_NTRIP_DEFAULT_VERSION),
+  mountpoint: import.meta.env.VITE_NTRIP_DEFAULT_MOUNTPOINT || '',
 };
 
 function formatLogTime(ts: number): string {
@@ -165,6 +176,17 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   const [usbDevices, setUsbDevices] = useState<UsbDeviceInfo[]>([]);
   const [btDevices, setBtDevices] = useState<{ address: string; name: string | null }[]>([]);
   const [showUCenter, setShowUCenter] = useState(false);
+
+  // mientras u-center esta abierto, el push rtkStatus (ya dispara hasta 10Hz) tambien trae
+  // satelites/DOP/TTFF - fuera de u-center vuelve a apagarse solo (cleanup), sin poll extra ni
+  // gasto de bateria de mas. .catch() silencioso: fuera de la app nativa esto simplemente no existe.
+  useEffect(() => {
+    if (!operatorMode) return;
+    RtkNtrip.setDiagnosticsActive({ active: showUCenter }).catch(() => {});
+    return () => {
+      RtkNtrip.setDiagnosticsActive({ active: false }).catch(() => {});
+    };
+  }, [showUCenter, operatorMode]);
 
   const [baudRate, setBaudRateInput] = useState(460800);
   const [gnssBusy, setGnssBusy] = useState(false);
@@ -561,16 +583,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     setMountpointsLoading(false);
   }
 
-  async function toggleNtrip() {
-    if (rtkStatus.ntripConnected) {
-      await RtkNtrip.stopNtrip();
-      return;
-    }
-    if (!activeNtripProfile) return;
-    await applyNtripConfig(activeNtripProfile);
-    await RtkNtrip.startNtrip();
-  }
-
   // "Servicio GNSS" agrupa las 4 piezas (USB, NTRIP, ubicacion simulada, salida SW Maps) en un
   // solo control - cada pieza sigue siendo un plugin nativo independiente, esto solo orquesta
   // el orden de arranque/apagado desde el front. Salida SW Maps sin UI propia (sin uso real
@@ -610,10 +622,11 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   }
 
   // valores "de fabrica" completos - servidor de produccion (token/id vacios, varian por
-  // tableta), envio continuo activado con intervalo 1s, NTRIP con DEFAULT_NTRIP_VALUES (mount
-  // point vacio, se elige con "Buscar puntos de montura"), baud rate 460800 y salida SW Maps
-  // activada en el puerto 11123. Se usa tanto al activar Modo Operador por primera vez como
-  // desde "Restaurar valores por defecto" (id fijo, no duplica)
+  // tableta), envio continuo activado con intervalo 1s, NTRIP con DEFAULT_NTRIP_VALUES (todo
+  // configurable via .env, ver arriba - mount point vacio si no se definio, se elige con "Buscar
+  // puntos de montura"), baud rate 460800 y salida SW Maps activada en el puerto 11123. Se usa
+  // tanto al activar Modo Operador por primera vez como desde "Restaurar valores por defecto"
+  // (id fijo, no duplica)
   async function applyDefaultProvisioning() {
     const serverProfile: ServerProfile = {
       id: DEFAULT_PROFILE_ID,
@@ -637,10 +650,10 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
 
     const ntripProfile: NtripProfile = {
       id: DEFAULT_PROFILE_ID,
-      name: 'Principal',
+      name: DEFAULT_NTRIP_VALUES.name,
       host: DEFAULT_NTRIP_VALUES.host,
       port: DEFAULT_NTRIP_VALUES.port,
-      mountpoint: '',
+      mountpoint: DEFAULT_NTRIP_VALUES.mountpoint,
       username: DEFAULT_NTRIP_VALUES.username,
       password: DEFAULT_NTRIP_VALUES.password,
       version: DEFAULT_NTRIP_VALUES.version,
@@ -1032,7 +1045,6 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
                 onSelect: selectNtripProfile,
                 onEdit: openEditNtripProfileModal,
                 onRemove: removeNtripProfile,
-                onToggleConnect: toggleNtrip,
                 showModal: showNtripProfileModal,
                 form: ntripProfileForm,
                 onFormChange: setNtripProfileForm,
