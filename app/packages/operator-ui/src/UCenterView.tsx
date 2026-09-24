@@ -889,6 +889,11 @@ export interface UCenterNtripProps {
   formError: string;
   onSave: () => void;
   onCloseModal: () => void;
+  // credenciales NTRIP de fabrica pedidas al backend en vivo (GET /api/app/ntrip-config, clave
+  // compartida) - nunca hardcodeadas en el APK, ver DeviceSettingsPanel.tsx fetchNtripFromServer()
+  onFetchFromServer: () => void;
+  fetchFromServerBusy: boolean;
+  fetchFromServerError: string;
 }
 
 function NtripProfileModal({
@@ -902,6 +907,9 @@ function NtripProfileModal({
   formError,
   onSave,
   onClose,
+  onFetchFromServer,
+  fetchFromServerBusy,
+  fetchFromServerError,
 }: {
   form: NtripProfile;
   isEditing: boolean;
@@ -913,6 +921,9 @@ function NtripProfileModal({
   formError: string;
   onSave: () => void;
   onClose: () => void;
+  onFetchFromServer: () => void;
+  fetchFromServerBusy: boolean;
+  fetchFromServerError: string;
 }) {
   return (
     <div className="ds-modal-overlay" onClick={onClose}>
@@ -981,10 +992,18 @@ function NtripProfileModal({
         {formError && <div className="ds-error-block">{formError}</div>}
         <div className="ds-actions">
           <button onClick={onSave}>Guardar</button>
+          <button onClick={onFetchFromServer} disabled={fetchFromServerBusy}>
+            {fetchFromServerBusy ? 'Obteniendo…' : 'Obtener del servidor'}
+          </button>
           <button className="ds-remove" onClick={onClose}>
             Cancelar
           </button>
         </div>
+        {fetchFromServerError && <div className="ds-error-block">{fetchFromServerError}</div>}
+        <p className="uc-mini-hint">
+          Trae host/puerto/usuario/contraseña/mount point de fabrica desde el servidor - requiere
+          que el token de telemetria de esta tableta ya funcione (revisa la bitacora de envio).
+        </p>
       </div>
     </div>
   );
@@ -1052,6 +1071,9 @@ function NtripSection({ status, ntrip }: { status: RtkStatus; ntrip: UCenterNtri
           formError={ntrip.formError}
           onSave={ntrip.onSave}
           onClose={ntrip.onCloseModal}
+          onFetchFromServer={ntrip.onFetchFromServer}
+          fetchFromServerBusy={ntrip.fetchFromServerBusy}
+          fetchFromServerError={ntrip.fetchFromServerError}
         />
       )}
     </section>

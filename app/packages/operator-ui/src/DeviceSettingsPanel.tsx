@@ -16,6 +16,7 @@ import {
   deleteServerProfile,
   enableOperatorMode,
   getActiveServerProfileId,
+  getApiBaseUrl,
   getDeviceId,
   getSettingsPassword,
   getStoredApiBaseUrl,
@@ -56,9 +57,6 @@ function buildMainServerUrl(serverUrl: string, token: string): string {
   return `${base}/gps${query}`;
 }
 
-// codigo de "configuracion rapida" - rellena servidor/token/NTRIP conocidos y activa el modo
-// automatico de un golpe, para no tener que escribirlo a mano en cada tableta que se provisiona.
-// El identificador del dispositivo NUNCA se llena solo a proposito (varia por tableta).
 // codigo interno de "modo operador" - solo el equipo de desarrollo debe conocerlo. Un dispositivo
 // nuevo llega en modo basico (login + panel normal, sin permisos extra); activar modo operador
 // revela todo lo que hay debajo de este comentario y ya no se puede desactivar sin reinstalar la
@@ -68,30 +66,14 @@ function buildMainServerUrl(serverUrl: string, token: string): string {
 // siempre si el .env no lo define.
 const OPERATOR_MODE_CODE = import.meta.env.VITE_OPERATOR_MODE_CODE || '3009';
 
-// id fijo para el perfil de servidor/NTRIP "de fabrica" - se usa tanto al activar Modo Operador
-// por primera vez como desde el boton "Restaurar valores por defecto", asi repetir la accion
+// id fijo para el perfil de servidor "de fabrica" - se usa tanto al activar Modo Operador por
+// primera vez como desde el boton "Restaurar valores por defecto", asi repetir la accion
 // actualiza el mismo perfil en vez de ir creando duplicados cada vez
 const DEFAULT_PROFILE_ID = 'principal';
 
-function envNtripVersion(value: string | undefined): NtripProfile['version'] {
-  return value === 'v1' ? 'v1' : 'v2';
-}
-
-// valores NTRIP "de fabrica" que "Restaurar valores por defecto"/activar Modo Operador dejan
-// listos - vienen de VITE_NTRIP_DEFAULT_* (.env de la raiz, ver seccion 5 de .env.example),
-// nunca hardcodeados aqui: a diferencia de OPERATOR_MODE_CODE, esto SI son credenciales reales de
-// una cuenta NTRIP, y este archivo se sube a un repo publico. Sin definirlos en el .env, cada
-// campo cae a vacio - mismo criterio que el mount point, que ya se dejaba vacio a proposito para
-// llenarse a mano por tableta/ubicacion.
-const DEFAULT_NTRIP_VALUES = {
-  name: import.meta.env.VITE_NTRIP_DEFAULT_NAME || 'Principal',
-  host: import.meta.env.VITE_NTRIP_DEFAULT_HOST || '',
-  port: Number(import.meta.env.VITE_NTRIP_DEFAULT_PORT) || 2101,
-  username: import.meta.env.VITE_NTRIP_DEFAULT_USERNAME || '',
-  password: import.meta.env.VITE_NTRIP_DEFAULT_PASSWORD || '',
-  version: envNtripVersion(import.meta.env.VITE_NTRIP_DEFAULT_VERSION),
-  mountpoint: import.meta.env.VITE_NTRIP_DEFAULT_MOUNTPOINT || '',
-};
+// nombre del perfil de fabrica - configurable via VITE_DEFAULT_PROFILE_NAME porque no es sensible
+// (a diferencia de las credenciales NTRIP, que ya NO viven aqui - ver fetchNtripFromServer())
+const DEFAULT_PROFILE_NAME = import.meta.env.VITE_DEFAULT_PROFILE_NAME || 'Principal';
 
 function formatLogTime(ts: number): string {
   return new Date(ts).toLocaleTimeString();
@@ -621,16 +603,19 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     await activateGnssService();
   }
 
-  // valores "de fabrica" completos - servidor de produccion (token/id vacios, varian por
-  // tableta), envio continuo activado con intervalo 1s, NTRIP con DEFAULT_NTRIP_VALUES (todo
-  // configurable via .env, ver arriba - mount point vacio si no se definio, se elige con "Buscar
-  // puntos de montura"), baud rate 460800 y salida SW Maps activada en el puerto 11123. Se usa
-  // tanto al activar Modo Operador por primera vez como desde "Restaurar valores por defecto"
-  // (id fijo, no duplica)
+  // valores "de fabrica" minimos y no sensibles - servidor de produccion (token/id vacios, varian
+  // por tableta), intervalo de envio en 1s pero envio continuo DESACTIVADO (lo activa la persona a
+  // mano en cuanto llene token+identificador), actualizacion automatica activada, baud rate 460800
+  // y salida SW Maps en el puerto 11123. Deliberadamente SIN ningun perfil NTRIP: las credenciales
+  // reales ya no viven en el codigo/APK (ver bug de seguridad real que esto corrigio, credencial
+  // hardcodeada en un repo publico) - se piden en vivo al servidor desde u-center > NTRIP Client >
+  // "Obtener del servidor" (fetchNtripFromServer), una vez que el token de telemetria ya funciona.
+  // Se usa tanto al activar Modo Operador por primera vez como desde "Restaurar valores por
+  // defecto" (id fijo, no duplica).
   async function applyDefaultProvisioning() {
     const serverProfile: ServerProfile = {
       id: DEFAULT_PROFILE_ID,
-      name: 'Principal',
+      name: DEFAULT_PROFILE_NAME,
       serverUrl: PRODUCTION_SERVER_URL,
       token: '',
       deviceId: '',
@@ -639,33 +624,56 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     await applyProfile(serverProfile);
     setProfiles(listServerProfiles());
 
-    try {
-      await TraccarSender.start();
-      setSenderRunning(true);
-      setSenderError(null);
-    } catch (e) {
-      setSenderError(e instanceof Error ? e.message : 'No se pudo iniciar el envio');
-    }
     setSendSettings(await TraccarSender.resetSendSettings());
 
-    const ntripProfile: NtripProfile = {
-      id: DEFAULT_PROFILE_ID,
-      name: DEFAULT_NTRIP_VALUES.name,
-      host: DEFAULT_NTRIP_VALUES.host,
-      port: DEFAULT_NTRIP_VALUES.port,
-      mountpoint: DEFAULT_NTRIP_VALUES.mountpoint,
-      username: DEFAULT_NTRIP_VALUES.username,
-      password: DEFAULT_NTRIP_VALUES.password,
-      version: DEFAULT_NTRIP_VALUES.version,
-    };
-    upsertNtripProfile(ntripProfile);
-    setActiveNtripProfileId(ntripProfile.id);
-    setNtripActiveProfileIdState(ntripProfile.id);
-    setNtripProfiles(listNtripProfiles());
+    // enciende la actualizacion automatica explicitamente - applyProfile() de proposito preserva
+    // el switch actual (para no pisarlo cada vez que se cambia de perfil), pero aqui SI queremos
+    // forzarlo a activado como parte del aprovisionamiento de fabrica
+    await AppUpdate.configure({
+      apiBaseUrl: serverProfile.serverUrl.trim(),
+      key: serverProfile.token.trim(),
+      enabled: true,
+    }).catch(() => {});
+    setUpdateStatus(await AppUpdate.getStatus());
 
     await updateBaudRate(460800);
     await RtkNtrip.startSwMapsOutput({ port: 11123 }).catch(() => {});
     await refreshRtkStatus();
+  }
+
+  // pide al backend las credenciales NTRIP de fabrica (GET /api/app/ntrip-config, misma clave
+  // compartida que ya usa el envio de posicion) y las vuelca en el formulario ya abierto - nunca
+  // las trae hardcodeadas en el APK. Requiere que el token de telemetria de esta tableta ya sea
+  // valido (401 "Clave invalida" si no) - por diseño, solo tiene sentido llamarlo despues de que
+  // el envio continuo ya este mandando OK, confirmando que el token es el correcto.
+  const [ntripFetchBusy, setNtripFetchBusy] = useState(false);
+  const [ntripFetchError, setNtripFetchError] = useState('');
+
+  async function fetchNtripFromServer() {
+    if (!ntripProfileForm) return;
+    setNtripFetchBusy(true);
+    setNtripFetchError('');
+    try {
+      const base = getApiBaseUrl().replace(/\/+$/, '');
+      const key = encodeURIComponent(getTelemetryToken());
+      const res = await fetch(`${base}/api/app/ntrip-config?key=${key}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+      setNtripProfileForm({
+        ...ntripProfileForm,
+        name: data.name || ntripProfileForm.name,
+        host: data.host || '',
+        port: data.port || 2101,
+        username: data.username || '',
+        password: data.password || '',
+        mountpoint: data.mountpoint || ntripProfileForm.mountpoint,
+        version: data.version === 'v1' ? 'v1' : 'v2',
+      });
+    } catch (e) {
+      setNtripFetchError(e instanceof Error ? e.message : 'No se pudo obtener la configuracion del servidor');
+    } finally {
+      setNtripFetchBusy(false);
+    }
   }
 
   async function handleActivateOperatorMode() {
@@ -1055,6 +1063,9 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
                 formError: ntripProfileFormError,
                 onSave: saveNtripProfileModal,
                 onCloseModal: closeNtripProfileModal,
+                onFetchFromServer: fetchNtripFromServer,
+                fetchFromServerBusy: ntripFetchBusy,
+                fetchFromServerError: ntripFetchError,
               }}
             />
           )}

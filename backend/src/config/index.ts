@@ -12,6 +12,20 @@ export interface PositionFilterConfig {
   maxConsecutiveRejects: number;
 }
 
+// credenciales NTRIP de fabrica que la tableta pide en vivo (GET /api/app/ntrip-config, clave
+// compartida) en vez de traerlas hardcodeadas en el APK - ver seccion 6 de .env.example. Este .env
+// es solo la semilla del primer arranque, loadSettingsOverrides() en app.ts los sobreescribe con
+// lo guardado en system_settings en cuanto un admin los edite una vez desde el panel.
+export interface NtripDefaultConfig {
+  name: string;
+  host: string | null;
+  port: number;
+  username: string | null;
+  password: string | null;
+  mountpoint: string | null;
+  version: 'v1' | 'v2';
+}
+
 export interface Env {
   port: number;
   jwtSecret: string;
@@ -29,6 +43,7 @@ export interface Env {
   defaultAdminEmail: string;
   defaultAdminPassword: string;
   positionFilter: PositionFilterConfig;
+  ntripDefault: NtripDefaultConfig;
 }
 
 export const env: Env = {
@@ -54,6 +69,16 @@ export const env: Env = {
     jitterRadiusMeters: parseFloat(process.env.POSITION_FILTER_JITTER_RADIUS_M || '5'),
     historyWindow: parseInt(process.env.POSITION_FILTER_HISTORY_WINDOW || '8', 10),
     maxConsecutiveRejects: parseInt(process.env.POSITION_FILTER_MAX_CONSECUTIVE_REJECTS || '3', 10),
+  },
+
+  ntripDefault: {
+    name: process.env.NTRIP_DEFAULT_NAME || 'Principal',
+    host: process.env.NTRIP_DEFAULT_HOST || null,
+    port: parseInt(process.env.NTRIP_DEFAULT_PORT || '2101', 10),
+    username: process.env.NTRIP_DEFAULT_USERNAME || null,
+    password: process.env.NTRIP_DEFAULT_PASSWORD || null,
+    mountpoint: process.env.NTRIP_DEFAULT_MOUNTPOINT || null,
+    version: process.env.NTRIP_DEFAULT_VERSION === 'v1' ? 'v1' : 'v2',
   },
 };
 

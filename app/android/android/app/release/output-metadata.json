@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 84,
-      "versionName": "1.0.77-ntrip-status-only",
+      "versionCode": 86,
+      "versionName": "1.0.79-ntrip-fetch-from-server",
       "outputFile": "app-release.apk"
     }
   ],

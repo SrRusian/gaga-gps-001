@@ -17,6 +17,15 @@ interface DownloadQrResponse {
   downloadUrl: string;
 }
 
+interface NtripMountpointInfo {
+  mountpoint: string;
+  identifier: string;
+  format: string;
+  navSystem: string;
+  country: string;
+  nmeaRequired: boolean;
+}
+
 function uploadApk(
   formData: FormData,
   onProgress: (percent: number) => void,
@@ -52,11 +61,59 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+interface SettingsResponse {
+  telemetrySharedSecret: string | null;
+  ntripDefaultName: string;
+  ntripDefaultHost: string | null;
+  ntripDefaultPort: number;
+  ntripDefaultUsername: string | null;
+  ntripDefaultPassword: string | null;
+  ntripDefaultMountpoint: string | null;
+  ntripDefaultVersion: 'v1' | 'v2';
+}
+
 export function SystemSection() {
   const [text, setText] = useState('');
   const [telemetrySecret, setTelemetrySecret] = useState('');
   const [showSecret, setShowSecret] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  // "de fabrica" para GET /api/app/ntrip-config (clave compartida) - lo que la tableta pide en
+  // vivo desde u-center > NTRIP Client > "Obtener del servidor", en vez de traerlo hardcodeado en
+  // el APK (ver CLAUDE.md, credencial real que estuvo expuesta en el codigo fuente publico)
+  const [ntripName, setNtripName] = useState('Principal');
+  const [ntripHost, setNtripHost] = useState('');
+  const [ntripPort, setNtripPort] = useState(2101);
+  const [ntripVersion, setNtripVersion] = useState<'v1' | 'v2'>('v2');
+  const [ntripUsername, setNtripUsername] = useState('');
+  const [ntripPassword, setNtripPassword] = useState('');
+  const [ntripMountpoint, setNtripMountpoint] = useState('');
+  const [showNtripPassword, setShowNtripPassword] = useState(false);
+  const [ntripSaveStatus, setNtripSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  // punto de montura SOLO se elige de la lista real del caster (pedido explicito: nunca a mano,
+  // un typo silencioso solo se nota cuando una tableta ya en campo falla al conectar)
+  const [mountpoints, setMountpoints] = useState<NtripMountpointInfo[]>([]);
+  const [mountpointsLoading, setMountpointsLoading] = useState(false);
+  const [mountpointsError, setMountpointsError] = useState('');
+
+  async function searchMountpoints() {
+    setMountpointsLoading(true);
+    setMountpointsError('');
+    setMountpoints([]);
+    try {
+      const { mountpoints: found } = await adminApi.post<{ mountpoints: NtripMountpointInfo[] }>(
+        '/api/settings/ntrip-mountpoints',
+        { host: ntripHost, port: ntripPort },
+      );
+      setMountpoints(found);
+      if (found.length === 0) setMountpointsError('El caster no reportó ningún punto de montura');
+    } catch (err) {
+      setMountpointsError(err instanceof Error ? err.message : 'No se pudo consultar el caster');
+    } finally {
+      setMountpointsLoading(false);
+    }
+  }
 
   const [releases, setReleases] = useState<AppReleaseRow[]>([]);
   const [devices, setDevices] = useState<DeviceRow[]>([]);
@@ -90,8 +147,15 @@ export function SystemSection() {
 
   async function loadSettings() {
     try {
-      const settings = await adminApi.get<{ telemetrySharedSecret: string | null }>('/api/settings');
+      const settings = await adminApi.get<SettingsResponse>('/api/settings');
       setTelemetrySecret(settings.telemetrySharedSecret ?? '');
+      setNtripName(settings.ntripDefaultName ?? 'Principal');
+      setNtripHost(settings.ntripDefaultHost ?? '');
+      setNtripPort(settings.ntripDefaultPort ?? 2101);
+      setNtripVersion(settings.ntripDefaultVersion ?? 'v2');
+      setNtripUsername(settings.ntripDefaultUsername ?? '');
+      setNtripPassword(settings.ntripDefaultPassword ?? '');
+      setNtripMountpoint(settings.ntripDefaultMountpoint ?? '');
     } catch {
       // sin bloquear el resto de la sección si esto falla
     }
@@ -127,6 +191,24 @@ export function SystemSection() {
       setSaveStatus('saved');
     } catch {
       setSaveStatus('error');
+    }
+  }
+
+  async function saveNtripDefaults() {
+    setNtripSaveStatus('saving');
+    try {
+      await Promise.all([
+        adminApi.patch('/api/settings', { key: 'ntripDefaultName', value: ntripName || null }),
+        adminApi.patch('/api/settings', { key: 'ntripDefaultHost', value: ntripHost || null }),
+        adminApi.patch('/api/settings', { key: 'ntripDefaultPort', value: String(ntripPort) }),
+        adminApi.patch('/api/settings', { key: 'ntripDefaultVersion', value: ntripVersion }),
+        adminApi.patch('/api/settings', { key: 'ntripDefaultUsername', value: ntripUsername || null }),
+        adminApi.patch('/api/settings', { key: 'ntripDefaultPassword', value: ntripPassword || null }),
+        adminApi.patch('/api/settings', { key: 'ntripDefaultMountpoint', value: ntripMountpoint || null }),
+      ]);
+      setNtripSaveStatus('saved');
+    } catch {
+      setNtripSaveStatus('error');
     }
   }
 
@@ -237,6 +319,101 @@ export function SystemSection() {
         </button>
         {saveStatus === 'saved' && <span style={{ marginLeft: 10, color: '#3fb950' }}>Guardado</span>}
         {saveStatus === 'error' && <span style={{ marginLeft: 10, color: '#f85149' }}>Error al guardar</span>}
+      </div>
+
+      <div className="card">
+        <h3>Configuración NTRIP por defecto</h3>
+        <p style={{ fontSize: 13, color: '#7d93b8' }}>
+          Credenciales que las tabletas piden en vivo desde u-center &gt; NTRIP Client &gt;
+          "Obtener del servidor" (clave compartida, nunca se compilan dentro del APK). Sin
+          configurar aquí, ese botón devuelve campos vacíos y hay que llenar el formulario NTRIP a
+          mano en cada tableta, como ya se hacía antes.
+        </p>
+        <div className="form-row">
+          <label>Nombre del perfil</label>
+          <input value={ntripName} onChange={(e) => setNtripName(e.target.value)} placeholder="Principal" />
+        </div>
+        <div className="form-row">
+          <label>NTRIP address</label>
+          <input value={ntripHost} onChange={(e) => setNtripHost(e.target.value)} placeholder="ntrip.ejemplo.com" />
+        </div>
+        <div className="form-row">
+          <label>Puerto</label>
+          <input
+            type="number"
+            value={ntripPort}
+            onChange={(e) => setNtripPort(Number(e.target.value) || 2101)}
+          />
+        </div>
+        <div className="form-row">
+          <label>Versión NTRIP</label>
+          <select value={ntripVersion} onChange={(e) => setNtripVersion(e.target.value as 'v1' | 'v2')}>
+            <option value="v1">V1</option>
+            <option value="v2">V2</option>
+          </select>
+        </div>
+        <div className="form-row">
+          <label>Usuario</label>
+          <input value={ntripUsername} onChange={(e) => setNtripUsername(e.target.value)} />
+        </div>
+        <div className="form-row">
+          <label>Contraseña</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              type={showNtripPassword ? 'text' : 'password'}
+              value={ntripPassword}
+              onChange={(e) => setNtripPassword(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <button className="btn btn-sm" type="button" onClick={() => setShowNtripPassword((v) => !v)}>
+              {showNtripPassword ? 'Ocultar' : 'Mostrar'}
+            </button>
+          </div>
+        </div>
+        <div className="form-row">
+          <label>Punto de montura</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input value={ntripMountpoint} readOnly placeholder="vacío = se elige a mano por tableta" style={{ flex: 1 }} />
+            <button
+              className="btn btn-sm"
+              type="button"
+              style={{ width: 'auto' }}
+              onClick={searchMountpoints}
+              disabled={!ntripHost || mountpointsLoading}
+            >
+              {mountpointsLoading ? 'Buscando…' : 'Buscar puntos de montura'}
+            </button>
+          </div>
+          <p style={{ fontSize: 12, color: '#7d93b8', margin: '4px 0 0' }}>
+            Solo se elige de la lista real del caster - nunca se escribe a mano, para no dejar un
+            typo silencioso que solo se note cuando una tableta ya en campo falle al conectar.
+          </p>
+          {mountpointsError && <div style={{ marginTop: 6, color: '#f85149' }}>{mountpointsError}</div>}
+          {mountpoints.length > 0 && (
+            <select
+              value=""
+              style={{ marginTop: 6 }}
+              onChange={(e) => {
+                setNtripMountpoint(e.target.value);
+                setMountpoints([]);
+              }}
+            >
+              <option value="" disabled>
+                {mountpoints.length} puntos de montura disponibles - elige uno
+              </option>
+              {mountpoints.map((m) => (
+                <option key={m.mountpoint} value={m.mountpoint}>
+                  {m.mountpoint} - {m.identifier || m.format} ({m.country}){m.nmeaRequired ? ' - pide GGA' : ''}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <button className="btn btn-sm" style={{ width: 'auto', marginTop: 10 }} onClick={saveNtripDefaults}>
+          {ntripSaveStatus === 'saving' ? 'Guardando…' : 'Guardar'}
+        </button>
+        {ntripSaveStatus === 'saved' && <span style={{ marginLeft: 10, color: '#3fb950' }}>Guardado</span>}
+        {ntripSaveStatus === 'error' && <span style={{ marginLeft: 10, color: '#f85149' }}>Error al guardar</span>}
       </div>
 
       <div className="card">
