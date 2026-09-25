@@ -15,7 +15,14 @@ const BATCH_SIZE = 500; // debe coincidir con MAX_DEVICE_EVENTS del backend
 const MAX_QUEUED = 5000;
 
 export interface DeviceEvent {
-  kind: 'geofence' | 'speed';
+  // 'zone_status' es un aviso puro de "estoy en zona permitida/estacionamiento" - no genera alerta
+  // ni infraccion, solo actualiza el estado que SignalLostService usa (ver useLocalAlerts.ts).
+  // 'restricted_zone' es la violacion real (dispositivo restringido, fuera de "allowed") - SI
+  // genera alerta/infraccion, mismo criterio que danger de geocerca.
+  // 'wrong_way' = va en sentido contrario por una ruta autorizada de un solo sentido. Se reporta
+  // solo cuando el sentido equivocado se SOSTIENE (ver WRONG_WAY_INFRACTION_MS), nunca por una
+  // maniobra momentanea de acomodo o una reversa corta.
+  kind: 'geofence' | 'speed' | 'zone_status' | 'restricted_zone' | 'wrong_way';
   state: 'raised' | 'cleared';
   deviceId: string;
   severity: 'warning' | 'danger' | 'info';

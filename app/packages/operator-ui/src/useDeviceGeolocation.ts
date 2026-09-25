@@ -12,9 +12,20 @@ export interface DeviceGeolocation {
   timestamp: number;
 }
 
+// 'rtk' = receptor RTK conectado ahora mismo (USB o Bluetooth), sin importar el estado de su fix
+// (buscando satelites, FLOAT o FIX - pedido explicito: "no importa en que estado este el rtk, si
+// esta conectado se usa"). 'tablet' = sin receptor conectado, GPS propio del dispositivo (chip
+// interno o Fused Location del navegador). null = todavia sin ningun fix que mostrar.
+export type GpsSource = 'rtk' | 'tablet' | null;
+
+// maximumAge=0 (nunca un fix cacheado) - con 2000 el navegador podía reentregar la misma lectura
+// hasta 2s de antigua en llamadas sucesivas de watchPosition, lo cual se sentía como una alarma de
+// velocidad "tarda en encender" (el valor mostrado/evaluado se quedaba atrás de la velocidad real
+// por hasta 2s). Sin costo real: el watch ya pide continuamente con enableHighAccuracy, esto solo
+// evita que reuse una lectura vieja cuando sí hay una fresca disponible.
 const WATCH_OPTIONS: PositionOptions = {
   enableHighAccuracy: true,
-  maximumAge: 2000,
+  maximumAge: 0,
   timeout: 10000,
 };
 
@@ -34,6 +45,14 @@ export function useDeviceGeolocation() {
   const supported = typeof navigator !== 'undefined' && 'geolocation' in navigator;
   const [position, setPosition] = useState<DeviceGeolocation | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hasFix, setHasFix] = useState(false);
+  // fuente de verdad real (empujada por el propio Kotlin en cuanto se conecta/desconecta el
+  // receptor - RtkNtripPlugin.onReceiverDisconnected() llama emitStatus() de inmediato), no
+  // inferida de "hace cuanto llego el ultimo fix". Bug real reportado en campo: la version anterior
+  // (ventana de frescura sobre el ultimo rtkFix) tardaba 7-10s en reflejar una desconexion real,
+  // porque dependia de que primero pasaran los 6s del watchdog de MockLocationFeeder + la siguiente
+  // posicion nueva del chip interno. Con el estado de conexion real, el cambio es casi instantaneo.
+  const [rtkConnected, setRtkConnected] = useState(false);
   const filterRef = useRef<PositionFilterService | null>(null);
   if (!filterRef.current) filterRef.current = new PositionFilterService();
 
@@ -68,6 +87,7 @@ export function useDeviceGeolocation() {
       if (!verdict.accepted) return;
 
       lastAcceptedAtRef.current = candidate.timestamp;
+      setHasFix(true);
       setPosition(candidate);
     }
 
@@ -158,6 +178,17 @@ export function useDeviceGeolocation() {
       removeGpsListener = () => handle.remove();
     });
 
+    // estado real del receptor - empujado por Kotlin en cada connect/disconnect, no inferido
+    RtkNtrip.getStatus().then((status) => {
+      setRtkConnected(status.usbConnected || status.bluetoothConnected);
+    });
+    let removeRtkStatusListener: (() => void) | null = null;
+    RtkNtrip.addListener('rtkStatus', (status) => {
+      setRtkConnected(status.usbConnected || status.bluetoothConnected);
+    }).then((handle) => {
+      removeRtkStatusListener = () => handle.remove();
+    });
+
     Power.getStatus().then((status) => {
       if (status.suspended) stopWatching();
     });
@@ -170,9 +201,12 @@ export function useDeviceGeolocation() {
       stopWatching();
       removeRtkListener?.();
       removeGpsListener?.();
+      removeRtkStatusListener?.();
       powerListenerPromise.then((h) => h.remove());
     };
   }, [supported]);
 
-  return { position, error, supported };
+  const gpsSource: GpsSource = !hasFix ? null : rtkConnected ? 'rtk' : 'tablet';
+
+  return { position, error, supported, gpsSource, rtkConnected };
 }

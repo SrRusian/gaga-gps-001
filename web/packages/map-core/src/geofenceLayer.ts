@@ -1,6 +1,6 @@
 import type { Geofence, GeofenceType } from '@gaga-gps/shared-types';
 import type { Feature, FeatureCollection, LineString, Polygon } from 'geojson';
-import type { GeoJSONSource, Map as MaplibreMap } from 'maplibre-gl';
+import type { FilterSpecification, GeoJSONSource, Map as MaplibreMap } from 'maplibre-gl';
 import { useEffect } from 'react';
 
 const METERS_PER_DEG_LAT = 111320;
@@ -79,7 +79,7 @@ function buildGeofenceFeatures(geofences: Geofence[], highlightedId?: number | n
         });
         break;
 
-      case 'polyline':
+      case 'polyline': {
         // una sola franja del ancho configurado, color del tipo real (ya no hay margen extra de
         // escalada - la severidad la decide el tipo, no la distancia)
         features.push({
@@ -87,7 +87,21 @@ function buildGeofenceFeatures(geofences: Geofence[], highlightedId?: number | n
           properties: { color, highlighted },
           geometry: lineToBufferPolygon(g.geometry, g.corridorWidthMeters),
         });
+        // la linea desnuda ademas de la franja: es sobre ella que se acomodan las flechas de
+        // sentido (symbol-placement: 'line' necesita una LineString, no el poligono del corredor)
+        const direction = g.routeDirection ?? 'both';
+        if (direction !== 'both') {
+          features.push({
+            type: 'Feature',
+            // 'backward' se recorre al reves del orden de dibujo, asi que la flecha apunta al otro
+            // lado - se invierte el caracter en vez de invertir la geometria, mas barato y evita
+            // que el resto de las capas vean una linea distinta a la real
+            properties: { color, arrow: direction === 'forward' ? '▶' : '◀' },
+            geometry: g.geometry,
+          });
+        }
         break;
+      }
 
       case 'circle':
       default:
@@ -102,7 +116,9 @@ function buildGeofenceFeatures(geofences: Geofence[], highlightedId?: number | n
   return features;
 }
 
-function renderGeofences(map: MaplibreMap, geofences: Geofence[], highlightedId?: number | null): void {
+// exportada para poder verificar en pruebas que capa filtra que feature (ver bug del relleno
+// fantasma en geofenceLayer.test.ts) - fuera de eso la usa solo useGeofenceLayer
+export function renderGeofences(map: MaplibreMap, geofences: Geofence[], highlightedId?: number | null): void {
   if (!map.isStyleLoaded()) {
     map.once('idle', () => renderGeofences(map, geofences, highlightedId));
     return;
@@ -118,10 +134,16 @@ function renderGeofences(map: MaplibreMap, geofences: Geofence[], highlightedId?
     source.setData(geojson);
   } else {
     map.addSource('geofences-preview', { type: 'geojson', data: geojson });
+    // La feature de flechas es una LineString desnuda que SOLO existe para colocar los simbolos
+    // encima. Hay que excluirla de relleno y borde: una capa 'fill' trata una LineString como si
+    // fuera un anillo de poligono y la cierra sola, lo que pintaba un area falsa enorme sobre el
+    // mapa (bug real reportado con captura, en los 3 paneles a la vez).
+    const notArrow: FilterSpecification = ['!', ['has', 'arrow']];
     map.addLayer({
       id: 'geofences-fill',
       type: 'fill',
       source: 'geofences-preview',
+      filter: notArrow,
       // poligono 'sin relleno' (filled=false) se dibuja solo con su linea de borde (capa
       // geofences-line, sin cambios) - la franja de alerta (corridorWidthMeters) no se dibuja,
       // solo se explica como texto en el panel de edicion
@@ -131,7 +153,32 @@ function renderGeofences(map: MaplibreMap, geofences: Geofence[], highlightedId?
       id: 'geofences-line',
       type: 'line',
       source: 'geofences-preview',
+      filter: notArrow,
       paint: { 'line-color': ['get', 'color'], 'line-width': 3, 'line-opacity': 1 },
+    });
+    // sentido de recorrido de las rutas de un solo sentido. Se usa un caracter de texto y no un
+    // icono para no tener que cargar un sprite - asi funciona igual sin conexion, que es el caso
+    // real del Operador. symbol-placement 'line' lo repite a lo largo y lo orienta con la linea.
+    map.addLayer({
+      id: 'geofences-direction',
+      type: 'symbol',
+      source: 'geofences-preview',
+      filter: ['has', 'arrow'],
+      layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 70,
+        'text-field': ['get', 'arrow'],
+        'text-size': 15,
+        'text-rotation-alignment': 'map',
+        'text-keep-upright': false,
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': ['get', 'color'],
+        'text-halo-color': '#0b0d10',
+        'text-halo-width': 1.5,
+      },
     });
     map.addLayer({
       id: 'geofences-highlight',

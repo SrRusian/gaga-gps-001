@@ -190,6 +190,7 @@ const socketServer = new FleetSocketServer({
   mapRepo,
   alertEventRepo,
   equipmentManager,
+  deviceRepo,
 });
 // mismo patrón de ciclo evitado que socketServer.incidentAlertService abajo
 geofenceService.socketServer = socketServer;
@@ -488,9 +489,26 @@ async function ensureDefaultAdmin(): Promise<void> {
   console.warn(' ══════════════════════════════════════════════════════════');
 }
 
+// claves de system_settings -> como aplicarlas a env.ntripDefault - mismo criterio que
+// telemetrySharedSecret (DB gana sobre .env en cuanto un admin guarda una vez desde Sistema)
+const NTRIP_SETTING_APPLIERS: Array<[key: string, apply: (value: string) => void]> = [
+  ['ntripDefaultName', (v) => (env.ntripDefault.name = v || 'Principal')],
+  ['ntripDefaultHost', (v) => (env.ntripDefault.host = v || null)],
+  ['ntripDefaultPort', (v) => (env.ntripDefault.port = parseInt(v, 10) || 2101)],
+  ['ntripDefaultUsername', (v) => (env.ntripDefault.username = v || null)],
+  ['ntripDefaultPassword', (v) => (env.ntripDefault.password = v || null)],
+  ['ntripDefaultMountpoint', (v) => (env.ntripDefault.mountpoint = v || null)],
+  ['ntripDefaultVersion', (v) => (env.ntripDefault.version = v === 'v1' ? 'v1' : 'v2')],
+];
+
 async function loadSettingsOverrides(): Promise<void> {
   const stored = await settingsRepo.get('telemetrySharedSecret');
   if (stored !== null) env.telemetrySharedSecret = stored;
+
+  for (const [key, apply] of NTRIP_SETTING_APPLIERS) {
+    const value = await settingsRepo.get(key);
+    if (value !== null) apply(value);
+  }
 }
 
 async function loadPersistedState(): Promise<void> {

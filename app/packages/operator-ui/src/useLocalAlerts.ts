@@ -1,7 +1,24 @@
 import type { Geofence } from '@gaga-gps/shared-types';
 import { useEffect, useRef, useState } from 'react';
-import { evaluateGeofencesOffline, type OfflineGeofenceMatch } from './offlineGeofences';
-import { evaluateSpeed, NO_SPEED_LIMITS, type SpeedLimits } from './localSpeed';
+import {
+  evaluateGeofencesOffline,
+  evaluateGeofencesNearby,
+  evaluateRouteDirection,
+  isInsideAllowedZone,
+  locateOnAuthorizedRoute,
+  matchedInformativeGeofences,
+  GEOFENCE_TYPE_LABEL,
+  type FootprintInput,
+  type OfflineGeofenceMatch,
+  type RouteProgress,
+} from './offlineGeofences';
+import {
+  evaluateSpeed,
+  NO_SPEED_LIMITS,
+  usesPredictiveSpeedWarning,
+  type SpeedLimits,
+  type VehicleCategory,
+} from './localSpeed';
 import { flushDeviceEvents, reportDeviceEvent, type DeviceEvent } from './deviceEvents';
 
 // La tableta evalua geocercas y velocidad por su cuenta, SIEMPRE - con o sin conexion - y le
@@ -13,13 +30,45 @@ import { flushDeviceEvents, reportDeviceEvent, type DeviceEvent } from './device
 // Solo se evalua lo que la tableta puede resolver sola con datos que ya tiene en mano. Lo que
 // necesita comparar contra OTROS vehiculos (colision, proximidad) o contra geometria pesada de
 // PostGIS (zona restringida, tiers elasticos de acercamiento) lo sigue decidiendo el servidor.
+//
+// Geocercas: TODA transicion (entrar/salir) se reporta al servidor sin importar severidad - el
+// servidor guarda el historial completo en geofence_events para poder calcular tiempo en zona a
+// futuro (pedido explicito). Lo que SI queda 100% en la tableta es la decision de que mostrar en
+// pantalla (`alerts`/`toast` de abajo) - eso nunca depende de si el evento se reporto.
+//
+// Velocidad: distinto criterio, sin cambios - solo el exceso real (danger) deja registro, el aviso
+// al 75% es para corregir a tiempo y no genera ni evento ni infraccion.
+//
+// Zona restringida: el servidor le manda a la tableta la REGLA (devices.restricted_to_allowed_zone,
+// via el evento de socket device:config - ver useOperatorSocket.ts), cacheada localmente para que
+// siga vigente sin conexion. La tableta evalua "¿estoy afuera de 'allowed' ahora mismo?" por NIVEL,
+// no por transicion (mismo criterio ya corregido en el backend - un dispositivo restringido que
+// arranca ya afuera debe alertar de inmediato, no solo el que "sale"), y reporta el cambio via
+// device-events (kind: 'restricted_zone') - el servidor solo registra/difunde, no vuelve a decidir.
+// Restringido + CERO geocercas 'allowed' en el proyecto = SIEMPRE violando (pedido explicito) - no
+// hay ninguna zona valida en la que estar, asi que "afuera" es el unico estado posible.
+//
+// Las 3 condiciones (zona restringida/geocerca de atencion/velocidad) pueden estar activas A LA VEZ
+// - pedido explicito: "múltiples alertas puedan convivir... poder ver las 3 alertas que hay". Este
+// hook ya no elige un solo ganador (antes `pickAlert`) - devuelve TODAS las que apliquen, y quien
+// arma el sonido/la pantalla (OperatorApp.tsx, junto con lo que decide el servidor) es quien decide
+// cual suena, con el sistema de prioridad de alertPriority.ts.
 
 export interface LocalAlert {
-  severity: 'warning' | 'danger' | 'info';
+  severity: 'warning' | 'danger';
   message: string;
-  source: 'geofence' | 'speed';
+  source: 'geofence' | 'geofence_near' | 'speed' | 'restricted_zone' | 'wrong_way';
   geofenceId: number | null;
 }
+
+// aviso "Entrando a/Saliendo de zona X" - transitorio, sin sonido, distinto de LocalAlert a
+// proposito (nunca compite por prioridad ni por el slot de sonido, ver GeofenceToast en
+// OperatorApp.tsx). Se auto-limpia solo tras TOAST_DURATION_MS.
+export interface GeofenceToast {
+  message: string;
+}
+
+const RESTRICTED_ZONE_MESSAGE = 'FUERA DE ZONA PERMITIDA - REGRESE DE INMEDIATO';
 
 // el fix propio puede llegar a 10Hz; una transicion de zona o de limite no necesita esa frecuencia
 const EVALUATION_INTERVAL_MS = 500;
@@ -27,18 +76,36 @@ const EVALUATION_INTERVAL_MS = 500;
 // zonas donde una tableta puede quedarse sin señal sin que sea un problema (estacionada)
 const EXEMPT_ZONE_TYPES = new Set(['allowed', 'parking']);
 
+// tiempo que el aviso de entrar/salir de zona informativa queda en pantalla antes de desvanecerse
+const TOAST_DURATION_MS = 4500;
+
+// mismo umbral que headingCalibration.ts / backend VehicleHeadingTracker.COURSE_TRUST_MIN_KMH - el
+// rumbo GPS no es confiable a baja velocidad/detenido, asi que no se usa para orientar el
+// rectangulo del vehiculo por debajo de esto (se congela el ultimo rumbo confiable conocido)
+const MIN_SPEED_KMH_FOR_HEADING_TRUST = 3;
+
+// mas separadas que esto, dos muestras ya no describen la aceleracion actual
+const MAX_ACCEL_SAMPLE_GAP_S = 3;
+
+// Sentido contrario en una ruta autorizada de un solo sentido. Dos umbrales a proposito: el aviso
+// sale rapido para que el operador corrija, la infraccion solo si INSISTE - asi una maniobra de
+// acomodo o una reversa corta para librar algo nunca le deja registro encima.
+const WRONG_WAY_ALERT_MS = 3000;
+const WRONG_WAY_INFRACTION_MS = 20000;
+
 export interface LocalFixInput {
   latitude: number;
   longitude: number;
   speedKmh: number;
+  headingDeg?: number | null;
+  accuracyMeters?: number | null;
 }
 
-// el sonido lo dispara la propia tableta, no el eco del servidor (ver device-events.routes.ts):
-// asi suena en el instante en que ella decide, y sigue sonando igual sin conexion
-export interface AlertSounds {
-  playWarningSound: () => void;
-  playDangerSound: (loop?: boolean) => void;
-  stopSound: () => void;
+// silueta real del vehiculo (largo/ancho, metros) - null si el dispositivo no tiene tipo de
+// vehiculo asignado, cae al punto crudo de siempre (ver isTriggered en offlineGeofences.ts)
+export interface VehicleFootprintDims {
+  lengthMeters: number | null;
+  widthMeters: number | null;
 }
 
 export function useLocalAlerts(
@@ -47,25 +114,60 @@ export function useLocalAlerts(
   fix: LocalFixInput | null,
   limits: SpeedLimits = NO_SPEED_LIMITS,
   connected = false,
-  sounds?: AlertSounds,
+  restrictedToAllowedZone = false,
+  geofencesReady = false,
+  footprintDims: VehicleFootprintDims | null = null,
+  vehicleCategory: VehicleCategory | null = null,
 ) {
-  const [alert, setAlert] = useState<LocalAlert | null>(null);
+  const [alerts, setAlerts] = useState<LocalAlert[]>([]);
+  const [toast, setToast] = useState<GeofenceToast | null>(null);
 
   const geofenceRef = useRef<OfflineGeofenceMatch | null>(null);
+  // ultima muestra de velocidad, para derivar la aceleracion real
+  const lastSpeedSampleRef = useRef<{ speedKmh: number; at: number } | null>(null);
+  // avance sobre la ruta autorizada actual, para poder derivar el sentido entre muestras
+  const routeFractionRef = useRef<{ geofenceId: number; fraction: number } | null>(null);
+  const wrongWaySinceRef = useRef<number | null>(null);
+  const wrongWayReportedRef = useRef(false);
+  const routeProgressRef = useRef<RouteProgress | null>(null);
+  const categoryRef = useRef<VehicleCategory | null>(vehicleCategory);
+  categoryRef.current = vehicleCategory;
   const speedSeverityRef = useRef<'warning' | 'danger' | null>(null);
+  const inAllowedZoneRef = useRef(false);
+  // por NIVEL ("¿esta violando ahora mismo?"), no por transicion - mismo criterio que el fix del
+  // backend (GeofenceAlertService.activeRestrictedViolations)
+  const restrictedViolatingRef = useRef(false);
   const lastEvalAtRef = useRef(0);
-  const alertSeverityRef = useRef<'warning' | 'danger' | 'info' | null>(null);
-  const soundsRef = useRef(sounds);
-  soundsRef.current = sounds;
+  // ultimo rumbo GPS de confianza (velocidad >= MIN_SPEED_KMH_FOR_HEADING_TRUST) - null si el
+  // dispositivo nunca reporto uno todavia (recien arranco, nunca se movio de verdad)
+  const lastTrustedHeadingRef = useRef<number | null>(null);
   const geofencesRef = useRef(geofences);
   geofencesRef.current = geofences;
   const limitsRef = useRef(limits);
   limitsRef.current = limits;
+  const footprintDimsRef = useRef(footprintDims);
+  footprintDimsRef.current = footprintDims;
+  const restrictedRef = useRef(restrictedToAllowedZone);
+  restrictedRef.current = restrictedToAllowedZone;
+  const geofencesReadyRef = useRef(geofencesReady);
+  geofencesReadyRef.current = geofencesReady;
+  // ultimo set de geocercas informativas activas, por id - para diferenciar entrada/salida en el
+  // siguiente tick sin volver a evaluar contra "la geocerca actual" (aqui puede haber varias a la
+  // vez, a diferencia de geofenceRef que solo guarda la de atencion mas severa)
+  const informativeSetRef = useRef<Map<number, Geofence>>(new Map());
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // al recuperar red se vacia lo que se haya acumulado sin conexion
   useEffect(() => {
     if (connected) void flushDeviceEvents();
   }, [connected]);
+
+  useEffect(
+    () => () => {
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!deviceId || !fix) return;
@@ -81,12 +183,32 @@ export function useLocalAlerts(
     };
     const send = (event: DeviceEvent) => void reportDeviceEvent(event);
 
-    // --- geocercas ---
-    const match = evaluateGeofencesOffline(fix.latitude, fix.longitude, geofencesRef.current);
+    // rumbo GPS confiable solo a partir de cierta velocidad (ver constante) - por debajo se
+    // congela el ultimo confiable conocido, en vez de orientar el rectangulo con un rumbo ruidoso
+    if (
+      fix.headingDeg != null &&
+      !Number.isNaN(fix.headingDeg) &&
+      fix.speedKmh >= MIN_SPEED_KMH_FOR_HEADING_TRUST
+    ) {
+      lastTrustedHeadingRef.current = fix.headingDeg;
+    }
+    const dims = footprintDimsRef.current;
+    const footprint: FootprintInput | null =
+      dims?.lengthMeters && dims?.widthMeters && lastTrustedHeadingRef.current != null
+        ? { headingDeg: lastTrustedHeadingRef.current, lengthMeters: dims.lengthMeters, widthMeters: dims.widthMeters }
+        : null;
+
+    // --- geocercas de atencion ---
+    // con la silueta real del vehiculo (footprint) en vez de solo el punto crudo - bug real
+    // reportado en campo: una "zona prohibida" no avisaba hasta que el CENTRO exacto (sin
+    // dimension) tocaba el poligono, aunque el vehiculo ya estuviera encima de un borde
+    const match = evaluateGeofencesOffline(fix.latitude, fix.longitude, geofencesRef.current, footprint);
     const previous = geofenceRef.current;
     const changed = (match?.geofenceId ?? null) !== (previous?.geofenceId ?? null);
 
     if (changed) {
+      // toda transicion se reporta, sin importar severidad - el servidor necesita el historial
+      // completo (entrada/salida) para calcular tiempo en zona a futuro
       if (previous) {
         send({
           ...base,
@@ -96,7 +218,6 @@ export function useLocalAlerts(
           message: `SALIÓ DE "${previous.geofenceName}"`,
           geofenceId: previous.geofenceId,
           geofenceName: previous.geofenceName,
-          inAllowedZone: isInExemptZone(fix, geofencesRef.current),
         });
       }
       if (match) {
@@ -108,17 +229,70 @@ export function useLocalAlerts(
           message: match.message,
           geofenceId: match.geofenceId,
           geofenceName: match.geofenceName,
-          inAllowedZone: isInExemptZone(fix, geofencesRef.current),
         });
       }
       geofenceRef.current = match;
     }
 
+    // --- zona exenta (estacionamiento/permitida) ---
+    // independiente de la severidad de arriba: el servidor necesita saber esto para no alarmar al
+    // proyecto si la tableta se queda sin señal justo despues, estando estacionada donde puede
+    // estarlo - sin esto quedaria atado a que ademas ocurriera una alerta grave al mismo tiempo
+    const inAllowedZone = isInExemptZone(fix, geofencesRef.current);
+    if (inAllowedZone !== inAllowedZoneRef.current) {
+      inAllowedZoneRef.current = inAllowedZone;
+      send({ ...base, kind: 'zone_status', state: 'raised', severity: 'info', message: '', inAllowedZone });
+    }
+
+    // --- zona restringida ---
+    // un solo punto de decision (nunca if/else-if con varias ramas) - "¿esta violando ahora mismo?"
+    // se recalcula completo en cada tick elegible y se compara contra el valor anterior. Sin
+    // geocercas cargadas todavia (geofencesReady=false, arranque en frio) cae a "no violando" -
+    // seguro por default, se corrige solo en el siguiente tick en cuanto geofences:update llegue.
+    // Restringido + CERO geocercas 'allowed' en el proyecto = SIEMPRE violando (pedido explicito:
+    // no hay zona valida en la que estar, no depende de que exista ninguna)
+    const currentlyViolating =
+      restrictedRef.current && geofencesReadyRef.current
+        ? !isInsideAllowedZone(fix.latitude, fix.longitude, geofencesRef.current)
+        : false;
+    if (currentlyViolating !== restrictedViolatingRef.current) {
+      restrictedViolatingRef.current = currentlyViolating;
+      send({
+        ...base,
+        kind: 'restricted_zone',
+        state: currentlyViolating ? 'raised' : 'cleared',
+        severity: 'danger',
+        message: RESTRICTED_ZONE_MESSAGE,
+      });
+    }
+
     // --- velocidad ---
-    const speed = evaluateSpeed(fix.speedKmh, limitsRef.current, matchedGeofence(match, geofencesRef.current));
+    // aceleracion real entre esta muestra y la anterior, para poder avisar ANTES de cruzar el
+    // limite cuando viene un aceleron fuerte (el 75% fijo no da margen a fondo). Se descarta un
+    // hueco largo entre muestras: dividir entre un dt grande da una aceleracion que ya no
+    // representa lo que esta pasando ahora.
+    const sampleAt = Date.now();
+    const prevSample = lastSpeedSampleRef.current;
+    let accelKmhPerS: number | null = null;
+    if (prevSample) {
+      const dt = (sampleAt - prevSample.at) / 1000;
+      if (dt > 0 && dt <= MAX_ACCEL_SAMPLE_GAP_S) {
+        accelKmhPerS = (fix.speedKmh - prevSample.speedKmh) / dt;
+      }
+    }
+    lastSpeedSampleRef.current = { speedKmh: fix.speedKmh, at: sampleAt };
+
+    const speed = evaluateSpeed(
+      fix.speedKmh,
+      limitsRef.current,
+      matchedGeofence(match, geofencesRef.current),
+      // maquinaria no tiene el modo de falla que resuelve el aviso anticipado (acelerar fuerte y
+      // pasarse sin alcanzar a reaccionar) - ahi solo seria ruido encima del aviso al 75%
+      usesPredictiveSpeedWarning(categoryRef.current) ? accelKmhPerS : null,
+    );
     const previousSpeed = speedSeverityRef.current;
     if (speed.severity !== previousSpeed) {
-      // solo el exceso real (danger) deja registro - el aviso al 90% es para corregir a tiempo,
+      // solo el exceso real (danger) deja registro - el aviso al 75% es para corregir a tiempo,
       // no para acumularle una infraccion al operador
       if (speed.severity === 'danger') {
         send({
@@ -144,22 +318,154 @@ export function useLocalAlerts(
       speedSeverityRef.current = speed.severity;
     }
 
-    // en pantalla gana lo mas grave de las dos evaluaciones
-    const next = pickAlert(match, speed.severity, speed.message);
-    setAlert(next);
+    // --- sentido de recorrido en ruta autorizada ---
+    const onRoute = locateOnAuthorizedRoute(fix.latitude, fix.longitude, geofencesRef.current);
+    if (!onRoute) {
+      // salir de la ruta limpia todo: el sentido solo significa algo yendo sobre ella
+      routeFractionRef.current = null;
+      wrongWaySinceRef.current = null;
+      wrongWayReportedRef.current = false;
+      routeProgressRef.current = null;
+    } else {
+      const prev = routeFractionRef.current;
+      const previousFraction = prev && prev.geofenceId === onRoute.geofence.id ? prev.fraction : null;
+      const progress = evaluateRouteDirection(onRoute.geofence, onRoute.location, previousFraction);
+      // null = todavia no se puede decidir (primera muestra o dentro de la zona muerta): se conserva
+      // el ultimo veredicto en vez de parpadear
+      if (progress) routeProgressRef.current = progress;
+      routeFractionRef.current = { geofenceId: onRoute.geofence.id, fraction: onRoute.location.fraction };
 
-    // el sonido solo cambia cuando cambia la severidad, no en cada evaluacion - si no, el pitido
-    // se reiniciaria dos veces por segundo y nunca llegaria a sonar completo
-    const previousSeverity = alertSeverityRef.current;
-    if (next?.severity !== previousSeverity) {
-      alertSeverityRef.current = next?.severity ?? null;
-      if (next?.severity === 'danger') soundsRef.current?.playDangerSound(true);
-      else if (next?.severity === 'warning') soundsRef.current?.playWarningSound();
-      else soundsRef.current?.stopSound();
+      const current = routeProgressRef.current;
+      if (current?.wrongWay) {
+        if (wrongWaySinceRef.current === null) wrongWaySinceRef.current = sampleAt;
+      } else {
+        // volvio al sentido correcto - si ya se habia reportado, se cierra la infraccion abierta
+        if (wrongWayReportedRef.current && current) {
+          send({
+            kind: 'wrong_way',
+            state: 'cleared',
+            deviceId,
+            severity: 'warning',
+            message: `Retomó el sentido correcto en "${current.geofenceName}"`,
+            latitude: fix.latitude,
+            longitude: fix.longitude,
+            occurredAt: new Date().toISOString(),
+            geofenceId: current.geofenceId,
+            geofenceName: current.geofenceName,
+          });
+          wrongWayReportedRef.current = false;
+        }
+        wrongWaySinceRef.current = null;
+      }
+    }
+
+    const wrongWaySince = wrongWaySinceRef.current;
+    const wrongWayProgress = routeProgressRef.current;
+    const wrongWayActive =
+      wrongWaySince !== null && wrongWayProgress?.wrongWay === true && sampleAt - wrongWaySince >= WRONG_WAY_ALERT_MS;
+
+    if (
+      wrongWayActive &&
+      !wrongWayReportedRef.current &&
+      wrongWaySince !== null &&
+      sampleAt - wrongWaySince >= WRONG_WAY_INFRACTION_MS &&
+      wrongWayProgress
+    ) {
+      wrongWayReportedRef.current = true;
+      send({
+        kind: 'wrong_way',
+        state: 'raised',
+        deviceId,
+        severity: 'danger',
+        message: `SENTIDO CONTRARIO sostenido en "${wrongWayProgress.geofenceName}"`,
+        latitude: fix.latitude,
+        longitude: fix.longitude,
+        occurredAt: new Date().toISOString(),
+        geofenceId: wrongWayProgress.geofenceId,
+        geofenceName: wrongWayProgress.geofenceName,
+      });
+    }
+
+    // --- se arma la lista completa de condiciones activas, sin elegir un solo ganador ---
+    // (antes esto era pickAlert(), que se quedaba con una sola) - el orden aqui no importa, quien
+    // consume esto (OperatorApp.tsx) ordena por prioridad real via alertPriority.ts
+    const nextAlerts: LocalAlert[] = [];
+    if (restrictedViolatingRef.current) {
+      nextAlerts.push({
+        severity: 'danger',
+        message: RESTRICTED_ZONE_MESSAGE,
+        source: 'restricted_zone',
+        geofenceId: null,
+      });
+    }
+    if (match) {
+      nextAlerts.push({
+        severity: match.severity,
+        message: match.message,
+        source: 'geofence',
+        geofenceId: match.geofenceId,
+      });
+    }
+    if (speed.severity) {
+      nextAlerts.push({ severity: speed.severity, message: speed.message, source: 'speed', geofenceId: null });
+    }
+    if (wrongWayActive && wrongWayProgress) {
+      nextAlerts.push({
+        severity: wrongWayReportedRef.current ? 'danger' : 'warning',
+        message: `SENTIDO CONTRARIO - "${wrongWayProgress.geofenceName}" es de un solo sentido`,
+        source: 'wrong_way',
+        geofenceId: wrongWayProgress.geofenceId,
+      });
+    }
+    // aviso temprano: el circulo de precision GPS ya toca el borde de una zona de atencion, aunque
+    // ni el punto ni la silueta real todavia (solo circulo/poligono relleno - ver
+    // evaluateGeofencesNearby). Nunca se reporta como transicion - es un heads-up, no un evento real
+    if (typeof fix.accuracyMeters === 'number' && fix.accuracyMeters > 0) {
+      const nearby = evaluateGeofencesNearby(
+        fix.latitude,
+        fix.longitude,
+        geofencesRef.current,
+        fix.accuracyMeters,
+        footprint,
+      );
+      if (nearby) {
+        nextAlerts.push({
+          severity: 'warning',
+          message: nearby.message,
+          source: 'geofence_near',
+          geofenceId: nearby.geofenceId,
+        });
+      }
+    }
+    setAlerts(nextAlerts);
+
+    // --- aviso de entrar/salir de zona informativa (toast, sin sonido) ---
+    // TODAS las informativas activas a la vez (puede haber varias encimadas/contiguas), no solo la
+    // "actual" - se diferencia contra el set del tick anterior para saber que entro y que salio
+    const currentInformative = matchedInformativeGeofences(fix.latitude, fix.longitude, geofencesRef.current);
+    const currentMap = new Map(currentInformative.map((g) => [g.id, g] as const));
+    const prevMap = informativeSetRef.current;
+    const entered: Geofence[] = [];
+    const exited: Geofence[] = [];
+    currentMap.forEach((g, id) => {
+      if (!prevMap.has(id)) entered.push(g);
+    });
+    prevMap.forEach((g, id) => {
+      if (!currentMap.has(id)) exited.push(g);
+    });
+    informativeSetRef.current = currentMap;
+
+    if (entered.length > 0 || exited.length > 0) {
+      const parts: string[] = [];
+      exited.forEach((g) => parts.push(`Saliendo de ${g.name}`));
+      entered.forEach((g) => parts.push(`Entrando a ${g.name} (${GEOFENCE_TYPE_LABEL[g.type]})`));
+      setToast({ message: parts.join(' - ') });
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = setTimeout(() => setToast(null), TOAST_DURATION_MS);
     }
   }, [deviceId, fix, connected]);
 
-  return alert;
+  return { alerts, toast };
 }
 
 function matchedGeofence(match: OfflineGeofenceMatch | null, geofences: Geofence[]): Geofence | null {
@@ -182,27 +488,4 @@ function evaluateGeofencesOfflineAny(fix: LocalFixInput, geofences: Geofence[]):
     (g) =>
       evaluateGeofencesOffline(fix.latitude, fix.longitude, [{ ...g, type: 'danger' }]) !== null,
   );
-}
-
-function pickAlert(
-  match: OfflineGeofenceMatch | null,
-  speedSeverity: 'warning' | 'danger' | null,
-  speedMessage: string,
-): LocalAlert | null {
-  const rank = { info: 1, warning: 2, danger: 3 } as const;
-  const geofenceRank = match ? rank[match.severity] : 0;
-  const speedRank = speedSeverity ? rank[speedSeverity] : 0;
-
-  if (speedRank > 0 && speedRank >= geofenceRank) {
-    return { severity: speedSeverity!, message: speedMessage, source: 'speed', geofenceId: null };
-  }
-  if (match) {
-    return {
-      severity: match.severity,
-      message: match.message,
-      source: 'geofence',
-      geofenceId: match.geofenceId,
-    };
-  }
-  return null;
 }

@@ -118,7 +118,7 @@ export function GeofencesModal({
           <input ref={admin.geoImportFileRef} type="file" accept=".geojson,.json,.kml" />
         </div>
         {admin.importFeedback.text && (
-          <div style={{ fontSize: 12, color: admin.importFeedback.ok ? '#4f8ff0' : '#e5484d' }}>
+          <div style={{ fontSize: 12, color: admin.importFeedback.ok ? '#008cff' : '#e5484d' }}>
             {admin.importFeedback.text}
           </div>
         )}

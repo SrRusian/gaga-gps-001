@@ -48,6 +48,18 @@ export interface UsbDeviceInfo {
   vendorId: number;
   productId: number;
   name: string | null;
+  // true = puerto CDC-ACM nativo (el USB propio del receptor u-blox, sin chip puente detras) - el
+  // firmware no tiene concepto de baud rate ahi, cambiarlo no hace nada real. false = un chip
+  // puente de verdad (FTDI/CP210x/CH340/Prolific), donde el baud si importa.
+  hasFixedBaud: boolean;
+}
+
+// modulo Bluetooth del receptor RTK (HC-05 sobre SPP) - solo dispositivos YA vinculados desde
+// Ajustes de Android; la app nunca descubre ni empareja, por eso no pide BLUETOOTH_SCAN
+export interface BluetoothDeviceInfo {
+  address: string;
+  name: string | null;
+  connected: boolean;
 }
 
 export type NtripVersion = 'v1' | 'v2';
@@ -68,11 +80,45 @@ export interface RtkFix {
   // los campos (satelites/hdop/fixLabel) siguen siendo reales aunque todavia no haya posicion
   latitude: number | null;
   longitude: number | null;
+  // hora UTC real del GPS (de RMC) - distinta del reloj de la tableta, util para confirmar que
+  // el receptor tiene hora GPS real en vez de comparar contra si mismo sin decir nada util
+  gpsTimeMs: number | null;
+  // altitud MSL (nivel del mar), tal cual la GGA. Ver ellipsoidalAltitudeMeters para la otra.
+  altitude: number | null;
+  // altitud sobre el elipsoide WGS84 - lo que u-center llama "Altitude" a secas (distinto de
+  // "Altitude (msl)"). null si la GGA no trae separacion geoidal (siempre deberia traerla)
+  ellipsoidalAltitudeMeters: number | null;
+  // rumbo/velocidad del ultimo fix - null hasta el primer RMC. Igual que el resto de este puente,
+  // separado del canal rapido rtkFix (RtkFixEvent) - este es para el panel de diagnostico (1/seg),
+  // no para el marcador propio en el mapa (hasta 10/seg)
+  speedMps: number | null;
+  courseDeg: number | null;
   fixQuality: number;
   fixLabel: RtkFixLabel;
   satellites: number;
   hdop: number | null;
   accuracyMeters: number;
+  // error horizontal REAL del receptor (GST). null si GST no esta habilitado en el receptor, y
+  // entonces accuracyMeters cae a una estimacion por tipo de fix en vez de una medicion
+  horizontalStdMeters: number | null;
+  // error 3D (horizontal + vertical) real del receptor (GST). Mismo criterio que horizontalStdMeters
+  fullStdMeters: number | null;
+  // segundos desde la ultima correccion aplicada, y estacion base que la emitio (campos 14 y 15
+  // de la GGA). Arriba de 2-5s el RTK se degrada aunque el NTRIP siga "conectado"
+  correctionAgeSeconds: number | null;
+  stationId: string | null;
+}
+
+// un satelite a la vista. signalId distingue la banda (1 = L1C/A, 6 = GPS L2 CL, 3 = GLONASS
+// L2 OF...), asi que un mismo satelite aparece dos veces si se rastrea en dos frecuencias
+export interface SatelliteInfo {
+  constellation: string;
+  id: number;
+  elevation: number | null;
+  azimuth: number | null;
+  snr: number | null; // dB-Hz. RTK necesita 35-45; null = rastreado sin medida
+  signalId: number;
+  used: boolean; // entra al calculo de posicion (viene de GSA)
 }
 
 // "ntrip" es el unico modo funcional hoy - pointperfect/usb_serial existen para que el selector no
@@ -92,6 +138,11 @@ export interface RtkFixEvent {
   timestamp: number;
 }
 
+// los 7 mensajes NMEA que este proyecto ya usa (README "Aprovisionamiento de un receptor RTK
+// nuevo") - vista MSG real de u-center expone muchos mas, alcance recortado a proposito (misma
+// decision ya tomada para "Puertos": solo lo que el hardware real de este proyecto necesita)
+export type NmeaMessageId = 'GGA' | 'RMC' | 'GLL' | 'GSA' | 'GSV' | 'VTG' | 'GST';
+
 export interface RtkStatus {
   usbConnected: boolean;
   connectedUsbDeviceName: string | null;
@@ -101,6 +152,16 @@ export interface RtkStatus {
   connectedUsbDeviceId: number | null;
   usbDataRateBps: number;
   usbTotalBytes: number;
+  // transporte Bluetooth, alternativa al cable USB. El baud rate no aparece aqui a proposito: vive
+  // entre el HC-05 y el UART2 del receptor, Android solo abre el socket serial.
+  bluetoothSupported: boolean;
+  bluetoothEnabled: boolean;
+  bluetoothPermissionGranted: boolean;
+  bluetoothConnected: boolean;
+  connectedBluetoothName: string | null;
+  connectedBluetoothAddress: string | null;
+  bluetoothDataRateBps: number;
+  bluetoothTotalBytes: number;
   ntripConnected: boolean;
   ntripError: string | null;
   ntripDataRateBps: number;
@@ -115,6 +176,16 @@ export interface RtkStatus {
   swMapsPort: number;
   correctionMode: CorrectionMode;
   lastFix?: RtkFix;
+  // solo vienen en getStatus(), nunca en el evento rtkStatus - ese sale hasta 10 veces por segundo
+  // y la lista de satelites es pesada de cruzar el puente a esa frecuencia
+  satellites?: SatelliteInfo[];
+  pdop?: number | null;
+  hdop?: number | null;
+  vdop?: number | null;
+  // 2 o 3 (de GSA), null si nunca llego un GSA valido
+  dimension?: number | null;
+  // TTFF aproximado desde que se establecio el enlace actual - ver comentario en RtkNtripPlugin.kt
+  ttffMs?: number | null;
 }
 
 // una fila "STR;..." de la sourcetable NTRIP estandar - GET / (sin mountpoint) contra cualquier
@@ -130,10 +201,73 @@ export interface NtripMountpoint {
   nmeaRequired: boolean;
 }
 
+export interface ReceiverConfigSnapshot {
+    measRateMs: number;
+    navRateCyc: number;
+    timeRef: number;
+    dynModel: number;
+    highPrecision: boolean;
+    qzssEnabled: boolean;
+    portTarget: 'I2C' | 'UART1' | 'UART2' | 'USB' | 'SPI';
+    portBaudRate: number;
+    portDatabits: number;
+    portStopbits: number;
+    portParity: number;
+    portI2cAddress: number;
+    portSpiCpol: boolean;
+    portSpiCpha: boolean;
+    portProtocolInUbx: boolean;
+    portProtocolInNmea: boolean;
+    portProtocolInRtcm3x: boolean;
+    portProtocolInSpartn: boolean;
+    portProtocolOutUbx: boolean;
+    portProtocolOutNmea: boolean;
+    portProtocolOutRtcm3x: boolean;
+    // vista MSG real de u-center: un mensaje NMEA por fila, On+valor (divisor de epoca) POR
+    // PUERTO - mismo alcance ya decidido para "Puertos" (solo UART1/UART2/USB, sin I2C/SPI - el
+    // Target de "Puertos" se amplio a los 5 reales, pero MSG sigue acotado a proposito)
+    msgRates: { message: NmeaMessageId; port: 'UART1' | 'UART2' | 'USB'; on: boolean; value: number }[];
+    // vista NMEA real de u-center (CFG-NMEA-DATA2) - 22 campos con clave moderna real, incluido
+    // "Galileo" (CFG-NMEA-FILT_GAL) y NMEA Version 4.11 (V411=42) - agregados en firmware posterior
+    // al manual usado en la ronda anterior, ver UbxConfig.kt para el detalle completo de la
+    // correccion. nmeaCompat/nmeaLimit82 son excluyentes con highPrecision - la UI debe apagar el
+    // otro lado al activar cualquiera de los dos.
+    nmeaProtVer: number;
+    nmeaMaxSvs: number;
+    nmeaCompat: boolean;
+    nmeaConsider: boolean;
+    nmeaLimit82: boolean;
+    nmeaSvNumbering: number;
+    nmeaFiltGps: boolean;
+    nmeaFiltSbas: boolean;
+    nmeaFiltGal: boolean;
+    nmeaFiltQzss: boolean;
+    nmeaFiltGlo: boolean;
+    nmeaFiltBds: boolean;
+    nmeaOutInvFix: boolean;
+    nmeaOutMskFix: boolean;
+    nmeaOutInvTime: boolean;
+    nmeaOutInvDate: boolean;
+    nmeaOutOnlyGps: boolean;
+    nmeaOutFrozenCog: boolean;
+    nmeaMainTalkerId: number;
+    nmeaGsvTalkerId: number;
+    nmeaBdsTalkerId: string;
+    // static hold del receptor: congela posicion y pone velocidad en 0 al detectarse detenido.
+    // speed en cm/s (111 = 4 km/h), distancia de salida en metros. 0 = apagado (default de fabrica)
+    staticHoldSpeedCmS: number;
+    staticHoldExitDistanceM: number;
+}
+
 export interface RtkNtripPlugin {
   listUsbDevices(): Promise<{ devices: UsbDeviceInfo[] }>;
   connectUsb(options: { deviceId: number; baudRate?: number }): Promise<void>;
   disconnectUsb(): Promise<void>;
+  listBluetoothDevices(): Promise<{ devices: BluetoothDeviceInfo[] }>;
+  connectBluetooth(options: { address: string }): Promise<void>;
+  disconnectBluetooth(): Promise<void>;
+  // en una tableta Device Owner se concede sin dialogo; si no, abre el dialogo normal de Android
+  requestBluetoothPermission(): Promise<void>;
   getBaudRate(): Promise<{ baudRate: number }>;
   setBaudRate(options: { baudRate: number }): Promise<void>;
   setNtripConfig(options: NtripConfig): Promise<void>;
@@ -143,15 +277,39 @@ export interface RtkNtripPlugin {
   setCorrectionMode(options: { mode: CorrectionMode }): Promise<void>;
   startNtrip(): Promise<void>;
   stopNtrip(): Promise<void>;
+  // aplica de un solo golpe (UBX-CFG-VALSET) el aprovisionamiento del receptor que hasta ahora
+  // requeria una PC con u-center - measRateMs/navRateCyc/timeRef son los MISMOS campos que la vista
+  // RATE de u-center real deja escribir; portTarget/portBaudRate/etc son los mismos campos de la
+  // vista PRT (Ports), ahora con los 5 targets reales (I2C/UART1/UART2/USB/SPI) - ver UbxConfig.kt
+  // (Kotlin) para el detalle completo de que clave corresponde a cada campo, y para los limites
+  // reales de databits/stopbits/parity/protocolo (la clave moderna no soporta todo lo que u-center
+  // muestra en su vista legada, generica para toda la familia u-blox - ver comentario ahi).
+  sendReceiverProvisioning(options: ReceiverConfigSnapshot): Promise<void>;
+  // Lee la configuracion REAL del receptor (UBX-CFG-VALGET) y la devuelve con los mismos nombres
+  // de campo que acepta sendReceiverProvisioning - el panel se llena con lo que el receptor TIENE,
+  // no con los defaults del codigo. Rechaza sin receptor conectado, o si el puerto no tiene
+  // habilitada la salida UBX (el receptor no puede contestar). `complete` en false = contesto solo
+  // una parte antes del timeout, lo que falte se queda en su valor anterior.
+  readReceiverConfig(options: {
+    portTarget: 'I2C' | 'UART1' | 'UART2' | 'USB' | 'SPI';
+    msgRates: { message: NmeaMessageId; port: 'UART1' | 'UART2' | 'USB'; on: boolean; value: number }[];
+  }): Promise<Partial<ReceiverConfigSnapshot> & { complete: boolean; readCount: number; expectedCount: number }>;
   // rumbo ya corregido por la auto-calibracion de montaje (ver headingCalibration.ts) - lo usa el
   // envio al servidor cuando el rumbo GPS no es confiable (vehiculo detenido), para que Admin y
   // Supervisor vean hacia donde apunta el vehiculo igual que el operador en su propia pantalla
   setCompassHeading(options: { headingDeg: number }): Promise<void>;
+  // umbral de "detenido" de ESTE vehiculo, derivado de su tipo (ver stationaryThresholdKmh) - 0
+  // desactiva el congelado de posicion, correcto para maquinaria lenta
+  setStationaryThreshold(options: { speedKmh: number }): Promise<void>;
   startMockLocation(): Promise<void>;
   stopMockLocation(): Promise<void>;
   startSwMapsOutput(options?: { port?: number }): Promise<void>;
   stopSwMapsOutput(): Promise<void>;
   getStatus(): Promise<RtkStatus>;
+  // mientras esta activo, el evento rtkStatus (hasta 10Hz) tambien trae satelites/DOP/TTFF - solo
+  // se activa mientras el menu u-center esta abierto (ver UCenterView.tsx), apagado el resto del
+  // tiempo para no cruzar esa lista por el puente sin que nadie la vea
+  setDiagnosticsActive(options: { active: boolean }): Promise<void>;
   addListener(
     eventName: 'rtkStatus',
     listenerFunc: (status: RtkStatus) => void,
@@ -159,6 +317,10 @@ export interface RtkNtripPlugin {
   addListener(
     eventName: 'usbDevicesChanged',
     listenerFunc: (data: { devices: UsbDeviceInfo[] }) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'bluetoothDevicesChanged',
+    listenerFunc: (data: { devices: BluetoothDeviceInfo[] }) => void,
   ): Promise<PluginListenerHandle>;
   addListener(
     eventName: 'rtkFix',
@@ -200,9 +362,15 @@ const webTraccarFallback: TraccarSenderPlugin = {
 };
 
 const webRtkFallback: RtkNtripPlugin = {
+  readReceiverConfig: async () => unavailable('RtkNtrip'),
+  setStationaryThreshold: async () => {},
   listUsbDevices: async () => ({ devices: [] }),
   connectUsb: async () => unavailable('RtkNtrip'),
   disconnectUsb: async () => unavailable('RtkNtrip'),
+  listBluetoothDevices: async () => ({ devices: [] }),
+  connectBluetooth: async () => unavailable('RtkNtrip'),
+  disconnectBluetooth: async () => unavailable('RtkNtrip'),
+  requestBluetoothPermission: async () => unavailable('RtkNtrip'),
   getBaudRate: async () => ({ baudRate: 460800 }),
   setBaudRate: async () => unavailable('RtkNtrip'),
   setNtripConfig: async () => unavailable('RtkNtrip'),
@@ -212,17 +380,27 @@ const webRtkFallback: RtkNtripPlugin = {
   setCorrectionMode: async () => unavailable('RtkNtrip'),
   startNtrip: async () => unavailable('RtkNtrip'),
   stopNtrip: async () => unavailable('RtkNtrip'),
+  sendReceiverProvisioning: async () => unavailable('RtkNtrip'),
   setCompassHeading: async () => unavailable('RtkNtrip'),
   startMockLocation: async () => unavailable('RtkNtrip'),
   stopMockLocation: async () => unavailable('RtkNtrip'),
   startSwMapsOutput: async () => unavailable('RtkNtrip'),
   stopSwMapsOutput: async () => unavailable('RtkNtrip'),
+  setDiagnosticsActive: async () => unavailable('RtkNtrip'),
   getStatus: async () => ({
     usbConnected: false,
     connectedUsbDeviceName: null,
     connectedUsbDeviceId: null,
     usbDataRateBps: 0,
     usbTotalBytes: 0,
+    bluetoothSupported: false,
+    bluetoothEnabled: false,
+    bluetoothPermissionGranted: false,
+    bluetoothConnected: false,
+    connectedBluetoothName: null,
+    connectedBluetoothAddress: null,
+    bluetoothDataRateBps: 0,
+    bluetoothTotalBytes: 0,
     ntripConnected: false,
     ntripError: null,
     ntripDataRateBps: 0,

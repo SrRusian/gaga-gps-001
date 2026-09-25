@@ -10,7 +10,12 @@ import type { Geofence } from '@gaga-gps/shared-types';
 // almacenamiento bloqueado o lleno, la app debe seguir funcionando, solo sin memoria entre sesiones.
 
 const GEOFENCES_KEY = 'gaga_offline_geofences';
+// separado del array de geocercas a proposito: un array vacio no distingue "nunca llego
+// geofences:update" de "llego y de verdad el proyecto no tiene ninguna" - ver isInsideAllowedZone
+// en useLocalAlerts.ts, que necesita saber cual de los dos casos es de verdad
+const GEOFENCES_READY_KEY = 'gaga_offline_geofences_ready';
 const ALERT_QUEUE_KEY = 'gaga_offline_alert_queue';
+const RESTRICTED_ZONE_KEY = 'gaga_restricted_to_allowed_zone';
 
 // tope de seguridad, no de operacion normal: una alerta se encola por transicion (entrar/salir de
 // una zona), no por segundo, asi que ni un turno entero sin red deberia acercarse. Si se desborda
@@ -33,6 +38,7 @@ export interface QueuedGeofenceAlert {
 export function cacheGeofences(geofences: Geofence[]): void {
   try {
     localStorage.setItem(GEOFENCES_KEY, JSON.stringify(geofences));
+    localStorage.setItem(GEOFENCES_READY_KEY, 'true');
   } catch {
     // almacenamiento lleno o bloqueado - se sigue operando con lo que ya hay en memoria
   }
@@ -46,6 +52,37 @@ export function loadCachedGeofences(): Geofence[] {
     return Array.isArray(parsed) ? (parsed as Geofence[]) : [];
   } catch {
     return [];
+  }
+}
+
+// true = ya llego un geofences:update real al menos una vez (aunque haya sido con 0 geocercas) -
+// distingue "nunca cargo" (no confiar todavia, ver zona restringida) de "cargo y de verdad esta
+// vacio" (confiar, un proyecto sin ninguna geocerca 'allowed' es un caso valido)
+export function loadGeofencesReady(): boolean {
+  try {
+    return localStorage.getItem(GEOFENCES_READY_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+// "el servidor le dice al dispositivo la regla, no al reves" - se cachea igual que las geocercas,
+// asi la tableta sabe si debe permanecer en zona permitida aunque arranque sin conexion. Se
+// actualiza via el evento de socket device:config (ver useOperatorSocket.ts), que llega al conectar
+// y en cuanto un admin cambia el valor - nunca se le pregunta al servidor, el servidor avisa.
+export function cacheRestrictedToAllowedZone(value: boolean): void {
+  try {
+    localStorage.setItem(RESTRICTED_ZONE_KEY, JSON.stringify(value));
+  } catch {
+    // ver comentario de cacheGeofences
+  }
+}
+
+export function loadCachedRestrictedToAllowedZone(): boolean {
+  try {
+    return localStorage.getItem(RESTRICTED_ZONE_KEY) === 'true';
+  } catch {
+    return false;
   }
 }
 

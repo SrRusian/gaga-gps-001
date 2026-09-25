@@ -94,6 +94,26 @@ export function buildAppUpdateRouter({
     });
   });
 
+  // credenciales NTRIP de fabrica, para que la tableta las pida en vivo desde u-center ("Obtener
+  // del servidor") en vez de traerlas hardcodeadas en el APK - decompilar un .apk es trivial,
+  // decompilar esto no expone nada porque nunca sale del backend salvo con la clave compartida
+  // correcta. Clave compartida, mismo criterio que /latest. Config real en env.ntripDefault
+  // (system_settings via loadSettingsOverrides, .env solo como semilla del primer arranque).
+  router.get('/ntrip-config', async (req, res) => {
+    if (!isValidSharedSecret(env.telemetrySharedSecret, req.query.key)) {
+      return res.status(401).json({ error: 'Clave inválida' });
+    }
+    res.json({
+      name: env.ntripDefault.name,
+      host: env.ntripDefault.host,
+      port: env.ntripDefault.port,
+      username: env.ntripDefault.username,
+      password: env.ntripDefault.password,
+      mountpoint: env.ntripDefault.mountpoint,
+      version: env.ntripDefault.version,
+    });
+  });
+
   router.get('/download', async (req, res) => {
     if (!isValidSharedSecret(env.telemetrySharedSecret, req.query.key)) {
       return res.status(401).json({ error: 'Clave inválida' });

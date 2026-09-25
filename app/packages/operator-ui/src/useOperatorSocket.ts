@@ -9,8 +9,13 @@ import type {
 } from '@gaga-gps/shared-types';
 import type { EquipmentMarkerData } from '@gaga-gps/map-core';
 import { useEffect, useRef, useState } from 'react';
-import { useAlertSound } from './useAlertSound';
-import { cacheGeofences, loadCachedGeofences } from './offlineStore';
+import {
+  cacheGeofences,
+  cacheRestrictedToAllowedZone,
+  loadCachedGeofences,
+  loadCachedRestrictedToAllowedZone,
+  loadGeofencesReady,
+} from './offlineStore';
 
 function toMarkerData(eq: StaticEquipment): EquipmentMarkerData {
   return {
@@ -24,9 +29,29 @@ function toMarkerData(eq: StaticEquipment): EquipmentMarkerData {
   };
 }
 
+// "server" en el sistema de prioridad (alertPriority.ts) - todo lo que SOLO el servidor puede
+// decidir porque necesita ver a toda la flota (colision, proximidad, equipo estatico, incidentes,
+// parada preventiva). El sonido ya no lo dispara este hook - OperatorApp.tsx arma el stack completo
+// (esto + conectividad + RTK + lo que useLocalAlerts.ts decide) y decide cual suena, con que
+// prioridad. `silent` es el escape para el unico caso que ya existia de "se ve pero no suena"
+// (equipment:approach_outer, radio exterior - solo el interior si suena).
 export interface AlertState {
   severity: 'warning' | 'danger' | 'info' | null;
   message: string;
+  loop: boolean;
+  silent: boolean;
+}
+
+// "connectivity" en el sistema de prioridad - separado a proposito del slot `alert` de arriba: un
+// peligro real (colision) y un problema de conectividad son cosas independientes que deben poder
+// verse/sonar por separado, nunca una pisando a la otra. Agrupa DOS fuentes que representan el
+// mismo problema de cara al operador ("no me estan recibiendo"): el vigilante local de socket
+// (LOCAL_DISCONNECT_LEVEL1/2, mas abajo) y signal:lost:levelX que el servidor manda cuando dejan de
+// llegar posiciones aunque el socket siga conectado (GPS/telemetria rota, no el enlace en si).
+export interface ConnectivityAlertState {
+  severity: 'warning' | 'danger';
+  message: string;
+  loop: boolean;
 }
 
 export interface NearestVehicle {
@@ -57,6 +82,19 @@ export interface ProximityNotice {
   message: string;
 }
 
+// aviso de conectividad de OTRO vehiculo (senal perdida/recuperada de un tercero) - separado a
+// proposito del slot `alert` de arriba. Bug real reportado: el mismo evento signal:lost:levelX que
+// el backend manda en tercera persona a todo el proyecto ("VEHICULO X SIN SEÑAL") se procesaba
+// aqui sin filtrar por deviceId, así que sobreescribia (visualmente Y en el sonido - useAlertSound
+// corta cualquier sonido en curso antes de tocar uno nuevo) una alerta real y propia que ya
+// estuviera en pantalla/sonando. Este es solo un aviso de precaucion sobre alguien mas - nunca debe
+// competir con el overlay/sonido de un peligro real de ESTE vehiculo
+export interface NetworkNotice {
+  severity: 'warning' | 'danger';
+  message: string;
+  deviceId: string;
+}
+
 // mismos umbrales que SignalLostService del backend (5s/15s) - no es codigo compartido, es el mismo
 // criterio a proposito: el operador se entera de que perdio conexion al mismo tiempo que el resto
 // del proyecto. Ademas, estando sin red este vigilante local es el UNICO que puede aplicarle el
@@ -71,20 +109,28 @@ export function useOperatorSocket(deviceId: string | null) {
   // ya dibujadas y evaluables aunque arranque sin red (pedido explicito: el Operador debe poder
   // operar sin restricciones sin conexion)
   const [geofences, setGeofences] = useState<Geofence[]>(() => loadCachedGeofences());
+  // ver offlineStore.ts - distingue "nunca llego un geofences:update real" de "llego y esta vacio"
+  const [geofencesReady, setGeofencesReady] = useState(() => loadGeofencesReady());
+  // "el servidor le dice al dispositivo la regla, no al reves" - se hidrata del cache local igual
+  // que las geocercas (funciona sin red desde el arranque) y se actualiza via device:config, que
+  // llega al conectar y en cuanto un admin cambia el valor (ver useLocalAlerts.ts, que la usa para
+  // evaluar la violacion 100% local)
+  const [restrictedToAllowedZone, setRestrictedToAllowedZone] = useState(() =>
+    loadCachedRestrictedToAllowedZone(),
+  );
   const [equipment, setEquipment] = useState<EquipmentMarkerData[]>([]);
   const [activeMaps, setActiveMaps] = useState<ActiveMap[]>([]);
   const [myPosition, setMyPosition] = useState<Position | null>(null);
   const [myOnline, setMyOnline] = useState(false);
-  const [alert, setAlert] = useState<AlertState>({ severity: null, message: '' });
+  const [alert, setAlert] = useState<AlertState>({ severity: null, message: '', loop: false, silent: false });
+  const [connectivityAlert, setConnectivityAlert] = useState<ConnectivityAlertState | null>(null);
   const [nearestVehicle, setNearestVehicle] = useState<NearestVehicle | null>(null);
   const [nearestOnRoute, setNearestOnRoute] = useState<NearestOnRouteVehicle | null>(null);
   const [threat, setThreat] = useState<ThreatVehicle | null>(null);
   const [activeGeofenceId, setActiveGeofenceId] = useState<number | null>(null);
   const [incidents, setIncidents] = useState<Record<number, IncidentReportedPayload>>({});
   const [proximityNotice, setProximityNotice] = useState<ProximityNotice | null>(null);
-  const { playWarningSound, playDangerSound, stopSound } = useAlertSound();
-  const soundsRef = useRef({ playWarningSound, playDangerSound, stopSound });
-  soundsRef.current = { playWarningSound, playDangerSound, stopSound };
+  const [networkNotice, setNetworkNotice] = useState<NetworkNotice | null>(null);
 
   const disconnectedAtRef = useRef<number | null>(null);
   const localSignalLevelRef = useRef<'none' | 'level1' | 'level2'>('none');
@@ -95,18 +141,26 @@ export function useOperatorSocket(deviceId: string | null) {
 
     const socket = createSocket();
 
-    const showWarning = (message: string) => setAlert({ severity: 'warning', message });
-    const showDanger = (message: string) => setAlert({ severity: 'danger', message });
-    const showInfo = (message: string) => setAlert({ severity: 'info', message });
-    const clearAlertState = () => setAlert({ severity: null, message: '' });
+    const showWarning = (message: string, silent = false) =>
+      setAlert({ severity: 'warning', message, loop: false, silent });
+    const showDanger = (message: string, loop?: boolean) =>
+      setAlert({ severity: 'danger', message, loop: !!loop, silent: false });
+    const showInfo = (message: string) => setAlert({ severity: 'info', message, loop: false, silent: true });
+    const clearAlertState = () => setAlert({ severity: null, message: '', loop: false, silent: false });
+    // colision/proximidad se emiten SIN filtro de proyecto en el backend (gap de aislamiento ya
+    // documentado, io.emit global) - sin este chequeo, cualquier par de vehiculos en TODO el
+    // sistema podia hijackear el overlay/sonido de este operador. deviceId1/deviceId2 llegan como
+    // number en CollisionPayload (typo historico, en runtime son strings) - String() normaliza los
+    // dos casos con la misma funcion
+    const involvesMe = (a: string | number, b: string | number) =>
+      String(a) === deviceId || String(b) === deviceId;
 
     socket.on('connect', () => {
       setConnected(true);
       disconnectedAtRef.current = null;
       if (localSignalLevelRef.current !== 'none') {
         localSignalLevelRef.current = 'none';
-        clearAlertState();
-        soundsRef.current.stopSound();
+        setConnectivityAlert(null);
       }
       // unico dato que le permite al backend mandarle un evento a ESTA tableta en particular
       // (ver FleetSocketServer.sendToDevice / "Actualizar esta tableta" en el panel de Sistema)
@@ -127,7 +181,13 @@ export function useOperatorSocket(deviceId: string | null) {
     socket.on('maps:active_update', ({ maps }) => setActiveMaps(maps));
     socket.on('geofences:update', (gs) => {
       setGeofences(gs);
+      setGeofencesReady(true);
       cacheGeofences(gs); // sobreviven a cerrar la app y a quedarse sin red
+    });
+    socket.on('device:config', (data: { restrictedToAllowedZone?: boolean }) => {
+      if (typeof data.restrictedToAllowedZone !== 'boolean') return;
+      setRestrictedToAllowedZone(data.restrictedToAllowedZone);
+      cacheRestrictedToAllowedZone(data.restrictedToAllowedZone);
     });
     socket.on('equipment:update', (eqs: StaticEquipment[]) => setEquipment(eqs.map(toMarkerData)));
 
@@ -151,14 +211,12 @@ export function useOperatorSocket(deviceId: string | null) {
       if (data.deviceId === deviceId) {
         showWarning(data.message);
         setActiveGeofenceId(data.geofenceId);
-        soundsRef.current.playWarningSound();
       }
     });
     socket.on('alert:critical', (data) => {
       if (data.deviceId === deviceId) {
-        showDanger(data.message);
+        showDanger(data.message, data.loop);
         setActiveGeofenceId(data.geofenceId);
-        soundsRef.current.playDangerSound(data.loop);
       }
     });
     socket.on('alert:info', (data) => {
@@ -171,7 +229,6 @@ export function useOperatorSocket(deviceId: string | null) {
       if (data.deviceId === deviceId) {
         clearAlertState();
         setActiveGeofenceId(null);
-        soundsRef.current.stopSound();
       }
     });
 
@@ -195,35 +252,48 @@ export function useOperatorSocket(deviceId: string | null) {
     socket.on('route:distance_clear', () => setNearestOnRoute(null));
 
     // el backend ya decide el mensaje segun la audiencia (SignalLostService.ts): al propio
-    // vehiculo afectado le llega en primera persona via un evento dirigido solo a el, al resto del
-    // proyecto en tercera persona ("VEHICULO X SIN SEÑAL") por seguridad - aqui solo se muestra
-    // el que de verdad llego, sin filtrar de nuevo
+    // vehiculo afectado le llega en primera persona via un evento dirigido solo a el (sendToDevice),
+    // al resto del proyecto en tercera persona ("VEHICULO X SIN SEÑAL") por seguridad
+    // (broadcastToProjectExceptDevice) - MISMO nombre de evento en los dos casos. Sobre este
+    // vehiculo, va al slot de CONECTIVIDAD (no al de peligros de terceros `alert`) - es el mismo
+    // problema de fondo que el vigilante local de mas abajo, solo detectado del lado del servidor
     socket.on('signal:lost:level1', (data) => {
-      showWarning(data.message);
-      soundsRef.current.playWarningSound();
+      if (data.deviceId === deviceId) {
+        setConnectivityAlert({ severity: 'warning', message: data.message, loop: false });
+      } else {
+        setNetworkNotice({ severity: 'warning', message: data.message, deviceId: data.deviceId });
+      }
     });
     socket.on('signal:lost:level2', (data) => {
-      showDanger(data.message);
-      soundsRef.current.playDangerSound(data.loop);
+      if (data.deviceId === deviceId) {
+        setConnectivityAlert({ severity: 'danger', message: data.message, loop: !!data.loop });
+      } else {
+        setNetworkNotice({ severity: 'danger', message: data.message, deviceId: data.deviceId });
+      }
     });
-    socket.on('signal:recovered', () => {
-      clearAlertState();
-      soundsRef.current.stopSound();
+    socket.on('signal:recovered', (data) => {
+      if (data.deviceId === deviceId) {
+        setConnectivityAlert(null);
+      } else {
+        // solo limpia si el aviso activo es justo de ESE vehiculo - la recuperacion de uno no debe
+        // borrar un aviso de red vigente sobre otro vehiculo distinto todavia caido
+        setNetworkNotice((prev) => (prev?.deviceId === data.deviceId ? null : prev));
+      }
     });
 
     socket.on('collision:proximity', (data) => {
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
       showWarning(data.message);
-      soundsRef.current.playWarningSound();
     });
     socket.on('collision:critical', (data) => {
-      showDanger(data.message);
-      soundsRef.current.playDangerSound(data.loop);
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
+      showDanger(data.message, data.loop);
       const otherId = String(data.deviceId1) === deviceId ? data.deviceId2 : data.deviceId1;
       setThreat({ deviceId: String(otherId), distance: data.distance });
     });
-    socket.on('collision:clear', () => {
+    socket.on('collision:clear', (data) => {
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
       clearAlertState();
-      soundsRef.current.stopSound();
       setThreat(null);
     });
 
@@ -233,41 +303,40 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
     socket.on('proximity:warning', (data) => {
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
       showWarning(data.message);
-      soundsRef.current.playWarningSound();
     });
     socket.on('proximity:critical', (data) => {
-      showDanger(data.message);
-      soundsRef.current.playDangerSound(data.loop);
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
+      showDanger(data.message, data.loop);
       const otherId = data.deviceId1 === deviceId ? data.deviceId2 : data.deviceId1;
       setThreat({ deviceId: otherId, distance: data.distance });
     });
-    socket.on('proximity:clear', () => {
+    socket.on('proximity:clear', (data) => {
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
       clearAlertState();
-      soundsRef.current.stopSound();
       setThreat(null);
       setNearestVehicle(null);
     });
 
+    // approach_outer (radio exterior) es visual sin sonido a proposito - approach_inner (interior,
+    // de verdad peligroso) es el unico de los dos que suena, ver `silent` en AlertState
     socket.on('equipment:approach_outer', (data) => {
-      if (data.deviceId === deviceId) showWarning(data.message);
+      if (data.deviceId === deviceId) showWarning(data.message, true);
     });
     socket.on('equipment:approach_inner', (data) => {
       if (data.deviceId === deviceId) {
         showWarning(`${data.message} - VELOCIDAD MÁXIMA 5 km/h`);
-        soundsRef.current.playWarningSound();
       }
     });
     socket.on('equipment:minimum_limit', (data) => {
       if (data.deviceId === deviceId) {
-        showDanger(data.message);
-        soundsRef.current.playDangerSound(data.loop);
+        showDanger(data.message, data.loop);
       }
     });
     socket.on('equipment:approach_clear', (data) => {
       if (data.deviceId === deviceId) {
         clearAlertState();
-        soundsRef.current.stopSound();
       }
     });
 
@@ -285,17 +354,14 @@ export function useOperatorSocket(deviceId: string | null) {
     socket.on('incident:nearby', (data) => {
       if (data.deviceId === deviceId) {
         showWarning(data.message);
-        soundsRef.current.playWarningSound();
       }
     });
 
     socket.on('fleet:preventive_stop', (data) => {
-      showDanger(data.message);
-      soundsRef.current.playDangerSound(data.loop);
+      showDanger(data.message, data.loop);
     });
     socket.on('fleet:preventive_stop_clear', (data) => {
       clearAlertState();
-      soundsRef.current.stopSound();
       showWarning(data.message);
       setTimeout(clearAlertState, 5000);
     });
@@ -307,13 +373,13 @@ export function useOperatorSocket(deviceId: string | null) {
     // desconecta/reconecta el mismo socket (conserva sus listeners) en vez de crear uno nuevo.
     // Desconectar el socket solo evita eventos NUEVOS - una alerta ya sonando (ej. parada
     // preventiva activa desde antes de perder corriente) sigue sonando si no se detiene aparte,
-    // por eso tambien se limpia el estado/sonido activo al entrar en suspension (bug real
+    // por eso tambien se limpia el estado activo (los dos slots) al entrar en suspension (bug real
     // reportado: "hay un alto total activo... se sigue escuchando la alerta de fondo").
     function onPowerSuspended() {
       powerSuspendedRef.current = true;
       socket.disconnect();
       clearAlertState();
-      soundsRef.current.stopSound();
+      setConnectivityAlert(null);
     }
     Power.getStatus().then((status) => {
       if (status.suspended) onPowerSuspended();
@@ -346,20 +412,18 @@ export function useOperatorSocket(deviceId: string | null) {
 
       if (elapsed >= LOCAL_DISCONNECT_LEVEL2_MS && localSignalLevelRef.current !== 'level2') {
         localSignalLevelRef.current = 'level2';
-        setAlert({
+        setConnectivityAlert({
           severity: 'danger',
           message: 'SIN CONEXIÓN PROLONGADA - DETÉNGASE Y REPORTE POR RADIO',
+          loop: true,
         });
-        playDangerSound(true);
       } else if (elapsed >= LOCAL_DISCONNECT_LEVEL1_MS && localSignalLevelRef.current === 'none') {
         localSignalLevelRef.current = 'level1';
-        setAlert({ severity: 'warning', message: 'SIN CONEXIÓN - REDUZCA VELOCIDAD' });
-        playWarningSound();
+        setConnectivityAlert({ severity: 'warning', message: 'SIN CONEXIÓN - REDUZCA VELOCIDAD', loop: false });
       }
     }, 1000);
 
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId]);
 
   // La evaluacion de geocercas y velocidad ya NO vive aqui: la hace useLocalAlerts, siempre, con o
@@ -378,6 +442,7 @@ export function useOperatorSocket(deviceId: string | null) {
     myPosition,
     myOnline,
     alert,
+    connectivityAlert,
     activeCount,
     nearestVehicle,
     nearestOnRoute,
@@ -385,8 +450,8 @@ export function useOperatorSocket(deviceId: string | null) {
     activeGeofenceId,
     incidents,
     proximityNotice,
-    // la evaluacion local (useLocalAlerts) suena por su cuenta, compartiendo esta MISMA instancia:
-    // dos useAlertSound distintos tendrian cada uno su propio bucle y ninguno podria callar al otro
-    sounds: { playWarningSound, playDangerSound, stopSound },
+    networkNotice,
+    restrictedToAllowedZone,
+    geofencesReady,
   };
 }

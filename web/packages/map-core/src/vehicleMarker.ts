@@ -11,7 +11,7 @@ const RING_SIZE = ARROW_SIZE + 14;
 // este paquete no depende de web/packages/ui (ver EQUIPMENT_CORE_COLOR/EQUIPMENT_OUTER_COLOR, mismo criterio)
 const SELECTED_RING_COLOR = '#ffd23f';
 const OFFLINE_COLOR = '#e5484d';
-const ACCURACY_COLOR = '#4f8ff0';
+const ACCURACY_COLOR = '#008cff';
 // color distinto a proposito del circulo de precision (azul) y de los colores de identidad
 // (mio/otro/desconectado/seleccionado) - representa una medida fisica fija, no un estado
 const FOOTPRINT_COLOR = '#94a3b8';

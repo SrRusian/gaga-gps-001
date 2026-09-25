@@ -16,7 +16,9 @@ export interface AlertsModalProps {
 export function AlertsModal({ open, onClose, alerts, alertCount }: AlertsModalProps) {
   return (
     <Modal size="large" open={open} title="Alertas" onClose={onClose}>
-      <AlertsPanel alerts={alerts} alertCount={alertCount} canAccessHistory />
+      <div className="sup-tokens">
+        <AlertsPanel alerts={alerts} alertCount={alertCount} canAccessHistory />
+      </div>
     </Modal>
   );
 }

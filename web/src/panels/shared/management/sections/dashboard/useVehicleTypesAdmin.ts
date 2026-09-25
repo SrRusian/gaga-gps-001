@@ -8,9 +8,16 @@ export interface VehicleTypeFormState {
   widthMeters: string;
   // opcional - vacio = sin limite propio para este tipo (a diferencia de largo/ancho, obligatorios)
   maxSpeedKmh: string;
+  category: 'transport' | 'machinery';
 }
 
-const EMPTY_FORM: VehicleTypeFormState = { name: '', lengthMeters: '', widthMeters: '', maxSpeedKmh: '' };
+const EMPTY_FORM: VehicleTypeFormState = {
+  name: '',
+  lengthMeters: '',
+  widthMeters: '',
+  maxSpeedKmh: '',
+  category: 'transport',
+};
 
 // catalogo global - solo admin lo administra (crea/edita/elimina), pero cualquier rol con acceso
 // a Dispositivos necesita la lista para el <select> de asignacion (ver DevicesModal). El modal de
@@ -43,6 +50,7 @@ export function useVehicleTypesAdmin() {
       lengthMeters: String(vt.length_meters),
       widthMeters: String(vt.width_meters),
       maxSpeedKmh: vt.max_speed_kmh != null ? String(vt.max_speed_kmh) : '',
+      category: vt.category ?? 'transport',
     });
     setVehicleTypeFormModal({ vehicleType: vt });
   }
@@ -71,6 +79,7 @@ export function useVehicleTypesAdmin() {
           lengthMeters,
           widthMeters,
           maxSpeedKmh,
+          category: vehicleTypeForm.category,
         });
       } else {
         await adminApi.post('/api/vehicle-types', {
@@ -78,6 +87,7 @@ export function useVehicleTypesAdmin() {
           lengthMeters,
           widthMeters,
           maxSpeedKmh,
+          category: vehicleTypeForm.category,
         });
       }
       setVehicleTypeFormModal(null);

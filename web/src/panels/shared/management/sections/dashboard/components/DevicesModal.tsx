@@ -137,7 +137,7 @@ export function DevicesModal({
                 admin.setDeviceForm({ ...admin.deviceForm, restrictedToAllowedZone: e.target.checked })
               }
             />
-            <label htmlFor="device-restricted-zone" style={{ fontSize: 12, color: '#8b949e' }}>
+            <label htmlFor="device-restricted-zone" style={{ fontSize: 12, color: '#7d93b8' }}>
               Restringido a zona permitida (debe quedarse dentro - salir genera infracción)
             </label>
           </div>

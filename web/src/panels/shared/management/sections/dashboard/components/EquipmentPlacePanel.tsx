@@ -17,7 +17,9 @@ export function EquipmentPlacePanel({ scope, projects, equipment }: EquipmentPla
       <div className="dash-float-panel-header">
         <h4>{eq.equipmentEditingId != null ? 'Editar equipo estático' : 'Nuevo equipo estático'}</h4>
         <button className="gg-modal-close" onClick={eq.closeEquipPanel} aria-label="Cerrar">
-          X
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
         </button>
       </div>
       <div className="dash-float-panel-body">

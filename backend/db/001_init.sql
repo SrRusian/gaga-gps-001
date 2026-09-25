@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS vehicle_types (
   -- devices.speed_limit_kmh/geofences.speed_limit_kmh). SpeedAlertService lo combina con el limite
   -- del dispositivo/grupo/geocerca y gana siempre el mas estricto.
   max_speed_kmh DOUBLE PRECISION,
+  -- 'transport' = vehiculo de carretera (camion, camioneta, auto) - tiene un estado "estacionado"
+  -- real a ~0 km/h. 'machinery' = maquinaria pesada (excavadora, cargador) - trabaja a velocidad de
+  -- gateo, donde no se puede distinguir "parado" de "avanzando despacio" con la velocidad GPS. La
+  -- categoria decide comportamientos reales (congelado de posicion, aviso anticipado de velocidad),
+  -- no es solo una etiqueta - ver stationaryThresholdKmh() en app/packages/operator-ui/localSpeed.ts
+  category VARCHAR(20) NOT NULL DEFAULT 'transport' CHECK (category IN ('transport', 'machinery')),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -156,6 +162,14 @@ CREATE TABLE IF NOT EXISTS geofences (
   -- solo aplica a shape_type='polyline' - TRUE (default, "Ruta autorizada" historico) = debe
   -- quedarse DENTRO del ancho (alerta si se aleja); FALSE = "no tocar" (alerta si se acerca)
   stay_inside BOOLEAN NOT NULL DEFAULT TRUE,
+  -- solo aplica a shape_type='polyline'. La direccion NO es geometria nueva: una polilinea ya viene
+  -- ordenada, asi que la fraccion a lo largo de ella (0 = primer punto, 1 = ultimo) ya define un
+  -- sentido. 'both' (default) = bidireccional, comportamiento historico sin regresion. 'forward' =
+  -- hay que recorrerla en el orden en que se dibujo; 'backward' = al reves (permite invertir una
+  -- ruta ya trazada sin volver a dibujarla). Un poligono no lleva direccion a proposito: no tiene
+  -- un sentido de recorrido intrinseco, y una polilinea con ancho de corredor YA es ese poligono.
+  route_direction VARCHAR(10) NOT NULL DEFAULT 'both'
+    CHECK (route_direction IN ('both', 'forward', 'backward')),
   active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   geog GEOGRAPHY(GEOMETRY, 4326),

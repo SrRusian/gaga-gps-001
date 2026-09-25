@@ -11,7 +11,10 @@ export const DEVICE_ID_KEY = 'gaga_operator_device_id';
 // rol que no sea operador (Admin/Encargado/Supervisor) pueda instalar el APK y hacer login sin
 // entrar nunca a Ajustes a configurar nada a mano. En navegador normal nunca aplica (ahi "vacio"
 // siempre significa mismo origen, que es correcto - Express sirve la SPA y la API del mismo host).
-export const PRODUCTION_SERVER_URL = 'https://app.gaga-maquinaria.com';
+// Configurable via VITE_PRODUCTION_SERVER_URL (.env de la raiz) - a diferencia de una credencial,
+// esta URL ya es publica de todos modos (es literalmente donde vive el servicio), no hay riesgo
+// real en que quede compilada en el bundle.
+export const PRODUCTION_SERVER_URL = import.meta.env.VITE_PRODUCTION_SERVER_URL || 'https://app.gaga-maquinaria.com';
 
 // valor guardado tal cual, SIN el fallback de produccion de abajo - lo usa la migracion de
 // perfiles (DeviceSettingsPanel.tsx) para distinguir "nunca se configuro nada" de "ya apunta a

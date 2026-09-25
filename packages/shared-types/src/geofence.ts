@@ -12,6 +12,11 @@ export type GeofenceType =
   | 'carga';
 export type GeofenceShapeType = 'circle' | 'polygon' | 'polyline';
 
+// Sentido de recorrido de una ruta autorizada. No es geometria aparte: la polilinea ya viene
+// ordenada, asi que su fraccion (0 = primer punto, 1 = ultimo) define el sentido. 'backward' existe
+// para poder invertir una ruta ya trazada sin volver a dibujarla.
+export type RouteDirection = 'both' | 'forward' | 'backward';
+
 interface GeofenceBase {
   id: number;
   name: string;
@@ -47,6 +52,10 @@ export interface PolylineGeofence extends GeofenceBase {
   // ancho; false = "no tocar" - alerta al ACERCARSE al ancho de la linea. En ambos casos la
   // severidad la decide el `type`, no la distancia.
   stayInside: boolean;
+  // 'both' (default) = bidireccional. Con 'forward'/'backward' la tableta avisa si el vehiculo la
+  // recorre en sentido contrario, y levanta infraccion si insiste - todo local, tambien sin
+  // conexion (ver evaluateRouteDirection en offlineGeofences.ts)
+  routeDirection: RouteDirection;
 }
 
 export type Geofence = CircleGeofence | PolygonGeofence | PolylineGeofence;

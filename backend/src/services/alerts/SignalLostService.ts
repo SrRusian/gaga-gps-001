@@ -46,6 +46,9 @@ class SignalLostService {
   deviceManager?: DeviceManagerLike;
   alertEventRepo?: AlertEventRepoLike;
   lastSeen: Record<string, number>;
+  // ultima vez que ESTE dispositivo reporto movimiento real - decide si al perder senal se usa el
+  // umbral corto (iba andando) o el largo (llevaba rato parado)
+  lastMovingAt: Record<string, number>;
   alertLevel: Record<string, AlertLevel>;
   projectByDevice: Record<string, number | null>;
   // dispositivos en suspension de energia autorizada (ver power-events.routes.ts) - checkAllDevices
@@ -64,6 +67,18 @@ class SignalLostService {
   // no son un bache normal de red
   readonly LEVEL1_MS = 5000;
   readonly LEVEL2_MS = 15000;
+
+  // Un vehiculo DETENIDO que pierde senal unos segundos casi siempre es un bache del GNSS (perdida
+  // de fix bajo techo/estructura), no una emergencia - medido en campo: 32 alertas en un dia con la
+  // tableta parada en el mismo lugar, todas por huecos de 5-15s del receptor. Un vehiculo EN
+  // MOVIMIENTO que desaparece es otra cosa (volcadura, accidente) y conserva los umbrales cortos.
+  readonly LEVEL1_STATIONARY_MS = 30000;
+  readonly LEVEL2_STATIONARY_MS = 60000;
+  // debajo de esto no se considera movimiento real (mismo criterio que COURSE_TRUST_MIN_KMH)
+  readonly MOVING_SPEED_KMH = 3;
+  // hay que llevar parado al menos esto para que aplique el umbral largo - un vehiculo que acaba de
+  // frenar sigue tratandose como en movimiento
+  readonly STATIONARY_SETTLE_MS = 60000;
   readonly RECOVERY_STABLE_MS = 5000;
 
   constructor({
@@ -82,6 +97,7 @@ class SignalLostService {
     this.deviceManager = deviceManager;
     this.alertEventRepo = alertEventRepo;
     this.lastSeen = {};
+    this.lastMovingAt = {};
     this.alertLevel = {};
     this.projectByDevice = {};
     this.suspendedDevices = {};
@@ -118,9 +134,14 @@ class SignalLostService {
     });
   }
 
-  recordPosition(deviceId: string, projectId: number | null = null): void {
+  recordPosition(deviceId: string, projectId: number | null = null, speedKmh?: number | null): void {
     const wasLost = this.alertLevel[deviceId];
     const now = Date.now();
+    // se inicializa en la primera posicion para que un dispositivo recien visto no cuente como
+    // "parado hace rato" sin haberlo observado nunca
+    if (this.lastMovingAt[deviceId] === undefined || (typeof speedKmh === 'number' && speedKmh >= this.MOVING_SPEED_KMH)) {
+      this.lastMovingAt[deviceId] = now;
+    }
     this.lastSeen[deviceId] = now;
     this.projectByDevice[deviceId] = projectId;
     // cualquier posicion real (encendido normal, o interaccion sospechosa sin corriente - ver
@@ -171,16 +192,20 @@ class SignalLostService {
       if (this.zoneExemptDevices[deviceId]) return;
       const elapsed = now - lastTime;
       const currentLevel = this.alertLevel[deviceId] || 'none';
+      const lastMoving = this.lastMovingAt[deviceId];
+      const stationary = lastMoving !== undefined && lastTime - lastMoving >= this.STATIONARY_SETTLE_MS;
+      const level1Ms = stationary ? this.LEVEL1_STATIONARY_MS : this.LEVEL1_MS;
+      const level2Ms = stationary ? this.LEVEL2_STATIONARY_MS : this.LEVEL2_MS;
 
       // volvio a caerse antes de completar la ventana de estabilidad: la cuenta se reinicia, no se
       // arrastra el progreso de una reconexion que no llego a sostenerse
-      if (elapsed >= this.LEVEL1_MS) delete this.recoveringSince[deviceId];
+      if (elapsed >= level1Ms) delete this.recoveringSince[deviceId];
 
-      if (elapsed >= this.LEVEL2_MS && currentLevel !== 'level2') {
+      if (elapsed >= level2Ms && currentLevel !== 'level2') {
         this.triggerLevel2(deviceId, elapsed);
         this.alertLevel[deviceId] = 'level2';
         this._markDeviceOffline(deviceId);
-      } else if (elapsed >= this.LEVEL1_MS && currentLevel === 'none') {
+      } else if (elapsed >= level1Ms && currentLevel === 'none') {
         this.triggerLevel1(deviceId, elapsed);
         this.alertLevel[deviceId] = 'level1';
         this._markDeviceOffline(deviceId);

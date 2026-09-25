@@ -130,7 +130,10 @@ class PositionProcessor {
       }
 
       if (this.signalLostService) {
-        this.signalLostService.recordPosition(position.deviceId, position.projectId ?? null);
+        // position.speed aqui todavia es el crudo del uplink en m/s (la estimacion suavizada se
+        // calcula mas abajo) - se convierte explicitamente, recordPosition espera km/h
+        const rawSpeedKmh = typeof position.speed === 'number' ? position.speed * 3.6 : null;
+        this.signalLostService.recordPosition(position.deviceId, position.projectId ?? null, rawSpeedKmh);
       }
 
       // recorrido historico del buffer de la tableta: se guarda completo para que el historial no

@@ -18,7 +18,9 @@ export function GeofenceDrawPanel({ scope, projects, geofence }: GeofenceDrawPan
       <div className="dash-float-panel-header">
         <h4>{g.geoEditingId != null ? 'Editar geocerca' : 'Nueva geocerca'}</h4>
         <button className="gg-modal-close" onClick={g.closeGeoPanel} aria-label="Cerrar">
-          X
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6 6 18" />
+          </svg>
         </button>
       </div>
       <div className="dash-float-panel-body">
@@ -109,6 +111,32 @@ export function GeofenceDrawPanel({ scope, projects, geofence }: GeofenceDrawPan
               {g.geofenceForm.stayInside
                 ? 'La alerta se dispara si el vehículo se ALEJA más del ancho indicado (ej. Ruta autorizada).'
                 : 'La alerta se dispara si el vehículo se ACERCA al ancho indicado (ej. una línea que no debe cruzarse).'}
+            </span>
+          </div>
+        )}
+
+        {g.geoShape === 'polyline' && g.geofenceForm.type === 'authorized_route' && (
+          <div className="dash-field-group">
+            <span className="dash-field-group-title">Sentido de circulación</span>
+            <select
+              value={g.geofenceForm.routeDirection}
+              onChange={(e) =>
+                g.setGeofenceForm({
+                  ...g.geofenceForm,
+                  routeDirection: e.target.value as 'both' | 'forward' | 'backward',
+                })
+              }
+            >
+              <option value="both">Ambos sentidos</option>
+              <option value="forward">Un sentido - como se dibujó (del primer punto al último)</option>
+              <option value="backward">Un sentido - invertido (del último punto al primero)</option>
+            </select>
+            <span className="dash-hint">
+              {g.geofenceForm.routeDirection === 'both'
+                ? 'Se puede recorrer en cualquier dirección. No se marca sentido en el mapa.'
+                : 'La tableta avisa al operador si la recorre al revés, y levanta infracción si insiste. ' +
+                  'En el mapa se dibujan flechas con el sentido permitido. Para el sentido opuesto, ' +
+                  'crea otra ruta autorizada orientada al revés.'}
             </span>
           </div>
         )}

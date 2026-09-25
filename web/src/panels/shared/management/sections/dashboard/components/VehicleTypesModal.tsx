@@ -27,6 +27,7 @@ export function VehicleTypesModal({ open, onClose, admin }: VehicleTypesModalPro
             <thead>
               <tr>
                 <th>Nombre</th>
+                <th>Categoría</th>
                 <th>Largo (m)</th>
                 <th>Ancho (m)</th>
                 <th>Vel. máx (km/h)</th>
@@ -37,6 +38,7 @@ export function VehicleTypesModal({ open, onClose, admin }: VehicleTypesModalPro
               {admin.vehicleTypes.map((vt) => (
                 <tr key={vt.id}>
                   <td>{vt.name}</td>
+                  <td>{vt.category === 'machinery' ? 'Maquinaria' : 'Transporte'}</td>
                   <td>{vt.length_meters.toFixed(2)}</td>
                   <td>{vt.width_meters.toFixed(2)}</td>
                   <td>{vt.max_speed_kmh != null ? vt.max_speed_kmh.toFixed(0) : '—'}</td>
@@ -106,6 +108,27 @@ export function VehicleTypesModal({ open, onClose, admin }: VehicleTypesModalPro
               admin.setVehicleTypeForm({ ...admin.vehicleTypeForm, maxSpeedKmh: e.target.value })
             }
           />
+        </div>
+        <div className="gg-modal-field">
+          <label>Categoría</label>
+          <select
+            value={admin.vehicleTypeForm.category}
+            onChange={(e) =>
+              admin.setVehicleTypeForm({
+                ...admin.vehicleTypeForm,
+                category: e.target.value as 'transport' | 'machinery',
+              })
+            }
+          >
+            <option value="transport">Transporte (camión, camioneta, auto)</option>
+            <option value="machinery">Maquinaria (excavadora, cargador, retro)</option>
+          </select>
+          <small>
+            No es solo una etiqueta: decide cómo se comporta la tableta. <b>Transporte</b> congela la
+            posición cuando el vehículo está detenido (menos de 4 km/h) y avisa antes de pasarse del
+            límite si viene acelerando fuerte. <b>Maquinaria</b> nunca congela la posición, porque
+            trabaja a velocidad de gateo y congelarla escondería trabajo real.
+          </small>
         </div>
         <div className="gg-modal-actions">
           <button className="btn btn-sm" onClick={() => admin.setVehicleTypeFormModal(null)}>

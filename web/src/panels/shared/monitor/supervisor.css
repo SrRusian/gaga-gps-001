@@ -1,16 +1,22 @@
-.sup-app {
+/* Paleta de color de Supervisor/Encargado, separada del layout de .sup-app a proposito - AlertsModal.tsx
+   (Admin) reusa AlertsPanel fuera de .sup-app y necesita estas variables sin el resto (height:100vh,
+   overflow:hidden rompen dentro de un Modal). Aplicar esta clase junto con .sup-app, o sola cuando
+   solo hace falta la paleta. */
+.sup-tokens {
   --sup-bg: #0b0d10;
   --sup-surface: #14171c;
   --sup-surface-2: #1a1e24;
   --sup-border: #262b33;
   --sup-text: #e8eaed;
-  --sup-text-muted: #8b949e;
-  --sup-accent: #4f8ff0;
+  --sup-text-muted: #7d93b8;
+  --sup-accent: #008cff;
   --sup-danger: #e5484d;
   --sup-warning: #f0a83c;
-  --sup-info: #4f8ff0;
+  --sup-info: #008cff;
   --sup-topbar-h: 56px;
+}
 
+.sup-app {
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -247,7 +253,7 @@
   cursor: pointer;
 }
 .sup-history-btn:hover {
-  background: #3f7cd6;
+  background: #0066ff;
 }
 .sup-history-table-wrap {
   overflow: auto;
@@ -379,7 +385,7 @@
   cursor: pointer;
 }
 .sup-app .btn:hover {
-  background: #3f7cd6;
+  background: #0066ff;
 }
 .sup-app .btn-sm {
   padding: 7px 12px;

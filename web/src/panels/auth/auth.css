@@ -60,7 +60,7 @@
 }
 
 .gw-subtitle {
-  color: #8b949e;
+  color: #7d93b8;
   font-size: 13px;
   text-align: center;
   margin: 0;
@@ -79,12 +79,12 @@
   left: 12px;
   width: 16px;
   height: 16px;
-  color: #8b949e;
+  color: #7d93b8;
   pointer-events: none;
   transition: color 0.15s;
 }
 .gw-input-wrap:focus-within .gw-input-icon {
-  color: #4f8ff0;
+  color: #008cff;
 }
 
 .gw-box input {
@@ -101,12 +101,12 @@
     box-shadow 0.15s;
 }
 .gw-box input::placeholder {
-  color: #8b949e;
+  color: #7d93b8;
 }
 .gw-box input:focus {
   outline: none;
-  border-color: #4f8ff0;
-  box-shadow: 0 0 0 3px rgba(79, 143, 240, 0.15);
+  border-color: #008cff;
+  box-shadow: 0 0 0 3px rgba(0, 140, 255, 0.15);
 }
 
 .gw-input-wrap--password input {
@@ -125,7 +125,7 @@
   background: none;
   border: none;
   border-radius: 6px;
-  color: #8b949e;
+  color: #7d93b8;
   cursor: pointer;
   transition: color 0.15s;
 }
@@ -133,7 +133,7 @@
   color: #e8eaed;
 }
 .gw-toggle-pw:focus-visible {
-  outline: 2px solid #4f8ff0;
+  outline: 2px solid #008cff;
   outline-offset: 1px;
 }
 .gw-toggle-pw svg {

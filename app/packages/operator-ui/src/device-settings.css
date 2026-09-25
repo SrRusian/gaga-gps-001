@@ -270,20 +270,6 @@
   cursor: not-allowed;
 }
 
-.ds-usb-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #e8eaed;
-  margin-bottom: 6px;
-  cursor: pointer;
-}
-.ds-usb-option input {
-  width: auto;
-  margin: 0;
-}
-
 .ds-status {
   font-size: 12px;
   color: #8b949e;
@@ -323,6 +309,655 @@
   color: #b7bec7;
   font-variant-numeric: tabular-nums;
   flex-wrap: wrap;
+}
+
+/* Panel de satelites - replica la vista de señal de u-center */
+.ds-sat-group {
+  margin-top: 12px;
+}
+
+.ds-sat-group-title {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e6e9ee;
+  margin-bottom: 6px;
+}
+
+.ds-sat-group-title span {
+  font-weight: 400;
+  color: #8b93a1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-sat-bars {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.ds-sat-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  width: 26px;
+}
+
+.ds-sat-bar-track {
+  width: 100%;
+  height: 56px;
+  background: #1b1f27;
+  border-radius: 3px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.ds-sat-bar-fill {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  transition: height 240ms ease;
+}
+
+.ds-sat-bar-snr,
+.ds-sat-bar-id {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.ds-sat-bar-snr {
+  color: #e6e9ee;
+}
+
+.ds-sat-bar-id {
+  color: #8b93a1;
+}
+
+/* ===== Sistema de paneles compartido (Ajustes + u-center) ===== */
+/* Piezas visuales genericas (tarjeta a pantalla completa, panel, fila de estado, hint chico, caja
+   de aviso, fila de dato) que usan tanto Ajustes (DeviceSettingsPanel, el componente principal)
+   como u-center (UCenterView, el secundario que se abre desde ahi) - nombradas "cfg" y no "uc"
+   porque el estilo compartido no puede llevar el nombre de la pantalla secundaria. La disposicion
+   en columnas de cada pantalla SI es propia de cada una (ver .uc-grid vs .cfg-columns mas abajo) -
+   u-center necesita paneles alineados en pares (graficas), Ajustes no tiene graficas y necesita
+   empacar filas de texto/botones de alto muy distinto sin dejar huecos. */
+.cfg-shell {
+  background: #0b0d10;
+  border: 1px solid #262b33;
+  border-radius: 10px;
+  width: 100%;
+  height: 100%;
+  max-width: 1400px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+.cfg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid #262b33;
+  flex: 0 0 auto;
+}
+
+.cfg-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e8eaed;
+  margin: 0;
+}
+
+.cfg-close {
+  background: none;
+  border: none;
+  color: #8b93a1;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.cfg-close:hover {
+  color: #e8eaed;
+}
+
+/* agrupa el boton de configuracion junto al de cerrar - ambos comparten .cfg-close, solo cambia el
+   icono/accion */
+.uc-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cfg-header-status {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cfg-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  /* flex:1 + min-height:0 es obligatorio para que un hijo con overflow-y scrollee de verdad dentro
+     de un contenedor flex de altura fija - sin min-height:0 el hijo se estira y nunca hace scroll */
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cfg-panel {
+  background: #14171c;
+  border: 1px solid #262b33;
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.cfg-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b93a1;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+}
+
+/* primer caso real de <select>/<input> sueltos (no en .ds-modal/.ds-card) dentro de un .cfg-panel -
+   sin esto caen al estilo nativo blanco del navegador, ilegible sobre el tema oscuro */
+.cfg-panel input,
+.cfg-panel select {
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: #0b0d10;
+  border: 1px solid #262b33;
+  border-radius: 6px;
+  color: #e8eaed;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.cfg-panel input:focus,
+.cfg-panel select:focus {
+  outline: none;
+  border-color: #4f8ff0;
+}
+
+/* checkbox/radio NUNCA debe heredar el width:100% de arriba - dentro de un .ds-toggle-row (flex),
+   un checkbox con width:100% reclama todo el ancho de la fila como su flex-basis y el texto vecino
+   (ej. "UART1") se queda sin espacio y desaparece, no solo se ve raro - bug real encontrado con
+   captura, no solo estetico. */
+.cfg-panel input[type='checkbox'],
+.cfg-panel input[type='radio'] {
+  width: auto;
+  margin-bottom: 0;
+}
+
+/* dentro de .cfg-version-row (fila flex label+valor) el input es angosto via inline style y no
+   debe llevar el margen vertical de fila completa que sí necesita un select/input de ancho total */
+.cfg-version-row input {
+  margin-bottom: 0;
+}
+
+/* divisor de grupo - full width por defecto (bloque normal); grid-column solo hace falta dentro
+   de .uc-grid (u-center), donde el navegador lo ignora fuera de un contenedor grid */
+.cfg-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4f8ff0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 4px 0 -2px;
+  grid-column: 1 / -1;
+}
+
+/* valor de solo lectura en caja (version instalada, baud rate nativo, etc) - mismo look en
+   Ajustes y u-center, en vez de texto plano suelto */
+.cfg-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  color: #e8eaed;
+  font-variant-numeric: tabular-nums;
+  background: #1b1f27;
+  border: 1px solid #262b33;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.cfg-chip-note {
+  font-size: 11px;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.cfg-version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+.cfg-version-row span:first-child {
+  font-size: 12px;
+  color: #8b93a1;
+}
+
+.cfg-status-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 4px 0;
+}
+
+.cfg-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #565d68;
+  flex: 0 0 auto;
+}
+
+.cfg-status-dot--on {
+  background: #3fb950;
+  box-shadow: 0 0 4px rgba(63, 185, 80, 0.6);
+}
+
+/* patron para "icono + texto que debe truncarse" dentro de un flex row - flex-basis:0% (no
+   "auto") le dice al flexbox que reparta el espacio disponible ANTES de mirar el ancho intrinseco
+   del contenido, y display:block explicito evita depender de que el motor "blockifique" un <span>
+   (inline por defecto) para que text-overflow:ellipsis funcione de verdad. Con "auto" en vez de
+   "0%" este texto llegó a renderear en un ancho calculado de 0 (invisible) en vez de truncarse
+   con "..." - bug real, no solo teorico. Aplicar el mismo patron a cualquier fila nueva similar. */
+.cfg-status-text {
+  display: block;
+  flex: 1 1 0%;
+  min-width: 0;
+  font-size: 13px;
+  color: #e8eaed;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* hints de una sola linea, mas discretos que .ds-hint (que se usa en parrafos largos en otras
+   partes de Ajustes) - deliberadamente mas chicos y sin caja, para no competir visualmente */
+.cfg-mini-hint {
+  font-size: 11px;
+  color: #6b7280;
+  margin: 4px 0;
+  line-height: 1.4;
+}
+
+.cfg-warning-box {
+  border: 1px solid #d29922;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 4px 0 10px;
+  font-size: 12px;
+}
+
+.cfg-warning-box p {
+  margin: 0 0 8px;
+}
+
+.cfg-data-grid {
+  display: flex;
+  flex-direction: column;
+}
+
+.cfg-data-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #1b1f27;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cfg-data-row:last-child {
+  border-bottom: none;
+}
+
+.cfg-data-row span:first-child {
+  color: #8b93a1;
+}
+
+.cfg-data-row span:last-child {
+  color: #e8eaed;
+  font-weight: 500;
+}
+
+.uc-value-danger {
+  color: #ef4444 !important;
+}
+
+/* ===== Ajustes (DeviceSettingsPanel) - columnas armadas a mano, no grid/masonry automatico ===== */
+/* Se probaron 2 mecanismos automaticos antes de esto y los dos fallaron para este contenido en
+   particular: un grid de filas parejas (v1) forzaba a un panel corto a compartir fila con uno
+   largo, dejando un hueco vacio enorme al lado; CSS multi-column con column-fill:balance (v2)
+   evitaba eso pero el algoritmo de balance del navegador reparte el alto de forma poco predecible
+   con solo 3-4 bloques de tamaño muy distinto, dejando espacio suelto arriba/abajo de un panel
+   corto. Fix real: cada grupo ("Conexion"/"Sistema") es un `.cfg-row` (flex, align-items:
+   flex-start para que NINGUNA columna se estire a la altura de su vecina) con 2-3 `.cfg-col`
+   (flex, columna vertical) - los paneles se asignan a mano a la columna que les toca, balanceando
+   el contenido por ojo (ej. "Bloqueo de ajustes" + "Servicio GNSS", ambos cortos, comparten una
+   columna con "Actualizacion automatica" y "Modo Kiosko" cada uno solo en la suya). Sin heuristica
+   de navegador de por medio, el resultado es 100% predecible: cada panel mide exactamente su
+   contenido, nunca de mas. */
+.cfg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.cfg-col {
+  flex: 1 1 0;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ===== u-center - grid de 3 columnas fijas, propio de esta pantalla ===== */
+/* Satellite Position (1 col) + World Position (uc-panel-wide, 2 col) deben quedar en la misma
+   fila real, cosa que un masonry por columnas no garantiza - por eso u-center sigue en grid en vez
+   de compartir .cfg-columns con Ajustes. Breakpoints angostos caen a 2 y luego 1 columna. */
+.uc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.uc-panel-wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 900px) {
+  .uc-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .uc-grid {
+    grid-template-columns: 1fr;
+  }
+  .uc-panel-wide {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Receptor / NTRIP Client lado a lado en pantallas anchas (u-center unicamente) - cada uno es su
+   propia tarjeta en vez de solo un bloque con linea divisoria */
+.uc-config-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .uc-config-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.uc-config-section {
+  background: #14171c;
+  border: 1px solid #262b33;
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.uc-config-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8eaed;
+  margin: 0 0 8px;
+}
+
+.uc-config-subtitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8b93a1;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 14px 0 6px;
+}
+
+.uc-link-button {
+  background: none;
+  border: none;
+  color: #4f8ff0;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.uc-link-button:hover {
+  text-decoration: underline;
+}
+
+/* precision separada del color de estado (RTK FIJO/FLOTANTE/etc ya tiene su propio color) - un
+   dato numerico neutro, no otro estado mas */
+.uc-header-precision {
+  color: #8b93a1;
+  font-weight: 500;
+}
+
+.uc-baud-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+.uc-baud-row .ds-label {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.uc-baud-row input {
+  width: 100px;
+}
+
+/* Sky plot (Satellite Position) y gauges circulares (Compass/Speed/Altitude) - misma familia visual */
+.uc-sky-plot,
+.uc-gauge {
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  margin: 4px auto 8px;
+}
+
+.uc-sky-ring,
+.uc-gauge-ring,
+.uc-gauge-track {
+  fill: none;
+  stroke: #262b33;
+  stroke-width: 1;
+}
+
+.uc-sky-axis {
+  stroke: #1b1f27;
+  stroke-width: 1;
+}
+
+.uc-sky-label,
+.uc-gauge-tick {
+  fill: #8b93a1;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.uc-sky-sat-id {
+  fill: #0b0d10;
+  font-size: 8px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.uc-gauge-needle {
+  stroke: #ef4444;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* Satellite Level History */
+/* Constelaciones en fila horizontal (una junto a otra, scroll si no caben); satelites de cada
+   constelacion apilados en vertical usando CSS multi-column (2 columnas) para no crecer tan alto
+   con listas largas. Clases propias, no .ds-sat-group (esa es de Satellite Level, sigue apilada). */
+.uc-history-groups {
+  display: flex;
+  flex-wrap: nowrap; /* nunca bajar a una fila nueva - siguen agregandose a la derecha */
+  gap: 16px 20px;
+  align-items: flex-start;
+  overflow-x: auto; /* con mas constelaciones de las que caben, scroll horizontal en vez de envolver */
+  padding-bottom: 4px; /* margen para que la barra de scroll no pegue con el contenido */
+}
+
+.uc-history-group {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0; /* sin esto se apachurraria para caber en vez de desbordar con scroll */
+  gap: 4px;
+}
+
+/* multi-column: llena la primera columna de arriba a abajo, sigue en la segunda - evita separar
+   el arreglo de satelites a mano en JS */
+.uc-history-rows {
+  columns: 2;
+  column-gap: 10px;
+}
+
+.uc-history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  break-inside: avoid; /* nunca cortar una fila entre las dos columnas */
+  margin-bottom: 3px;
+}
+
+.uc-history-row-id {
+  width: 16px;
+  font-size: 10px;
+  color: #8b93a1;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.uc-sparkline {
+  width: 52px;
+  height: 40px;
+  flex: 0 0 auto;
+  background: #1b1f27;
+  border-radius: 3px;
+}
+
+.uc-history-row-snr {
+  width: 20px;
+  text-align: right;
+  font-size: 9px;
+  color: #e8eaed;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+/* Watch */
+.uc-watch-time {
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #e8eaed;
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* World Position - mapa equirectangular simplificado */
+.uc-world-map {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid #262b33; /* lo enmarca como un instrumento propio, no un dibujo suelto */
+  border-radius: 4px;
+  overflow: hidden; /* recorta el gradiente/tierra a las esquinas redondeadas de arriba */
+  margin: 4px 0 8px;
+}
+
+.uc-world-grid {
+  stroke: #1b1f27;
+  stroke-width: 1;
+}
+
+/* ecuador y meridiano de Greenwich (lon/lat = 0) un poco mas visibles que el resto de la
+   graticula - convencion cartografica estandar, ayuda a orientarse de un vistazo */
+.uc-world-grid-main {
+  stroke: #2f3946;
+  stroke-width: 1;
+}
+
+.uc-world-land {
+  fill: #2b323c;
+  stroke: #454e5a;
+  stroke-width: 0.5;
+}
+
+.uc-world-receiver-ring {
+  fill: none;
+  stroke: #4f8ff0;
+  stroke-width: 1.5;
+}
+
+.uc-world-receiver-dot {
+  fill: #4f8ff0;
+}
+
+.uc-world-receiver-halo {
+  fill: #4f8ff0;
+  opacity: 0.18;
+}
+
+/* leyenda compartida por Satellite Position y World Position - solo constelaciones presentes */
+.uc-constellation-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0 2px;
+}
+
+.uc-constellation-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: #8b93a1;
+}
+
+.uc-constellation-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
 }
 
 .ds-switch-row {
@@ -505,7 +1140,8 @@
   color: #e8eaed;
   margin-bottom: 14px;
 }
-.ds-modal input {
+.ds-modal input,
+.ds-modal select {
   width: 100%;
   padding: 9px 11px;
   margin-bottom: 10px;
@@ -516,7 +1152,8 @@
   font-size: 13px;
   box-sizing: border-box;
 }
-.ds-modal input:focus {
+.ds-modal input:focus,
+.ds-modal select:focus {
   outline: none;
   border-color: #4f8ff0;
 }

@@ -265,6 +265,7 @@ export function DashboardSection() {
             onSearch={history.loadHistoryPoints}
             onExportCsv={history.exportHistoryCsv}
             csvExporting={history.csvExporting}
+            loadProgress={history.historyLoadProgress}
           />
         )}
 

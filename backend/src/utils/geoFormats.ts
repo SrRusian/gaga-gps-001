@@ -1,6 +1,6 @@
 import { DOMParser } from '@xmldom/xmldom';
 import { kml as kmlToGeoJSON } from '@tmcw/togeojson';
-import type { GeofenceShapeType, GeofenceType } from '@gaga-gps/shared-types';
+import type { GeofenceShapeType, GeofenceType, RouteDirection } from '@gaga-gps/shared-types';
 import type { Feature, FeatureCollection, Geometry, LineString, Point, Polygon } from 'geojson';
 
 export interface GeofenceRow {
@@ -18,6 +18,7 @@ export interface GeofenceRow {
   speed_limit_kmh: number | null;
   filled: boolean;
   stay_inside: boolean;
+  route_direction: RouteDirection;
 }
 
 function geofenceRowToFeature(row: GeofenceRow): Feature {

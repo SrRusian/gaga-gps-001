@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Geofence } from '@gaga-gps/shared-types';
 import {
+  DEFAULT_STATIONARY_SPEED_KMH,
   evaluateSpeed,
   NO_SPEED_LIMITS,
   resolveSpeedLimit,
+  stationaryThresholdKmh,
+  usesPredictiveSpeedWarning,
 } from '../../../../../../app/packages/operator-ui/src/localSpeed';
 
 function zone(speedLimitKmh: number | null): Geofence {
@@ -75,5 +78,33 @@ describe('evaluateSpeed', () => {
 
   it('sin limite configurado nunca alerta, por rapido que vaya', () => {
     expect(evaluateSpeed(180, NO_SPEED_LIMITS, null).severity).toBeNull();
+  });
+});
+
+describe('stationaryThresholdKmh - decidido por la CATEGORIA del tipo de vehiculo', () => {
+  it('transporte congela la posicion al estar detenido', () => {
+    expect(stationaryThresholdKmh('transport')).toBe(DEFAULT_STATIONARY_SPEED_KMH);
+  });
+
+  // el caso que motivo todo: una excavadora trabaja a 2-3 km/h, dentro del ruido de medicion.
+  // Congelarla escondería trabajo real, asi que se desactiva en vez de bajar el umbral.
+  it('maquinaria NUNCA congela, sin importar su velocidad maxima', () => {
+    expect(stationaryThresholdKmh('machinery')).toBe(0);
+  });
+
+  it('sin categoria conocida cae a transporte (comportamiento de siempre)', () => {
+    expect(stationaryThresholdKmh(null)).toBe(DEFAULT_STATIONARY_SPEED_KMH);
+    expect(stationaryThresholdKmh(undefined)).toBe(DEFAULT_STATIONARY_SPEED_KMH);
+  });
+});
+
+describe('usesPredictiveSpeedWarning', () => {
+  it('solo transporte usa el aviso anticipado por aceleracion', () => {
+    expect(usesPredictiveSpeedWarning('transport')).toBe(true);
+    expect(usesPredictiveSpeedWarning(null)).toBe(true);
+  });
+
+  it('maquinaria no lo usa - no acelera asi, seria ruido sobre el aviso al 75%', () => {
+    expect(usesPredictiveSpeedWarning('machinery')).toBe(false);
   });
 });

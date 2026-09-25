@@ -10,11 +10,11 @@
   transition: background 0.2s;
 }
 .gg-button--primary {
-  background: #4f8ff0;
+  background: #008cff;
   color: #0b0d10;
 }
 .gg-button--primary:hover {
-  background: #3f7cd6;
+  background: #0066ff;
 }
 .gg-button--danger {
   background: #e5484d;
@@ -46,13 +46,13 @@
 .gg-map-mode-btn {
   background: none;
   border: none;
-  color: #8b949e;
+  color: #7d93b8;
   font-size: 11px;
   padding: 8px 12px;
   cursor: pointer;
 }
 .gg-map-mode-btn.active {
-  background: #4f8ff0;
+  background: #008cff;
   color: #0b0d10;
   font-weight: 600;
 }
@@ -159,7 +159,7 @@
 }
 .gg-vehicle-card__info {
   font-size: 12px;
-  color: #8b949e;
+  color: #7d93b8;
 }
 
 .gg-stat-card {
@@ -174,11 +174,14 @@
   align-items: center;
   justify-content: center;
   margin: 0 auto 6px;
-  color: #8b949e;
+  color: #7d93b8;
+}
+.gg-stat-card__icon--active {
+  color: #008cff;
 }
 .gg-stat-card__label {
   font-size: 10px;
-  color: #8b949e;
+  color: #7d93b8;
   text-transform: uppercase;
   margin-bottom: 4px;
 }
@@ -192,6 +195,11 @@
 }
 .gg-stat-card__value--warning {
   color: #ffaa00;
+}
+/* !important a proposito - gana sobre el color base por panel (.dash-stats/.sup-app
+   .gg-stat-card__value), que ya es mas especifico que una sola clase */
+.gg-stat-card__value--active {
+  color: #008cff !important;
 }
 
 .gg-modal-backdrop {
@@ -248,15 +256,31 @@
   margin: 0;
 }
 .gg-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   background: none;
-  border: none;
-  color: #8b949e;
-  font-size: 16px;
-  line-height: 1;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #7d93b8;
   cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.gg-modal-close svg {
+  width: 15px;
+  height: 15px;
 }
 .gg-modal-close:hover {
-  color: #e5484d;
+  color: #e8eaed;
+  border-color: #008cff;
+  background: rgba(0, 140, 255, 0.12);
+}
+.gg-modal-close:focus-visible {
+  outline: 2px solid #008cff;
+  outline-offset: 1px;
 }
 .gg-modal-body {
   padding: 18px;
@@ -271,7 +295,7 @@
 }
 .gg-modal-field label {
   font-size: 12px;
-  color: #8b949e;
+  color: #7d93b8;
 }
 .gg-modal-field input,
 .gg-modal-field select {
@@ -285,7 +309,7 @@
 .gg-modal-field input:focus,
 .gg-modal-field select:focus {
   outline: none;
-  border-color: #4f8ff0;
+  border-color: #008cff;
 }
 .gg-modal-field input:disabled,
 .gg-modal-field select:disabled {
@@ -307,7 +331,7 @@
   transition: background 0.3s;
 }
 .gg-connection-dot.connected {
-  background: #4f8ff0;
+  background: #008cff;
 }
 
 .gg-vehicle-detail {
@@ -334,15 +358,32 @@
   justify-content: space-between;
 }
 .gg-vehicle-detail__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin: -4px -4px 0 0;
   background: none;
-  border: none;
-  color: #8b949e;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #7d93b8;
   cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.gg-vehicle-detail__close svg {
+  width: 14px;
+  height: 14px;
 }
 .gg-vehicle-detail__close:hover {
   color: #e8eaed;
+  border-color: #008cff;
+  background: rgba(0, 140, 255, 0.12);
+}
+.gg-vehicle-detail__close:focus-visible {
+  outline: 2px solid #008cff;
+  outline-offset: 1px;
 }
 .gg-vehicle-detail__row {
   display: flex;
@@ -355,7 +396,7 @@
   border-bottom: none;
 }
 .gg-vehicle-detail__label {
-  color: #8b949e;
+  color: #7d93b8;
 }
 .gg-vehicle-detail__value {
   color: #e8eaed;

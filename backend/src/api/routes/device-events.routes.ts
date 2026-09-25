@@ -13,6 +13,15 @@ import type InfractionRepository from '../../repositories/InfractionRepository';
 const MAX_DEVICE_EVENTS = 500;
 const VALID_SEVERITIES = new Set(['info', 'warning', 'danger']);
 
+// gravedad fija para "salio de zona permitida siendo un dispositivo restringido" - no es una zona
+// de peligro real, es un limite operativo. Mismo valor que RESTRICTED_ZONE_INFRACTION_SEVERITY en
+// GeofenceAlertService.ts (duplicado a proposito, ese codigo ya no corre en produccion pero se deja
+// como referencia canonica - ver evaluateRestrictedZone)
+// circular por el sentido equivocado en una via de un solo sentido: gravedad alta pero por debajo
+// de tocar una zona de peligro real - el operador puede corregirlo saliendose de la ruta
+const WRONG_WAY_INFRACTION_SEVERITY = 7;
+const RESTRICTED_ZONE_INFRACTION_SEVERITY = 7;
+
 // gravedad de la infraccion por exceso: misma escala que utils/infractionSeverity.ts del backend
 function speedInfractionSeverity(speedKmh: number, limitKmh: number): number {
   const over = (speedKmh - limitKmh) / limitKmh;
@@ -90,24 +99,38 @@ export function buildDeviceEventsRouter({
 
   async function handleEvent(event: Record<string, unknown>): Promise<boolean> {
     const deviceId = event?.deviceId ? String(event.deviceId) : null;
-    const severity = String(event?.severity) as 'info' | 'warning' | 'danger';
     const kind = String(event?.kind);
+    if (!deviceId) return false;
+
+    // aviso puro de "estoy en zona permitida/estacionamiento", desacoplado de cualquier severidad -
+    // no genera alerta ni infraccion, solo actualiza el estado que SignalLostService usa para no
+    // alarmar al proyecto si la tableta se queda sin señal justo despues de estacionarse
+    if (kind === 'zone_status') {
+      if (typeof event.inAllowedZone === 'boolean') {
+        signalLostService?.setZoneExempt(deviceId, event.inAllowedZone);
+      }
+      return true;
+    }
+
+    const severity = String(event?.severity) as 'info' | 'warning' | 'danger';
     const state = String(event?.state);
     const occurredAt = new Date(String(event?.occurredAt));
 
-    if (!deviceId || !VALID_SEVERITIES.has(severity)) return false;
-    if (kind !== 'geofence' && kind !== 'speed') return false;
+    if (!VALID_SEVERITIES.has(severity)) return false;
+    if (kind !== 'geofence' && kind !== 'speed' && kind !== 'restricted_zone' && kind !== 'wrong_way') return false;
     if (Number.isNaN(occurredAt.getTime())) return false;
 
-    // lo ultimo que la tableta reporto sobre si estaba estacionada donde puede estarlo - se usa
-    // para no alarmar al proyecto si justo despues se queda sin señal (ver SignalLostService)
+    // compatibilidad hacia atras: si algun evento geofence/speed sigue trayendo este campo
     if (typeof event.inAllowedZone === 'boolean') {
       signalLostService?.setZoneExempt(deviceId, event.inAllowedZone);
     }
 
     const device = await deviceRepo.findByUniqueId(deviceId);
     const projectId = device?.project_id ?? null;
-    const alertType = kind === 'speed' ? 'speed' : 'geofence';
+    // wrong_way comparte alert_type 'geofence' (el evento SIEMPRE trae su geofenceId, asi que el
+    // historial nunca queda ambiguo) pero mensaje e infraccion propios - agregar un alert_type
+    // nuevo exigiria migrar el CHECK de alert_events sin ganar nada aqui
+    const alertType = kind === 'speed' ? 'speed' : kind === 'restricted_zone' ? 'restricted_zone' : 'geofence';
     const message = event?.message ? String(event.message) : null;
 
     if (state === 'cleared') {
@@ -150,17 +173,38 @@ export function buildDeviceEventsRouter({
     if (severity === 'danger') {
       const speedKmh = toNumber(event.speedKmh);
       const limitKmh = toNumber(event.limitKmh);
+      // solo 'raised' llega hasta aqui (state === 'cleared' ya retorno arriba, antes de esta
+      // rama) - toda infraccion de geocerca es siempre una ENTRADA por construccion, nunca una
+      // salida (salir de una zona prohibida es la resolucion de la infraccion, no una nueva). El
+      // mensaje real de la tableta (AREA_ALERT_TEXT, ej. "ZONA PROHIBIDA - NO INGRESAR...") se
+      // conserva intacto para el resto de los consumidores de `message` (broadcast en vivo a los
+      // demas operadores/supervisor) - esta version con el prefijo y el nombre de la zona es
+      // exclusiva del registro permanente, donde antes se veia identica en cada fila y no distinguia
+      // a que geocerca en particular se referia cada infraccion (bug real reportado con captura:
+      // el historial mostraba la misma frase generica repetida sin decir si entro/salio ni cual zona)
+      const geofenceName = event.geofenceName ? String(event.geofenceName) : null;
+      const fallbackMessage = message ?? 'Infracción reportada por el dispositivo';
+      const infractionMessage =
+        kind === 'wrong_way' && geofenceName
+          ? `Sentido contrario sostenido en "${geofenceName}" - ${fallbackMessage}`
+          : kind === 'geofence' && geofenceName
+            ? `Entró a "${geofenceName}" - ${fallbackMessage}`
+            : fallbackMessage;
       await infractionRepo.create({
         projectId,
         deviceId,
         infractionType: kind === 'speed' ? 'speed' : 'geofence',
-        message: message ?? 'Infracción reportada por el dispositivo',
+        message: infractionMessage,
         latitude: toNumber(event.latitude) ?? 0,
         longitude: toNumber(event.longitude) ?? 0,
         severity:
           kind === 'speed' && speedKmh !== null && limitKmh !== null
             ? speedInfractionSeverity(speedKmh, limitKmh)
-            : 8,
+            : kind === 'restricted_zone'
+              ? RESTRICTED_ZONE_INFRACTION_SEVERITY
+              : kind === 'wrong_way'
+                ? WRONG_WAY_INFRACTION_SEVERITY
+                : 8,
         occurredAt,
         metadata: { reportedByDevice: true, ...pickMetadata(event) },
       });
@@ -180,7 +224,12 @@ export function buildDeviceEventsRouter({
     });
     socketServer?.broadcastToProject(projectId, 'supervisor:alert', {
       deviceId,
-      type: kind === 'speed' ? 'speed_danger' : 'geofence_red',
+      type:
+        kind === 'speed'
+          ? 'speed_danger'
+          : kind === 'restricted_zone'
+            ? 'restricted_zone_violation'
+            : 'geofence_red',
       severity,
       message,
       timestamp: new Date().toISOString(),

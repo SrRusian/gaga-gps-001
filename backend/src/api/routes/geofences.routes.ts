@@ -60,6 +60,7 @@ export function buildGeofencesRouter({
         speedLimitKmh,
         filled,
         stayInside,
+        routeDirection,
       } = req.body;
 
       if (!name || !type) {
@@ -96,6 +97,7 @@ export function buildGeofencesRouter({
         speedLimitKmh,
         filled,
         stayInside,
+        routeDirection,
       });
 
       geofenceService.addGeofence(GeofenceRepository.toMemoryFormat(geofence));
@@ -132,6 +134,7 @@ export function buildGeofencesRouter({
         speedLimitKmh,
         filled,
         stayInside,
+        routeDirection,
       } = req.body;
 
       const geofence = await geofenceRepo.update(Number(req.params.id), {
@@ -146,6 +149,7 @@ export function buildGeofencesRouter({
         speedLimitKmh,
         filled,
         stayInside,
+        routeDirection,
       });
       if (!geofence) return res.status(404).json({ error: 'Geocerca no encontrada' });
 

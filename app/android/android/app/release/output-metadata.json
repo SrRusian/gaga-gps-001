@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 58,
-      "versionName": "1.0.52-fix-dead-gps-listener",
+      "versionCode": 130,
+      "versionName": "1.1.14-directional-routes",
       "outputFile": "app-release.apk"
     }
   ],

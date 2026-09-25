@@ -158,8 +158,15 @@ class GeofenceAlertService {
   activeGeofences: Geofence[];
   activeAlerts: Record<string, Severity>;
   // boolean | undefined explicito (no solo Record<string, boolean>) - undefined distingue "nunca se
-  // evaluo este dispositivo todavia" de "ya se evaluo y esta afuera", ver evaluate()
+  // evaluo este dispositivo todavia" de "ya se evaluo y esta afuera", ver evaluate(). Solo se usa
+  // para decidir cuando registrar una TRANSICION en geofence_events (entrar/salir) - nunca para
+  // decidir la violacion de zona restringida, que es un estado por NIVEL (ver activeRestrictedViolations).
   activeAllowedZones: Record<string, boolean | undefined>;
+  // true = este dispositivo restringido tiene una violacion activa AHORA MISMO (esta afuera de
+  // "allowed") - por nivel, no por transicion. Separado de activeAllowedZones a proposito: un
+  // dispositivo que arranca (o que este proceso ve por primera vez) ya afuera de la zona tambien
+  // debe alertar de inmediato, no solo el que "sale" durante la vida del proceso.
+  activeRestrictedViolations: Record<string, boolean>;
   geofenceEventRepo: GeofenceEventRepoLike | null;
   alertEventRepo: AlertEventRepoLike | null;
   infractionRepo: InfractionRepoLike | null;
@@ -170,6 +177,12 @@ class GeofenceAlertService {
   // false = la alerta de zona la decide la tableta y el servidor solo registra lo que ella reporta
   // (ver el bloque en evaluate()). Default false: es el modo vigente del proyecto.
   evaluateAreaAlerts: boolean;
+  // false = la violacion de zona restringida tambien la decide la tableta ahora (25 sep, pedido
+  // explicito: el servidor le manda el flag restricted_to_allowed_zone a la tableta - ver
+  // device:config en FleetSocketServer - y ella evalua/reporta, igual que el resto de geocercas).
+  // Default false: modo vigente. Se deja el codigo de abajo intacto (no borrado) como referencia
+  // canonica de la copia que corre en la tableta - mismo criterio que evaluateAreaAlerts.
+  evaluateRestrictedZone: boolean;
 
   constructor({
     geofenceRepo,
@@ -178,6 +191,7 @@ class GeofenceAlertService {
     alertEventRepo,
     infractionRepo,
     evaluateAreaAlerts = false,
+    evaluateRestrictedZone = false,
   }: {
     geofenceRepo: GeofenceRepoLike;
     socketServer?: SocketServerLike;
@@ -185,18 +199,21 @@ class GeofenceAlertService {
     alertEventRepo?: AlertEventRepoLike;
     infractionRepo?: InfractionRepoLike;
     evaluateAreaAlerts?: boolean;
+    evaluateRestrictedZone?: boolean;
   }) {
     this.geofenceRepo = geofenceRepo;
     this.socketServer = socketServer || null;
     this.activeGeofences = [];
     this.activeAlerts = {};
     this.activeAllowedZones = {};
+    this.activeRestrictedViolations = {};
     this.geofenceEventRepo = geofenceEventRepo || null;
     this.alertEventRepo = alertEventRepo || null;
     this.infractionRepo = infractionRepo || null;
     this.distanceHistoryByKey = {};
     this.activeSilentNotices = {};
     this.evaluateAreaAlerts = evaluateAreaAlerts;
+    this.evaluateRestrictedZone = evaluateRestrictedZone;
   }
 
   addGeofence(geofence: Partial<Geofence> & { id: number }): void {
@@ -233,21 +250,39 @@ class GeofenceAlertService {
     });
 
     // undefined (nunca se evaluo antes) en vez de defaultear a false/true - evita un falso "salio"/
-    // "entro" en la primera posicion real de un dispositivo solo por no conocer su estado anterior
+    // "entro" en geofence_events en la primera posicion real de un dispositivo solo por no conocer
+    // su estado anterior. Esto es correcto SOLO para el historial de transiciones (tiempo en zona) -
+    // nunca debe usarse para decidir la violacion de zona restringida (ver bloque de abajo).
     const previousInAllowed = this.activeAllowedZones[deviceId];
     const matchedAllowedZone = matches.find((g) => g.type === 'allowed') ?? null;
     const inAllowed = matchedAllowedZone !== null;
     if (previousInAllowed !== undefined && previousInAllowed !== inAllowed) {
       this._persistEvent(deviceId, inAllowed ? matchedAllowedZone!.id : null, inAllowed ? 'enter' : 'exit', null);
-      if (position.restrictedToAllowedZone) {
-        if (inAllowed) {
-          this._clearRestrictedZoneViolation(deviceId, projectId);
-        } else {
-          this._triggerRestrictedZoneViolation(deviceId, projectId, latitude, longitude);
-        }
-      }
     }
     this.activeAllowedZones[deviceId] = inAllowed;
+
+    // violacion de zona restringida - por NIVEL ("¿esta afuera ahora?"), no por transicion (bug real
+    // corregido 25 sep, ver historial). Desde el mismo dia, esta decision se movio a la tableta (el
+    // servidor le manda el flag restricted_to_allowed_zone via device:config y ella evalua/reporta
+    // localmente, igual que el resto de geocercas) - este bloque solo corre si evaluateRestrictedZone
+    // esta activo (false en produccion), se deja como referencia canonica sin borrar.
+    if (this.evaluateRestrictedZone) {
+      if (position.restrictedToAllowedZone) {
+        const wasViolating = this.activeRestrictedViolations[deviceId] ?? false;
+        if (!inAllowed && !wasViolating) {
+          this.activeRestrictedViolations[deviceId] = true;
+          this._triggerRestrictedZoneViolation(deviceId, projectId, latitude, longitude);
+        } else if (inAllowed && wasViolating) {
+          this.activeRestrictedViolations[deviceId] = false;
+          this._clearRestrictedZoneViolation(deviceId, projectId);
+        }
+      } else if (this.activeRestrictedViolations[deviceId]) {
+        // dejo de estar restringido (se desmarco) mientras tenia una violacion activa - limpiar
+        // para no dejar una alerta fantasma que nunca se resuelve
+        this.activeRestrictedViolations[deviceId] = false;
+        this._clearRestrictedZoneViolation(deviceId, projectId);
+      }
+    }
 
     let maxSeverity: Severity = null;
     let triggeredGeofence: GeofenceMatchRow | null = null;
@@ -605,6 +640,7 @@ class GeofenceAlertService {
     // rastrear aparte si el dispositivo era restringido y tenia una violacion activa en este momento
     this._clearRestrictedZoneViolation(deviceId, projectId);
     delete this.activeAllowedZones[deviceId];
+    delete this.activeRestrictedViolations[deviceId];
 
     if (this.activeSilentNotices[deviceId] && this.socketServer?.sendToDevice) {
       this.socketServer.sendToDevice(deviceId, 'alert:proximity_clear', {

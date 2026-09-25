@@ -18,6 +18,7 @@ import type { VehicleHeadingTracker } from '../../utils/vehicleFootprint';
 
 interface SocketServerLike {
   broadcastToProject(projectId: number | null, event: string, payload: unknown): void;
+  sendToDevice?(deviceId: string, event: string, payload: unknown): void;
 }
 
 export interface DevicesRouterDeps {
@@ -179,6 +180,16 @@ export function buildDevicesRouter({
           changedBy: req.user!.id,
         });
       }
+
+      // "el servidor le dice al dispositivo la regla, no al reves" - si cambio, se lo manda de
+      // inmediato (solo llega si la tableta tiene el socket conectado ahora mismo, ver
+      // sendToDevice; si no, se pone al dia sola al reconectar via device:hello)
+      if (restrictedToAllowedZone !== undefined && device) {
+        socketServer?.sendToDevice?.(device.unique_id, 'device:config', {
+          restrictedToAllowedZone: device.restricted_to_allowed_zone,
+        });
+      }
+
       res.json(device);
     } catch (err) {
       console.error('devices.routes PATCH /:id:', (err as Error).message);
