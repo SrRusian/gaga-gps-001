@@ -1,5 +1,5 @@
 import { getStoredToken } from '@gaga-gps/client';
-import { flyToBounds } from '@gaga-gps/map-core';
+import { flyToBounds, haversineMeters } from '@gaga-gps/map-core';
 import type { Feature, FeatureCollection } from 'geojson';
 import maplibregl from 'maplibre-gl';
 import type { GeoJSONSource } from 'maplibre-gl';
@@ -25,11 +25,25 @@ export interface UseHistoryModeOptions {
   setHistoryMode: (v: boolean) => void;
 }
 
+// tamaño de cada pagina pedida al servidor - mismo numero que HISTORY_PAGE_SIZE en
+// reports.routes.ts (no importado directo, backend/frontend son paquetes separados, mismo criterio
+// de duplicacion deliberada del resto del proyecto - si se cambia alla, replicar aqui)
+const HISTORY_PAGE_SIZE = 5000;
+
+// null = no esta cargando. {loaded,total} mientras carga - progreso REAL (paginas ya traidas del
+// servidor), no un spinner indeterminado - pedido explicito: "que muestre una barra de carga
+// progresiva interactiva real"
+export interface HistoryLoadProgress {
+  loaded: number;
+  total: number;
+}
+
 export function useHistoryMode({ map, scope, historyMode, setHistoryMode }: UseHistoryModeOptions) {
   const [historyDeviceId, setHistoryDeviceId] = useState('');
   const [historyFrom, setHistoryFrom] = useState('');
   const [historyTo, setHistoryTo] = useState('');
   const [historyPoints, setHistoryPoints] = useState<HistoryPoint[]>([]);
+  const [historyLoadProgress, setHistoryLoadProgress] = useState<HistoryLoadProgress | null>(null);
   const [historySliderIndex, setHistorySliderIndex] = useState(0);
   const [historyPlaying, setHistoryPlaying] = useState(false);
   const [showHistoryPanel, setShowHistoryPanel] = useState(true);
@@ -89,6 +103,18 @@ export function useHistoryMode({ map, scope, historyMode, setHistoryMode }: UseH
       for (let i = 0; i < points.length - 1; i++) {
         const a = points[i];
         const b = points[i + 1];
+        // ruido GPS con el vehiculo detenido/casi detenido, no movimiento real - bug real
+        // reportado con captura: un equipo parado horas enteras genera miles de fixes que
+        // "tiemblan" unos metros alrededor del mismo punto (precision GPS + curso aleatorio a
+        // velocidad casi cero), y dibujar una linea entre CADA fix consecutivo se ve como el
+        // vehiculo manejando erraticamente sin haberse movido en realidad. El umbral no es un
+        // numero fijo adivinado - es la suma de las 2 precisiones reales de cada fix (lo que dos
+        // mediciones independientes con ruido podrian diferir SIN que haya habido movimiento real
+        // alguno), con un piso de 6m por si algun fix reporta una precision sospechosamente buena
+        const noiseThresholdMeters =
+          Math.max(a.accuracy, 6) + Math.max(b.accuracy, 6);
+        const distanceMeters = haversineMeters(a.latitude, a.longitude, b.latitude, b.longitude);
+        if (distanceMeters <= noiseThresholdMeters) continue;
         segments.push({
           type: 'Feature',
           properties: { color: a.zones.length > 0 ? '#008cff' : '#e5484d' },
@@ -135,22 +161,52 @@ export function useHistoryMode({ map, scope, historyMode, setHistoryMode }: UseH
     draw();
   }
 
+  // sin limite en el TOTAL - pedido explicito: "debe darme todos los puntos sin limite... que el
+  // servidor recibió". Se pagina en el cliente (HISTORY_PAGE_SIZE por vuelta) hasta agotar el rango
+  // completo, actualizando historyLoadProgress en cada vuelta para una barra de progreso real. El
+  // total se pide primero (GET /history-count, sin traer filas) para saber cuantas vueltas hacen
+  // falta de antemano, en vez de un spinner indeterminado.
   async function loadHistoryPoints() {
     if (!historyDeviceId || !historyFrom || !historyTo) {
       alert('Complete dispositivo, desde y hasta');
       return;
     }
     stopHistoryPlayback();
+    setHistoryPoints([]);
+    setHistorySliderIndex(0);
+    clearHistoryRoute();
+
+    const projectParam = typeof scope === 'number' ? `&projectId=${scope}` : '';
+    const baseParams = `deviceId=${encodeURIComponent(historyDeviceId)}&from=${new Date(historyFrom).toISOString()}&to=${new Date(historyTo).toISOString()}${projectParam}`;
+
     try {
-      const projectParam = typeof scope === 'number' ? `&projectId=${scope}` : '';
-      const data = await adminApi.get<HistoryPoint[]>(
-        `/api/reports/history-with-zones?deviceId=${encodeURIComponent(historyDeviceId)}&from=${new Date(historyFrom).toISOString()}&to=${new Date(historyTo).toISOString()}${projectParam}`,
-      );
-      setHistoryPoints(data);
-      setHistorySliderIndex(0);
-      renderHistoryRoute(data);
+      const { total } = await adminApi.get<{ total: number }>(`/api/reports/history-count?${baseParams}`);
+      if (total <= 0) {
+        setHistoryLoadProgress(null);
+        return;
+      }
+
+      setHistoryLoadProgress({ loaded: 0, total });
+      const accumulated: HistoryPoint[] = [];
+      let offset = 0;
+      while (offset < total) {
+        const page = await adminApi.get<HistoryPoint[]>(
+          `/api/reports/history-with-zones?${baseParams}&limit=${HISTORY_PAGE_SIZE}&offset=${offset}`,
+        );
+        // red de seguridad: si el rango ya no tiene mas filas (ej. cambio de datos a mitad de la
+        // carga) no se queda en un bucle infinito pidiendo lo mismo una y otra vez
+        if (page.length === 0) break;
+        accumulated.push(...page);
+        offset += page.length;
+        setHistoryLoadProgress({ loaded: accumulated.length, total });
+      }
+
+      setHistoryPoints(accumulated);
+      renderHistoryRoute(accumulated);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Error obteniendo el historial');
+    } finally {
+      setHistoryLoadProgress(null);
     }
   }
 
@@ -219,6 +275,7 @@ export function useHistoryMode({ map, scope, historyMode, setHistoryMode }: UseH
     historyTo,
     setHistoryTo,
     historyPoints,
+    historyLoadProgress,
     historySliderIndex,
     setHistorySliderIndex,
     historyPlaying,

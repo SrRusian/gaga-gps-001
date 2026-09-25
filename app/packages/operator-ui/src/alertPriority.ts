@@ -19,6 +19,7 @@ export interface StackedAlert {
     | 'rtk'
     | 'restricted_zone'
     | 'geofence'
+    | 'geofence_near'
     | 'speed';
   severity: AlertSeverity;
   message: string;
@@ -39,14 +40,18 @@ export interface StackedAlert {
 //    mismo orden que ya tenia pickAlert antes de este rediseño)
 // 3) sin conexion prolongada (nivel 2) - ya no se puede seguir operando a ciegas
 // 4) avisos "warning" de las mismas fuentes de arriba, con menor urgencia
-// 5) sin conexion, primer aviso (nivel 1) - reduzca velocidad, todavia hay margen
-// 6) RTK desconectado - degradado (sigue habiendo GPS), nunca al punto de exigir detenerse
+// 5) aviso temprano de geocerca (solo el circulo de precision GPS toca el borde, ni el punto ni la
+//    silueta real todavia - ver evaluateGeofencesNearby) - por debajo de una geocerca YA tocada,
+//    pero por encima de "sin conexion, primer aviso" (es una infraccion inminente, no ambiental)
+// 6) sin conexion, primer aviso (nivel 1) - reduzca velocidad, todavia hay margen
+// 7) RTK desconectado - degradado (sigue habiendo GPS), nunca al punto de exigir detenerse
 const PRIORITY: Record<StackedAlert['id'], Record<AlertSeverity, number>> = {
   server: { danger: 90, warning: 60 },
   restricted_zone: { danger: 85, warning: 85 },
   geofence: { danger: 80, warning: 55 },
   speed: { danger: 75, warning: 50 },
   connectivity: { danger: 70, warning: 45 },
+  geofence_near: { danger: 52, warning: 52 },
   rtk: { danger: 30, warning: 30 },
 };
 

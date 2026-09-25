@@ -167,11 +167,24 @@ export function buildDeviceEventsRouter({
     if (severity === 'danger') {
       const speedKmh = toNumber(event.speedKmh);
       const limitKmh = toNumber(event.limitKmh);
+      // solo 'raised' llega hasta aqui (state === 'cleared' ya retorno arriba, antes de esta
+      // rama) - toda infraccion de geocerca es siempre una ENTRADA por construccion, nunca una
+      // salida (salir de una zona prohibida es la resolucion de la infraccion, no una nueva). El
+      // mensaje real de la tableta (AREA_ALERT_TEXT, ej. "ZONA PROHIBIDA - NO INGRESAR...") se
+      // conserva intacto para el resto de los consumidores de `message` (broadcast en vivo a los
+      // demas operadores/supervisor) - esta version con el prefijo y el nombre de la zona es
+      // exclusiva del registro permanente, donde antes se veia identica en cada fila y no distinguia
+      // a que geocerca en particular se referia cada infraccion (bug real reportado con captura:
+      // el historial mostraba la misma frase generica repetida sin decir si entro/salio ni cual zona)
+      const geofenceName = kind === 'geofence' && event.geofenceName ? String(event.geofenceName) : null;
+      const infractionMessage = geofenceName
+        ? `Entró a "${geofenceName}" - ${message ?? 'Infracción reportada por el dispositivo'}`
+        : (message ?? 'Infracción reportada por el dispositivo');
       await infractionRepo.create({
         projectId,
         deviceId,
         infractionType: kind === 'speed' ? 'speed' : 'geofence',
-        message: message ?? 'Infracción reportada por el dispositivo',
+        message: infractionMessage,
         latitude: toNumber(event.latitude) ?? 0,
         longitude: toNumber(event.longitude) ?? 0,
         severity:

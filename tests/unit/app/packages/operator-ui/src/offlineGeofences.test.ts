@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Geofence } from '@gaga-gps/shared-types';
-import { evaluateGeofencesOffline } from '../../../../../../app/packages/operator-ui/src/offlineGeofences';
+import {
+  evaluateGeofencesOffline,
+  evaluateGeofencesNearby,
+} from '../../../../../../app/packages/operator-ui/src/offlineGeofences';
 
 // cuadrado de ~222m de lado centrado en (19.35, -103.56) - 0.001 grados son ~111m
 const CENTER = { lat: 19.35, lon: -103.56 };
@@ -87,6 +90,122 @@ describe('evaluateGeofencesOffline', () => {
     const match = evaluateGeofencesOffline(CENTER.lat, CENTER.lon, zones);
     expect(match?.severity).toBe('danger');
     expect(match?.geofenceId).toBe(11);
+  });
+
+  // el borde SUR del cuadrado esta en lat=19.349 (SQUARE arriba) - un punto justo debajo (lat menor)
+  // esta fuera por el test de punto crudo, pero un vehiculo de 10x4m centrado 3m al sur, apuntando
+  // al norte (heading 0), llega hasta ~2m dentro del poligono - exactamente el bug reportado en
+  // campo: "zona prohibida" no avisaba hasta que el CENTRO exacto tocaba el poligono
+  const JUST_OUTSIDE_SOUTH_EDGE = { lat: 19.349 - 3 / 111320, lon: -103.56 };
+  const FOOTPRINT_10X4_NORTH = { headingDeg: 0, lengthMeters: 10, widthMeters: 4 };
+
+  it('punto crudo justo afuera del borde: sin footprint no alerta', () => {
+    expect(
+      evaluateGeofencesOffline(JUST_OUTSIDE_SOUTH_EDGE.lat, JUST_OUTSIDE_SOUTH_EDGE.lon, [polygon()]),
+    ).toBeNull();
+  });
+
+  it('con la silueta real del vehiculo, tocar el borde SI alerta aunque el centro este afuera', () => {
+    const match = evaluateGeofencesOffline(
+      JUST_OUTSIDE_SOUTH_EDGE.lat,
+      JUST_OUTSIDE_SOUTH_EDGE.lon,
+      [polygon()],
+      FOOTPRINT_10X4_NORTH,
+    );
+    expect(match?.severity).toBe('danger');
+  });
+
+  it('silueta real lejos del borde (mismo vehiculo, mas al sur): no alerta', () => {
+    const farSouth = { lat: 19.349 - 50 / 111320, lon: -103.56 };
+    expect(
+      evaluateGeofencesOffline(farSouth.lat, farSouth.lon, [polygon()], FOOTPRINT_10X4_NORTH),
+    ).toBeNull();
+  });
+
+  it('circulo: la silueta real toca aunque el centro del vehiculo este fuera del radio', () => {
+    const circle = {
+      id: 3, name: 'Circulo', type: 'danger', projectId: null,
+      shapeType: 'circle', center: CENTER, radiusMeters: 100,
+    } as Geofence;
+    // centro del vehiculo a 103m del centro del circulo (fuera del radio de 100m), pero con un
+    // vehiculo de 10m de largo orientado hacia el circulo la silueta si llega a tocar el borde
+    const justOutsideRadius = { lat: CENTER.lat + 103 / 111320, lon: CENTER.lon };
+    expect(evaluateGeofencesOffline(justOutsideRadius.lat, justOutsideRadius.lon, [circle])).toBeNull();
+    expect(
+      evaluateGeofencesOffline(justOutsideRadius.lat, justOutsideRadius.lon, [circle], {
+        headingDeg: 180, // apuntando hacia el centro del circulo (al sur)
+        lengthMeters: 10,
+        widthMeters: 4,
+      }),
+    ).not.toBeNull();
+  });
+
+  describe('evaluateGeofencesNearby (aviso temprano por precision GPS)', () => {
+    it('el circulo de precision toca el borde: avisa "warning" aunque el punto/silueta no toquen', () => {
+      const nearby = evaluateGeofencesNearby(
+        JUST_OUTSIDE_SOUTH_EDGE.lat,
+        JUST_OUTSIDE_SOUTH_EDGE.lon,
+        [polygon()],
+        5, // 5m de precision GPS - el punto esta a 3m del borde, el circulo si lo toca
+      );
+      expect(nearby?.severity).toBe('warning');
+      expect(nearby?.message).toContain('ACERCÁNDOSE');
+    });
+
+    it('sin precision suficiente para tocar el borde: no avisa', () => {
+      expect(
+        evaluateGeofencesNearby(JUST_OUTSIDE_SOUTH_EDGE.lat, JUST_OUTSIDE_SOUTH_EDGE.lon, [polygon()], 1),
+      ).toBeNull();
+    });
+
+    it('si la silueta real ya toca de verdad, no hay aviso temprano duplicado (ese ya gano)', () => {
+      const nearby = evaluateGeofencesNearby(
+        JUST_OUTSIDE_SOUTH_EDGE.lat,
+        JUST_OUTSIDE_SOUTH_EDGE.lon,
+        [polygon()],
+        5,
+        FOOTPRINT_10X4_NORTH,
+      );
+      expect(nearby).toBeNull();
+    });
+
+    it('poligono sin relleno y polilinea: fuera de alcance a proposito (solo circulo/poligono relleno)', () => {
+      const unfilled = polygon({ filled: false, corridorWidthMeters: 5 } as Partial<Geofence>);
+      // lejos del borde de deteccion (60m+ dentro del cuadrado) - ni siquiera el "real" deberia tocar,
+      // y el aviso temprano nunca aplica a este tipo de forma de todas formas
+      expect(evaluateGeofencesNearby(CENTER.lat, CENTER.lon, [unfilled], 5)).toBeNull();
+      expect(evaluateGeofencesNearby(CENTER.lat, -103.56, [line()], 5)).toBeNull();
+    });
+
+    // pregunta real del usuario: "si mi area aproximada de precision es de 5 metros o mas, ese
+    // circulo se toma correctamente cuando su zona o incluso apenas con sus bordes alerta de
+    // advertencia al tocar una zona de advertencia?" - probado explicitamente contra una geocerca
+    // type:'warning' (no danger/forbidden como el resto de los tests de arriba), y en el limite
+    // matematico exacto (5.0m alcanza, 5.0m+1cm ya no) para confirmar que es el borde real del
+    // circulo, no un margen aproximado
+    it('zona type warning: el circulo de precision SI avisa "advertencia" aunque solo toque con el borde', () => {
+      const warningZone = polygon({ type: 'warning' });
+      const nearby = evaluateGeofencesNearby(
+        JUST_OUTSIDE_SOUTH_EDGE.lat, // exactamente a 3.000m del borde (ver constante arriba)
+        JUST_OUTSIDE_SOUTH_EDGE.lon,
+        [warningZone],
+        5,
+      );
+      expect(nearby?.severity).toBe('warning');
+      expect(nearby?.geofenceType).toBe('warning');
+      expect(nearby?.message).toBe('PRECAUCIÓN - ACERCÁNDOSE A ZONA DE RIESGO');
+    });
+
+    it('el borde del circulo de precision es el limite real, no una aproximacion con margen', () => {
+      // el punto esta a 3m del borde - con exactamente 3m de precision el circulo apenas ALCANZA a
+      // tocar el borde (avisa); con un pelo menos (2.99m) ya no llega (no avisa)
+      expect(
+        evaluateGeofencesNearby(JUST_OUTSIDE_SOUTH_EDGE.lat, JUST_OUTSIDE_SOUTH_EDGE.lon, [polygon()], 3),
+      ).not.toBeNull();
+      expect(
+        evaluateGeofencesNearby(JUST_OUTSIDE_SOUTH_EDGE.lat, JUST_OUTSIDE_SOUTH_EDGE.lon, [polygon()], 2.99),
+      ).toBeNull();
+    });
   });
 
   it('un agujero del poligono no cuenta como dentro', () => {

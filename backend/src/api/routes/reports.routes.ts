@@ -48,9 +48,18 @@ export function buildReportsRouter({
     return { device, effectiveProjectId };
   }
 
+  // tamaño de pagina real de las consultas paginadas (history-with-zones/csv) - el mismo numero
+  // que antes era el tope duro absoluto, ahora solo describe cuanto trae CADA vuelta del bucle
+  const HISTORY_PAGE_SIZE = 5000;
+  // techo de seguridad sobre lo que el cliente puede pedir de una sola vez via ?limit= - evita que
+  // alguien pida una pagina absurdamente grande en una sola consulta (mismo criterio de clamp ya
+  // usado en infractions.routes.ts/alerts.routes.ts, solo que el techo aqui es mas alto porque una
+  // fila de posicion es mucho mas chica que una fila de infraccion/alerta)
+  const MAX_HISTORY_PAGE_SIZE = 20000;
+
   router.get('/history', canView, async (req, res) => {
     try {
-      const { deviceId, from, to, limit } = req.query;
+      const { deviceId, from, to, limit, offset } = req.query;
       if (!deviceId || !from || !to) {
         return res.status(400).json({ error: 'deviceId, from y to son requeridos' });
       }
@@ -64,7 +73,8 @@ export function buildReportsRouter({
         deviceId: String(deviceId),
         from: new Date(String(from)),
         to: new Date(String(to)),
-        limit: limit ? parseInt(String(limit), 10) : undefined,
+        limit: limit ? Math.min(parseInt(String(limit), 10), MAX_HISTORY_PAGE_SIZE) : undefined,
+        offset: offset ? parseInt(String(offset), 10) : undefined,
       });
 
       res.json(history);
@@ -74,9 +84,38 @@ export function buildReportsRouter({
     }
   });
 
+  // total de puntos en el rango, sin traer ninguna fila - el panel de Admin lo pide primero para
+  // saber cuantas paginas hacen falta y mostrar una barra de progreso real ("cargados X de Y"), en
+  // vez de un spinner indeterminado. Pedido explicito: "debe darme todos los puntos sin limite...
+  // que muestre una barra de carga progresiva interactiva real"
+  router.get('/history-count', canView, async (req, res) => {
+    try {
+      const { deviceId, from, to } = req.query;
+      if (!deviceId || !from || !to) {
+        return res.status(400).json({ error: 'deviceId, from y to son requeridos' });
+      }
+
+      const resolved = await resolveDeviceForHistory(req, String(deviceId));
+      if ('error' in resolved) {
+        return res.status(resolved.error).json({ error: resolved.message });
+      }
+
+      const total = await positionRepo.countHistory({
+        deviceId: String(deviceId),
+        from: new Date(String(from)),
+        to: new Date(String(to)),
+      });
+
+      res.json({ total });
+    } catch (err) {
+      console.error('reports.routes GET /history-count:', (err as Error).message);
+      res.status(500).json({ error: 'Error contando historial' });
+    }
+  });
+
   router.get('/history-with-zones', canView, async (req, res) => {
     try {
-      const { deviceId, from, to, limit } = req.query;
+      const { deviceId, from, to, limit, offset } = req.query;
       if (!deviceId || !from || !to) {
         return res.status(400).json({ error: 'deviceId, from y to son requeridos' });
       }
@@ -91,7 +130,8 @@ export function buildReportsRouter({
           deviceId: String(deviceId),
           from: new Date(String(from)),
           to: new Date(String(to)),
-          limit: limit ? parseInt(String(limit), 10) : undefined,
+          limit: limit ? Math.min(parseInt(String(limit), 10), MAX_HISTORY_PAGE_SIZE) : undefined,
+          offset: offset ? parseInt(String(offset), 10) : undefined,
         }),
         geofenceRepo.findAllActive(resolved.effectiveProjectId),
       ]);
@@ -125,11 +165,25 @@ export function buildReportsRouter({
         return res.status(resolved.error).json({ error: resolved.message });
       }
 
-      const history = await positionRepo.findHistory({
-        deviceId: String(deviceId),
-        from: new Date(String(from)),
-        to: new Date(String(to)),
-      });
+      // el CSV tenia el mismo techo silencioso de 5000 que la tabla (nunca pasaba `limit`, asi que
+      // caia al default de findHistory) - se pagina aqui adentro, servidor-a-servidor, hasta agotar
+      // el rango completo. Sin progreso visible del lado del cliente porque esto es una sola
+      // descarga de archivo (fetch+blob), no una vista incremental - ver useHistoryMode.ts
+      const history: Awaited<ReturnType<typeof positionRepo.findHistory>> = [];
+      let offset = 0;
+      for (;;) {
+        const page = await positionRepo.findHistory({
+          deviceId: String(deviceId),
+          from: new Date(String(from)),
+          to: new Date(String(to)),
+          limit: HISTORY_PAGE_SIZE,
+          offset,
+        });
+        if (page.length === 0) break;
+        history.push(...page);
+        offset += page.length;
+        if (page.length < HISTORY_PAGE_SIZE) break;
+      }
 
       const header = 'device_id,latitude,longitude,speed_kmh,course,altitude,fix_time\n';
       const csv =

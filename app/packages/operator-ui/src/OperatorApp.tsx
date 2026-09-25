@@ -176,12 +176,15 @@ export default function OperatorApp() {
           latitude: localGeo.latitude,
           longitude: localGeo.longitude,
           speedKmh: (localGeo.speed ?? 0) * 3.6,
+          headingDeg: localGeo.heading,
+          accuracyMeters: localGeo.accuracy,
         }
       : null,
     speedLimits,
     connected,
     restrictedToAllowedZone,
     geofencesReady,
+    deviceId ? (vehicleFootprints[deviceId] ?? null) : null,
   );
 
   // "alguna vez tuvo RTK conectado en esta sesion" - el aviso de RTK desconectado solo tiene
@@ -218,6 +221,16 @@ export default function OperatorApp() {
   const sortedAlerts = sortAlertStack(alertStack);
   const topAlert = sortedAlerts[0] ?? null;
   const topSound = topSoundAlert(sortedAlerts);
+
+  // el contenedor de alertas queda SIEMPRE montado (ver JSX abajo) para poder animar su cierre -
+  // mientras se colapsa conserva el ultimo contenido no vacio, si no el texto desaparecia de golpe
+  // justo cuando el espacio recien empezaba a encogerse
+  const [displayedAlerts, setDisplayedAlerts] = useState<StackedAlert[]>([]);
+  useEffect(() => {
+    if (sortedAlerts.length > 0) setDisplayedAlerts(sortedAlerts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(sortedAlerts)]);
+  const alertStackOpen = sortedAlerts.length > 0;
 
   // el sonido solo se toca cuando cambia QUIEN suena (id+severidad+loop) - nunca en cada render,
   // o el pitido se reiniciaria constantemente y nunca llegaria a sonar completo
@@ -401,18 +414,21 @@ export default function OperatorApp() {
         </div>
       </header>
 
-      {sortedAlerts.length > 0 && (
+      <div className={`op-alert-stack-wrap${alertStackOpen ? ' op-alert-stack-wrap--open' : ''}`}>
         <div className="op-alert-stack">
-          {sortedAlerts.map((a, index) => (
-            <div
-              key={a.id}
-              className={`op-alert-message ${a.severity}${index > 0 ? ' op-alert-message--stacked' : ''}`}
-            >
-              {a.message}
-            </div>
-          ))}
+          <div className="op-alert-stack-inner">
+            {displayedAlerts.map((a, index) => (
+              <div
+                key={a.id}
+                className={`op-alert-message ${a.severity}${index > 0 ? ' op-alert-message--stacked' : ''}`}
+              >
+                <span className="op-alert-message-dot" />
+                {a.message}
+              </div>
+            ))}
+          </div>
         </div>
-      )}
+      </div>
 
       {!checking && myDisplay && (
         <>

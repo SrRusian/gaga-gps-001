@@ -94,28 +94,59 @@ class PositionRepository {
     }
   }
 
+  // `limit` sigue siendo el tamaño de UNA pagina (default 5000, el mismo numero que antes era el
+  // tope duro del total) - pedido explicito: "no deberia tener limite... aunque va a tardar". Ya no
+  // hay ningun techo sobre el TOTAL de filas que se pueden traer - el caller (reports.routes.ts)
+  // pagina con `offset` hasta agotar el rango, ver /history-count + el bucle del lado del cliente en
+  // useHistoryMode.ts.
   async findHistory({
     deviceId,
     from,
     to,
     limit = 5000,
+    offset = 0,
   }: {
     deviceId: string;
     from: Date | string;
     to: Date | string;
     limit?: number;
+    offset?: number;
   }): Promise<PositionRow[]> {
     try {
       const { rows } = await query<PositionRow>(
         `SELECT * FROM positions
          WHERE device_id = $1 AND fix_time BETWEEN $2 AND $3 AND valid = TRUE
          ORDER BY fix_time ASC
-         LIMIT $4`,
-        [deviceId, from, to, limit],
+         LIMIT $4 OFFSET $5`,
+        [deviceId, from, to, limit, offset],
       );
       return rows;
     } catch (err) {
       console.error('PositionRepository.findHistory:', (err as Error).message);
+      throw err;
+    }
+  }
+
+  // total real de posiciones en el rango, sin traer ninguna fila - permite saber de antemano
+  // cuantas paginas hacen falta (para la barra de progreso real del lado del cliente) sin adivinar
+  async countHistory({
+    deviceId,
+    from,
+    to,
+  }: {
+    deviceId: string;
+    from: Date | string;
+    to: Date | string;
+  }): Promise<number> {
+    try {
+      const { rows } = await query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM positions
+         WHERE device_id = $1 AND fix_time BETWEEN $2 AND $3 AND valid = TRUE`,
+        [deviceId, from, to],
+      );
+      return Number(rows[0]?.count ?? 0);
+    } catch (err) {
+      console.error('PositionRepository.countHistory:', (err as Error).message);
       throw err;
     }
   }

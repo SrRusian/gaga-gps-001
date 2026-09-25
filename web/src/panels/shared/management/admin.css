@@ -494,9 +494,40 @@ tbody tr:hover {
   left: 22px;
   z-index: 21;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+}
+.dash-history-filter-row {
+  display: flex;
   align-items: flex-end;
   gap: 10px;
-  padding: 10px 14px;
+}
+/* barra de progreso REAL (paginas ya traidas del servidor / total del rango), no un spinner
+   indeterminado - pedido explicito: "que muestre una barra de carga progresiva interactiva real" */
+.dash-history-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 280px;
+}
+.dash-history-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ad-bg);
+  border: 1px solid var(--ad-border);
+  overflow: hidden;
+}
+.dash-history-progress-fill {
+  height: 100%;
+  background: var(--ad-accent);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+.dash-history-progress-label {
+  font-size: 11px;
+  color: var(--ad-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 .dash-history-filter-field {
   display: flex;

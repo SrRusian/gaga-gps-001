@@ -2,9 +2,11 @@ import type { Geofence } from '@gaga-gps/shared-types';
 import { useEffect, useRef, useState } from 'react';
 import {
   evaluateGeofencesOffline,
+  evaluateGeofencesNearby,
   isInsideAllowedZone,
   matchedInformativeGeofences,
   GEOFENCE_TYPE_LABEL,
+  type FootprintInput,
   type OfflineGeofenceMatch,
 } from './offlineGeofences';
 import { evaluateSpeed, NO_SPEED_LIMITS, type SpeedLimits } from './localSpeed';
@@ -46,7 +48,7 @@ import { flushDeviceEvents, reportDeviceEvent, type DeviceEvent } from './device
 export interface LocalAlert {
   severity: 'warning' | 'danger';
   message: string;
-  source: 'geofence' | 'speed' | 'restricted_zone';
+  source: 'geofence' | 'geofence_near' | 'speed' | 'restricted_zone';
   geofenceId: number | null;
 }
 
@@ -68,10 +70,24 @@ const EXEMPT_ZONE_TYPES = new Set(['allowed', 'parking']);
 // tiempo que el aviso de entrar/salir de zona informativa queda en pantalla antes de desvanecerse
 const TOAST_DURATION_MS = 4500;
 
+// mismo umbral que headingCalibration.ts / backend VehicleHeadingTracker.COURSE_TRUST_MIN_KMH - el
+// rumbo GPS no es confiable a baja velocidad/detenido, asi que no se usa para orientar el
+// rectangulo del vehiculo por debajo de esto (se congela el ultimo rumbo confiable conocido)
+const MIN_SPEED_KMH_FOR_HEADING_TRUST = 3;
+
 export interface LocalFixInput {
   latitude: number;
   longitude: number;
   speedKmh: number;
+  headingDeg?: number | null;
+  accuracyMeters?: number | null;
+}
+
+// silueta real del vehiculo (largo/ancho, metros) - null si el dispositivo no tiene tipo de
+// vehiculo asignado, cae al punto crudo de siempre (ver isTriggered en offlineGeofences.ts)
+export interface VehicleFootprintDims {
+  lengthMeters: number | null;
+  widthMeters: number | null;
 }
 
 export function useLocalAlerts(
@@ -82,6 +98,7 @@ export function useLocalAlerts(
   connected = false,
   restrictedToAllowedZone = false,
   geofencesReady = false,
+  footprintDims: VehicleFootprintDims | null = null,
 ) {
   const [alerts, setAlerts] = useState<LocalAlert[]>([]);
   const [toast, setToast] = useState<GeofenceToast | null>(null);
@@ -93,10 +110,15 @@ export function useLocalAlerts(
   // backend (GeofenceAlertService.activeRestrictedViolations)
   const restrictedViolatingRef = useRef(false);
   const lastEvalAtRef = useRef(0);
+  // ultimo rumbo GPS de confianza (velocidad >= MIN_SPEED_KMH_FOR_HEADING_TRUST) - null si el
+  // dispositivo nunca reporto uno todavia (recien arranco, nunca se movio de verdad)
+  const lastTrustedHeadingRef = useRef<number | null>(null);
   const geofencesRef = useRef(geofences);
   geofencesRef.current = geofences;
   const limitsRef = useRef(limits);
   limitsRef.current = limits;
+  const footprintDimsRef = useRef(footprintDims);
+  footprintDimsRef.current = footprintDims;
   const restrictedRef = useRef(restrictedToAllowedZone);
   restrictedRef.current = restrictedToAllowedZone;
   const geofencesReadyRef = useRef(geofencesReady);
@@ -133,8 +155,26 @@ export function useLocalAlerts(
     };
     const send = (event: DeviceEvent) => void reportDeviceEvent(event);
 
+    // rumbo GPS confiable solo a partir de cierta velocidad (ver constante) - por debajo se
+    // congela el ultimo confiable conocido, en vez de orientar el rectangulo con un rumbo ruidoso
+    if (
+      fix.headingDeg != null &&
+      !Number.isNaN(fix.headingDeg) &&
+      fix.speedKmh >= MIN_SPEED_KMH_FOR_HEADING_TRUST
+    ) {
+      lastTrustedHeadingRef.current = fix.headingDeg;
+    }
+    const dims = footprintDimsRef.current;
+    const footprint: FootprintInput | null =
+      dims?.lengthMeters && dims?.widthMeters && lastTrustedHeadingRef.current != null
+        ? { headingDeg: lastTrustedHeadingRef.current, lengthMeters: dims.lengthMeters, widthMeters: dims.widthMeters }
+        : null;
+
     // --- geocercas de atencion ---
-    const match = evaluateGeofencesOffline(fix.latitude, fix.longitude, geofencesRef.current);
+    // con la silueta real del vehiculo (footprint) en vez de solo el punto crudo - bug real
+    // reportado en campo: una "zona prohibida" no avisaba hasta que el CENTRO exacto (sin
+    // dimension) tocaba el poligono, aunque el vehiculo ya estuviera encima de un borde
+    const match = evaluateGeofencesOffline(fix.latitude, fix.longitude, geofencesRef.current, footprint);
     const previous = geofenceRef.current;
     const changed = (match?.geofenceId ?? null) !== (previous?.geofenceId ?? null);
 
@@ -250,6 +290,26 @@ export function useLocalAlerts(
     }
     if (speed.severity) {
       nextAlerts.push({ severity: speed.severity, message: speed.message, source: 'speed', geofenceId: null });
+    }
+    // aviso temprano: el circulo de precision GPS ya toca el borde de una zona de atencion, aunque
+    // ni el punto ni la silueta real todavia (solo circulo/poligono relleno - ver
+    // evaluateGeofencesNearby). Nunca se reporta como transicion - es un heads-up, no un evento real
+    if (typeof fix.accuracyMeters === 'number' && fix.accuracyMeters > 0) {
+      const nearby = evaluateGeofencesNearby(
+        fix.latitude,
+        fix.longitude,
+        geofencesRef.current,
+        fix.accuracyMeters,
+        footprint,
+      );
+      if (nearby) {
+        nextAlerts.push({
+          severity: 'warning',
+          message: nearby.message,
+          source: 'geofence_near',
+          geofenceId: nearby.geofenceId,
+        });
+      }
     }
     setAlerts(nextAlerts);
 
