@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Geofence } from '@gaga-gps/shared-types';
 import {
-  evaluateGeofencesOffline,
   evaluateGeofencesNearby,
+  evaluateGeofencesOffline,
+  evaluateRouteDirection,
+  locateOnAuthorizedRoute,
+  locateOnPath,
 } from '../../../../../../app/packages/operator-ui/src/offlineGeofences';
 
 // cuadrado de ~222m de lado centrado en (19.35, -103.56) - 0.001 grados son ~111m
@@ -219,5 +222,107 @@ describe('evaluateGeofencesOffline', () => {
       },
     } as Partial<Geofence>);
     expect(evaluateGeofencesOffline(CENTER.lat, CENTER.lon, [withHole])).toBeNull();
+  });
+});
+
+// --- Rutas autorizadas con sentido ---
+// La direccion no es geometria nueva: la polilinea ya viene ordenada, asi que la fraccion a lo
+// largo de ella (0 = primer punto, 1 = ultimo) ya define un sentido.
+function route(routeDirection: 'both' | 'forward' | 'backward'): Geofence {
+  return {
+    id: 90,
+    name: 'Ruta Norte',
+    type: 'authorized_route',
+    projectId: null,
+    shapeType: 'polyline',
+    // ~1113 m de sur a norte sobre el mismo meridiano
+    geometry: { type: 'LineString', coordinates: [[-103.72, 19.24], [-103.72, 19.25]] },
+    corridorWidthMeters: 20,
+    stayInside: true,
+    routeDirection,
+  } as Geofence;
+}
+
+describe('locateOnPath - equivalente local de ST_LineLocatePoint', () => {
+  const path = [[-103.72, 19.24], [-103.72, 19.25]];
+
+  it('el inicio de la linea es fraccion 0 y el final fraccion 1', () => {
+    expect(locateOnPath(19.24, -103.72, path)!.fraction).toBeCloseTo(0, 3);
+    expect(locateOnPath(19.25, -103.72, path)!.fraction).toBeCloseTo(1, 3);
+  });
+
+  it('a la mitad da 0.5 y distancia perpendicular cero', () => {
+    const loc = locateOnPath(19.245, -103.72, path)!;
+    expect(loc.fraction).toBeCloseTo(0.5, 2);
+    expect(loc.distanceMeters).toBeLessThan(1);
+  });
+
+  it('un punto al costado conserva su avance y reporta la separacion real', () => {
+    // ~10.5 m al este del punto medio
+    const loc = locateOnPath(19.245, -103.71990, path)!;
+    expect(loc.fraction).toBeCloseTo(0.5, 2);
+    expect(loc.distanceMeters).toBeGreaterThan(8);
+    expect(loc.distanceMeters).toBeLessThan(13);
+  });
+
+  it('una linea degenerada no revienta', () => {
+    expect(locateOnPath(19.24, -103.72, [[-103.72, 19.24]])).toBeNull();
+    expect(locateOnPath(19.24, -103.72, [[-103.72, 19.24], [-103.72, 19.24]])).toBeNull();
+  });
+});
+
+describe('locateOnAuthorizedRoute', () => {
+  it('fuera del corredor no cuenta como ir por esa ruta', () => {
+    // ~105 m al este, muy fuera del corredor de 20 m
+    expect(locateOnAuthorizedRoute(19.245, -103.719, [route('forward')])).toBeNull();
+  });
+
+  it('dentro del corredor la encuentra', () => {
+    const found = locateOnAuthorizedRoute(19.245, -103.72, [route('forward')]);
+    expect(found?.geofence.id).toBe(90);
+  });
+});
+
+describe('evaluateRouteDirection', () => {
+  const at = (lat: number) => locateOnPath(lat, -103.72, route('forward').geometry.coordinates)!;
+
+  it('una ruta bidireccional nunca marca sentido contrario', () => {
+    const r = evaluateRouteDirection(route('both'), at(19.245), 0.9);
+    expect(r!.wrongWay).toBe(false);
+  });
+
+  it('avanzar en el orden de dibujo va bien en una ruta forward', () => {
+    const r = evaluateRouteDirection(route('forward'), at(19.246), 0.5);
+    expect(r!.wrongWay).toBe(false);
+  });
+
+  it('retroceder en una ruta forward es sentido contrario', () => {
+    const r = evaluateRouteDirection(route('forward'), at(19.244), 0.5);
+    expect(r!.wrongWay).toBe(true);
+  });
+
+  // 'backward' existe para invertir una ruta ya trazada sin volver a dibujarla
+  it('en una ruta backward el criterio se invierte', () => {
+    expect(evaluateRouteDirection(route('backward'), at(19.244), 0.5)!.wrongWay).toBe(false);
+    expect(evaluateRouteDirection(route('backward'), at(19.246), 0.5)!.wrongWay).toBe(true);
+  });
+
+  it('un movimiento dentro de la zona muerta no decide nada (evita parpadeo)', () => {
+    const loc = at(19.245);
+    expect(evaluateRouteDirection(route('forward'), loc, loc.fraction)).toBeNull();
+  });
+
+  it('la primera muestra todavia no puede decidir sentido', () => {
+    expect(evaluateRouteDirection(route('forward'), at(19.245), null)!.wrongWay).toBe(false);
+  });
+
+  // base del sistema de guiado: cuanto falta para llegar al extremo permitido
+  it('lo que falta se mide hacia el extremo del sentido permitido', () => {
+    const half = at(19.245);
+    const fwd = evaluateRouteDirection(route('forward'), half, 0.4)!;
+    const bwd = evaluateRouteDirection(route('backward'), half, 0.6)!;
+    expect(fwd.remainingMeters).toBeCloseTo(bwd.remainingMeters, 0);
+    expect(fwd.remainingMeters).toBeGreaterThan(500);
+    expect(fwd.remainingMeters).toBeLessThan(600);
   });
 });

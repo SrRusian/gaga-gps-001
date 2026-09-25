@@ -18,6 +18,7 @@ export interface StackedAlert {
     | 'connectivity'
     | 'rtk'
     | 'restricted_zone'
+    | 'wrong_way'
     | 'geofence'
     | 'geofence_near'
     | 'speed';
@@ -48,6 +49,9 @@ export interface StackedAlert {
 const PRIORITY: Record<StackedAlert['id'], Record<AlertSeverity, number>> = {
   server: { danger: 90, warning: 60 },
   restricted_zone: { danger: 85, warning: 85 },
+  // por encima de geocerca en warning: ir en contra por una ruta de un solo sentido es una
+  // situacion que hay que corregir YA, no un aviso ambiental
+  wrong_way: { danger: 78, warning: 65 },
   geofence: { danger: 80, warning: 55 },
   speed: { danger: 75, warning: 50 },
   connectivity: { danger: 70, warning: 45 },

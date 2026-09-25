@@ -33,6 +33,7 @@ export interface GeofenceFormState {
   // solo aplica a polilinea - true (default, "Ruta autorizada" historico) = debe quedarse DENTRO
   // del ancho; false = "no tocar" - alerta al acercarse al ancho de la linea
   stayInside: boolean;
+  routeDirection: 'both' | 'forward' | 'backward';
 }
 
 export interface UseGeofencesAdminOptions {
@@ -60,6 +61,7 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
     corridorWidth: '',
     filled: true,
     stayInside: true,
+    routeDirection: 'both',
   });
   // seleccion de filas via checkbox - se reutiliza tanto para exportar (GeoJSON/KML) como para
   // eliminar varias a la vez
@@ -168,6 +170,7 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
       corridorWidth: '',
       filled: true,
       stayInside: true,
+    routeDirection: 'both',
     });
     setGeoSelectedCenter(null);
     if (circleMarkerRef.current) {
@@ -195,6 +198,7 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
       corridorWidth: g.corridor_width_meters != null ? String(g.corridor_width_meters) : '',
       filled: g.filled,
       stayInside: g.stay_inside,
+      routeDirection: g.route_direction ?? 'both',
     });
     drawRef.current?.deleteAll();
     if (g.shape_type === 'circle') {
@@ -299,6 +303,7 @@ export function useGeofencesAdmin({ map, scope, drawRef, circleMarkerRef }: UseG
             geometry,
             corridorWidthMeters,
             stayInside: geofenceForm.stayInside,
+            routeDirection: geofenceForm.routeDirection,
             ...(isEditing ? {} : { projectId: effectiveProjectId }),
           });
         }

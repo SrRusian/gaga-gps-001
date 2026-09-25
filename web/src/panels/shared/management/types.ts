@@ -84,6 +84,8 @@ export interface GeofenceRow {
   corridor_width_meters: number | null;
   filled: boolean;
   stay_inside: boolean;
+  // sentido de recorrido de una ruta autorizada - 'both' = bidireccional (default historico)
+  route_direction: 'both' | 'forward' | 'backward';
 }
 
 export interface EquipmentRow {

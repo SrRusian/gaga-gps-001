@@ -115,6 +115,32 @@ export function GeofenceDrawPanel({ scope, projects, geofence }: GeofenceDrawPan
           </div>
         )}
 
+        {g.geoShape === 'polyline' && g.geofenceForm.type === 'authorized_route' && (
+          <div className="dash-field-group">
+            <span className="dash-field-group-title">Sentido de circulación</span>
+            <select
+              value={g.geofenceForm.routeDirection}
+              onChange={(e) =>
+                g.setGeofenceForm({
+                  ...g.geofenceForm,
+                  routeDirection: e.target.value as 'both' | 'forward' | 'backward',
+                })
+              }
+            >
+              <option value="both">Ambos sentidos</option>
+              <option value="forward">Un sentido - como se dibujó (del primer punto al último)</option>
+              <option value="backward">Un sentido - invertido (del último punto al primero)</option>
+            </select>
+            <span className="dash-hint">
+              {g.geofenceForm.routeDirection === 'both'
+                ? 'Se puede recorrer en cualquier dirección. No se marca sentido en el mapa.'
+                : 'La tableta avisa al operador si la recorre al revés, y levanta infracción si insiste. ' +
+                  'En el mapa se dibujan flechas con el sentido permitido. Para el sentido opuesto, ' +
+                  'crea otra ruta autorizada orientada al revés.'}
+            </span>
+          </div>
+        )}
+
         {g.geoShape === 'circle' && (
           <div className="dash-field-group">
             <span className="dash-field-group-title">Ubicación y radio</span>

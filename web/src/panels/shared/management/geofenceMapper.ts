@@ -24,6 +24,7 @@ export function toGeofence(row: GeofenceRow): Geofence {
       geometry: row.geometry as LineString,
       corridorWidthMeters: row.corridor_width_meters as number,
       stayInside: row.stay_inside,
+      routeDirection: row.route_direction ?? 'both',
     };
   }
   return {

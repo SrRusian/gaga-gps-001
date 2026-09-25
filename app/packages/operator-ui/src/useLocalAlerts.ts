@@ -3,11 +3,14 @@ import { useEffect, useRef, useState } from 'react';
 import {
   evaluateGeofencesOffline,
   evaluateGeofencesNearby,
+  evaluateRouteDirection,
   isInsideAllowedZone,
+  locateOnAuthorizedRoute,
   matchedInformativeGeofences,
   GEOFENCE_TYPE_LABEL,
   type FootprintInput,
   type OfflineGeofenceMatch,
+  type RouteProgress,
 } from './offlineGeofences';
 import {
   evaluateSpeed,
@@ -54,7 +57,7 @@ import { flushDeviceEvents, reportDeviceEvent, type DeviceEvent } from './device
 export interface LocalAlert {
   severity: 'warning' | 'danger';
   message: string;
-  source: 'geofence' | 'geofence_near' | 'speed' | 'restricted_zone';
+  source: 'geofence' | 'geofence_near' | 'speed' | 'restricted_zone' | 'wrong_way';
   geofenceId: number | null;
 }
 
@@ -83,6 +86,12 @@ const MIN_SPEED_KMH_FOR_HEADING_TRUST = 3;
 
 // mas separadas que esto, dos muestras ya no describen la aceleracion actual
 const MAX_ACCEL_SAMPLE_GAP_S = 3;
+
+// Sentido contrario en una ruta autorizada de un solo sentido. Dos umbrales a proposito: el aviso
+// sale rapido para que el operador corrija, la infraccion solo si INSISTE - asi una maniobra de
+// acomodo o una reversa corta para librar algo nunca le deja registro encima.
+const WRONG_WAY_ALERT_MS = 3000;
+const WRONG_WAY_INFRACTION_MS = 20000;
 
 export interface LocalFixInput {
   latitude: number;
@@ -116,6 +125,11 @@ export function useLocalAlerts(
   const geofenceRef = useRef<OfflineGeofenceMatch | null>(null);
   // ultima muestra de velocidad, para derivar la aceleracion real
   const lastSpeedSampleRef = useRef<{ speedKmh: number; at: number } | null>(null);
+  // avance sobre la ruta autorizada actual, para poder derivar el sentido entre muestras
+  const routeFractionRef = useRef<{ geofenceId: number; fraction: number } | null>(null);
+  const wrongWaySinceRef = useRef<number | null>(null);
+  const wrongWayReportedRef = useRef(false);
+  const routeProgressRef = useRef<RouteProgress | null>(null);
   const categoryRef = useRef<VehicleCategory | null>(vehicleCategory);
   categoryRef.current = vehicleCategory;
   const speedSeverityRef = useRef<'warning' | 'danger' | null>(null);
@@ -304,6 +318,74 @@ export function useLocalAlerts(
       speedSeverityRef.current = speed.severity;
     }
 
+    // --- sentido de recorrido en ruta autorizada ---
+    const onRoute = locateOnAuthorizedRoute(fix.latitude, fix.longitude, geofencesRef.current);
+    if (!onRoute) {
+      // salir de la ruta limpia todo: el sentido solo significa algo yendo sobre ella
+      routeFractionRef.current = null;
+      wrongWaySinceRef.current = null;
+      wrongWayReportedRef.current = false;
+      routeProgressRef.current = null;
+    } else {
+      const prev = routeFractionRef.current;
+      const previousFraction = prev && prev.geofenceId === onRoute.geofence.id ? prev.fraction : null;
+      const progress = evaluateRouteDirection(onRoute.geofence, onRoute.location, previousFraction);
+      // null = todavia no se puede decidir (primera muestra o dentro de la zona muerta): se conserva
+      // el ultimo veredicto en vez de parpadear
+      if (progress) routeProgressRef.current = progress;
+      routeFractionRef.current = { geofenceId: onRoute.geofence.id, fraction: onRoute.location.fraction };
+
+      const current = routeProgressRef.current;
+      if (current?.wrongWay) {
+        if (wrongWaySinceRef.current === null) wrongWaySinceRef.current = sampleAt;
+      } else {
+        // volvio al sentido correcto - si ya se habia reportado, se cierra la infraccion abierta
+        if (wrongWayReportedRef.current && current) {
+          send({
+            kind: 'wrong_way',
+            state: 'cleared',
+            deviceId,
+            severity: 'warning',
+            message: `Retomó el sentido correcto en "${current.geofenceName}"`,
+            latitude: fix.latitude,
+            longitude: fix.longitude,
+            occurredAt: new Date().toISOString(),
+            geofenceId: current.geofenceId,
+            geofenceName: current.geofenceName,
+          });
+          wrongWayReportedRef.current = false;
+        }
+        wrongWaySinceRef.current = null;
+      }
+    }
+
+    const wrongWaySince = wrongWaySinceRef.current;
+    const wrongWayProgress = routeProgressRef.current;
+    const wrongWayActive =
+      wrongWaySince !== null && wrongWayProgress?.wrongWay === true && sampleAt - wrongWaySince >= WRONG_WAY_ALERT_MS;
+
+    if (
+      wrongWayActive &&
+      !wrongWayReportedRef.current &&
+      wrongWaySince !== null &&
+      sampleAt - wrongWaySince >= WRONG_WAY_INFRACTION_MS &&
+      wrongWayProgress
+    ) {
+      wrongWayReportedRef.current = true;
+      send({
+        kind: 'wrong_way',
+        state: 'raised',
+        deviceId,
+        severity: 'danger',
+        message: `SENTIDO CONTRARIO sostenido en "${wrongWayProgress.geofenceName}"`,
+        latitude: fix.latitude,
+        longitude: fix.longitude,
+        occurredAt: new Date().toISOString(),
+        geofenceId: wrongWayProgress.geofenceId,
+        geofenceName: wrongWayProgress.geofenceName,
+      });
+    }
+
     // --- se arma la lista completa de condiciones activas, sin elegir un solo ganador ---
     // (antes esto era pickAlert(), que se quedaba con una sola) - el orden aqui no importa, quien
     // consume esto (OperatorApp.tsx) ordena por prioridad real via alertPriority.ts
@@ -326,6 +408,14 @@ export function useLocalAlerts(
     }
     if (speed.severity) {
       nextAlerts.push({ severity: speed.severity, message: speed.message, source: 'speed', geofenceId: null });
+    }
+    if (wrongWayActive && wrongWayProgress) {
+      nextAlerts.push({
+        severity: wrongWayReportedRef.current ? 'danger' : 'warning',
+        message: `SENTIDO CONTRARIO - "${wrongWayProgress.geofenceName}" es de un solo sentido`,
+        source: 'wrong_way',
+        geofenceId: wrongWayProgress.geofenceId,
+      });
     }
     // aviso temprano: el circulo de precision GPS ya toca el borde de una zona de atencion, aunque
     // ni el punto ni la silueta real todavia (solo circulo/poligono relleno - ver

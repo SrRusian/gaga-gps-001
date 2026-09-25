@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 127,
-      "versionName": "1.1.11-config-diff-confirm",
+      "versionCode": 130,
+      "versionName": "1.1.14-directional-routes",
       "outputFile": "app-release.apk"
     }
   ],

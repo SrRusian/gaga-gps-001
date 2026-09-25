@@ -174,6 +174,57 @@ function distanceToPathMeters(lat: number, lon: number, path: number[][]): numbe
   return best;
 }
 
+// Equivalente local de ST_LineLocatePoint + ST_Distance: proyecta el punto sobre cada segmento de
+// la ruta, se queda con el mas cercano, y devuelve que tan avanzado va (0 = primer punto de la
+// linea, 1 = ultimo) junto con la distancia perpendicular. Que la fraccion exista es lo que permite
+// hablar de "sentido" sin geometria extra: la polilinea ya viene ordenada.
+export interface PathLocation {
+  fraction: number;
+  distanceMeters: number;
+}
+
+export function locateOnPath(lat: number, lon: number, path: number[][]): PathLocation | null {
+  if (path.length < 2) return null;
+
+  // longitudes acumuladas para poder convertir "avance dentro del segmento i" en fraccion total
+  const segmentLengths: number[] = [];
+  let total = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const len = haversineMeters(path[i][1], path[i][0], path[i + 1][1], path[i + 1][0]);
+    segmentLengths.push(len);
+    total += len;
+  }
+  if (total === 0) return null;
+
+  let best: PathLocation | null = null;
+  let travelled = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const p = localMeters(lat, lon, lat);
+    const a = localMeters(path[i][1], path[i][0], lat);
+    const b = localMeters(path[i + 1][1], path[i + 1][0], lat);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lengthSq = dx * dx + dy * dy;
+    let t = lengthSq === 0 ? 0 : ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq;
+    t = Math.max(0, Math.min(1, t));
+    const distance = Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+    if (!best || distance < best.distanceMeters) {
+      best = { fraction: (travelled + t * segmentLengths[i]) / total, distanceMeters: distance };
+    }
+    travelled += segmentLengths[i];
+  }
+  return best;
+}
+
+// longitud total de la ruta, para poder decir cuanto falta para llegar al final
+export function pathLengthMeters(path: number[][]): number {
+  let total = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    total += haversineMeters(path[i][1], path[i][0], path[i + 1][1], path[i + 1][0]);
+  }
+  return total;
+}
+
 // ray casting sobre el anillo exterior, con los agujeros restando (mismo criterio que ST_Contains)
 export function pointInPolygon(lat: number, lon: number, rings: number[][][]): boolean {
   if (rings.length === 0) return false;
@@ -411,4 +462,78 @@ export function isInsideAllowedZone(lat: number, lon: number, geofences: Geofenc
 // ruta autorizada) y el operador debe ver el transito de las dos, no solo una.
 export function matchedInformativeGeofences(lat: number, lon: number, geofences: Geofence[]): Geofence[] {
   return geofences.filter((g) => !ATTENTION_GEOFENCE_TYPES.has(g.type) && isTriggered(lat, lon, g));
+}
+
+// --- Sentido de recorrido en rutas autorizadas ---
+// Corre 100% en la tableta, tambien sin conexion. El criterio es el MISMO que ya usa
+// CollisionRiskService del lado servidor (delta de fraccion con zona muerta) - deliberadamente
+// duplicado, mismo motivo que el resto de este archivo: shared-types no puede exportar logica.
+//
+// Se decide por avance a lo largo de la linea y NO por el rumbo GPS: el rumbo es poco confiable a
+// baja velocidad (ver MIN_SPEED_KMH_FOR_HEADING_TRUST) y en una ruta con curvas apuntaria "mal"
+// en cada vuelta aunque el vehiculo vaya perfecto.
+export const ROUTE_FRACTION_DEADBAND = 0.0015;
+
+export interface RouteProgress {
+  geofenceId: number;
+  geofenceName: string;
+  fraction: number;
+  // metros que faltan para llegar al final de la ruta en el sentido permitido - la base del
+  // sistema de guiado que viene despues
+  remainingMeters: number;
+  wrongWay: boolean;
+}
+
+// ruta autorizada que contiene al vehiculo ahora mismo, con su avance. null si no va sobre ninguna.
+export function locateOnAuthorizedRoute(
+  lat: number,
+  lon: number,
+  geofences: Geofence[],
+): { geofence: Geofence; location: PathLocation } | null {
+  let best: { geofence: Geofence; location: PathLocation } | null = null;
+  for (const geofence of geofences) {
+    if (geofence.type !== 'authorized_route' || geofence.shapeType !== 'polyline') continue;
+    const path = geofence.geometry?.coordinates;
+    if (!path || path.length < 2) continue;
+    const location = locateOnPath(lat, lon, path);
+    if (!location) continue;
+    // fuera del corredor no cuenta como "ir por esa ruta"
+    if (location.distanceMeters > (geofence.corridorWidthMeters ?? 0)) continue;
+    if (!best || location.distanceMeters < best.location.distanceMeters) {
+      best = { geofence, location };
+    }
+  }
+  return best;
+}
+
+// Compara el avance actual contra el anterior. Devuelve null cuando todavia no se puede decidir
+// (primera muestra, o movimiento dentro de la zona muerta) para que quien llame conserve el ultimo
+// veredicto en vez de parpadear.
+export function evaluateRouteDirection(
+  geofence: Geofence,
+  location: PathLocation,
+  previousFraction: number | null,
+): RouteProgress | null {
+  if (geofence.shapeType !== 'polyline') return null;
+  const direction = geofence.routeDirection ?? 'both';
+  const path = geofence.geometry?.coordinates ?? [];
+  const totalMeters = pathLengthMeters(path);
+
+  // 'forward' avanza hacia fraccion 1, 'backward' hacia 0 - lo que falta se mide hacia ese extremo
+  const remainingMeters =
+    direction === 'backward' ? location.fraction * totalMeters : (1 - location.fraction) * totalMeters;
+
+  const base: RouteProgress = {
+    geofenceId: geofence.id,
+    geofenceName: geofence.name,
+    fraction: location.fraction,
+    remainingMeters,
+    wrongWay: false,
+  };
+
+  if (direction === 'both' || previousFraction === null) return base;
+  const delta = location.fraction - previousFraction;
+  if (Math.abs(delta) <= ROUTE_FRACTION_DEADBAND) return null; // ruido, no un sentido real
+  const movingForward = delta > 0;
+  return { ...base, wrongWay: direction === 'forward' ? !movingForward : movingForward };
 }

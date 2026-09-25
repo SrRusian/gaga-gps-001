@@ -17,6 +17,9 @@ const VALID_SEVERITIES = new Set(['info', 'warning', 'danger']);
 // de peligro real, es un limite operativo. Mismo valor que RESTRICTED_ZONE_INFRACTION_SEVERITY en
 // GeofenceAlertService.ts (duplicado a proposito, ese codigo ya no corre en produccion pero se deja
 // como referencia canonica - ver evaluateRestrictedZone)
+// circular por el sentido equivocado en una via de un solo sentido: gravedad alta pero por debajo
+// de tocar una zona de peligro real - el operador puede corregirlo saliendose de la ruta
+const WRONG_WAY_INFRACTION_SEVERITY = 7;
 const RESTRICTED_ZONE_INFRACTION_SEVERITY = 7;
 
 // gravedad de la infraccion por exceso: misma escala que utils/infractionSeverity.ts del backend
@@ -114,7 +117,7 @@ export function buildDeviceEventsRouter({
     const occurredAt = new Date(String(event?.occurredAt));
 
     if (!VALID_SEVERITIES.has(severity)) return false;
-    if (kind !== 'geofence' && kind !== 'speed' && kind !== 'restricted_zone') return false;
+    if (kind !== 'geofence' && kind !== 'speed' && kind !== 'restricted_zone' && kind !== 'wrong_way') return false;
     if (Number.isNaN(occurredAt.getTime())) return false;
 
     // compatibilidad hacia atras: si algun evento geofence/speed sigue trayendo este campo
@@ -124,6 +127,9 @@ export function buildDeviceEventsRouter({
 
     const device = await deviceRepo.findByUniqueId(deviceId);
     const projectId = device?.project_id ?? null;
+    // wrong_way comparte alert_type 'geofence' (el evento SIEMPRE trae su geofenceId, asi que el
+    // historial nunca queda ambiguo) pero mensaje e infraccion propios - agregar un alert_type
+    // nuevo exigiria migrar el CHECK de alert_events sin ganar nada aqui
     const alertType = kind === 'speed' ? 'speed' : kind === 'restricted_zone' ? 'restricted_zone' : 'geofence';
     const message = event?.message ? String(event.message) : null;
 
@@ -176,10 +182,14 @@ export function buildDeviceEventsRouter({
       // exclusiva del registro permanente, donde antes se veia identica en cada fila y no distinguia
       // a que geocerca en particular se referia cada infraccion (bug real reportado con captura:
       // el historial mostraba la misma frase generica repetida sin decir si entro/salio ni cual zona)
-      const geofenceName = kind === 'geofence' && event.geofenceName ? String(event.geofenceName) : null;
-      const infractionMessage = geofenceName
-        ? `Entró a "${geofenceName}" - ${message ?? 'Infracción reportada por el dispositivo'}`
-        : (message ?? 'Infracción reportada por el dispositivo');
+      const geofenceName = event.geofenceName ? String(event.geofenceName) : null;
+      const fallbackMessage = message ?? 'Infracción reportada por el dispositivo';
+      const infractionMessage =
+        kind === 'wrong_way' && geofenceName
+          ? `Sentido contrario sostenido en "${geofenceName}" - ${fallbackMessage}`
+          : kind === 'geofence' && geofenceName
+            ? `Entró a "${geofenceName}" - ${fallbackMessage}`
+            : fallbackMessage;
       await infractionRepo.create({
         projectId,
         deviceId,
@@ -192,7 +202,9 @@ export function buildDeviceEventsRouter({
             ? speedInfractionSeverity(speedKmh, limitKmh)
             : kind === 'restricted_zone'
               ? RESTRICTED_ZONE_INFRACTION_SEVERITY
-              : 8,
+              : kind === 'wrong_way'
+                ? WRONG_WAY_INFRACTION_SEVERITY
+                : 8,
         occurredAt,
         metadata: { reportedByDevice: true, ...pickMetadata(event) },
       });

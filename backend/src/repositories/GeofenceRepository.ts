@@ -1,4 +1,4 @@
-import type { Geofence, GeofenceShapeType, GeofenceType } from '@gaga-gps/shared-types';
+import type { Geofence, GeofenceShapeType, GeofenceType, RouteDirection } from '@gaga-gps/shared-types';
 import type { LineString, Polygon } from 'geojson';
 import { query } from '../config/database';
 import type { GeofenceRow } from '../utils/geoFormats';
@@ -16,6 +16,7 @@ export interface CreateGeofenceParams {
   speedLimitKmh?: number;
   filled?: boolean;
   stayInside?: boolean;
+  routeDirection?: RouteDirection;
 }
 
 export interface UpdateGeofenceParams {
@@ -30,6 +31,7 @@ export interface UpdateGeofenceParams {
   speedLimitKmh?: number | null;
   filled?: boolean;
   stayInside?: boolean;
+  routeDirection?: RouteDirection;
 }
 
 // solo lo que GeofenceAlertService realmente consume - la severidad/mensaje siempre los decide el
@@ -256,12 +258,13 @@ class GeofenceRepository {
     speedLimitKmh,
     filled,
     stayInside,
+    routeDirection,
   }: CreateGeofenceParams): Promise<GeofenceRow> {
     try {
       const { rows } = await query<GeofenceRow>(
         `INSERT INTO geofences
-           (name, project_id, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, speed_limit_kmh, filled, stay_inside, geog)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+           (name, project_id, type, shape_type, center_lat, center_lon, radius_meters, geometry, corridor_width_meters, speed_limit_kmh, filled, stay_inside, route_direction, geog)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$15,
            CASE $13
              WHEN 'circle' THEN ST_SetSRID(ST_MakePoint($6, $5), 4326)::geography
              ELSE ST_GeomFromGeoJSON($14)::geography
@@ -283,6 +286,7 @@ class GeofenceRepository {
           // duplican $4/$8 - mismo placeholder en dos contextos de tipo distinto confunde a pg
           shapeType,
           geometry ? JSON.stringify(geometry) : null,
+          routeDirection ?? 'both',
         ],
       );
       return rows[0];
@@ -297,6 +301,7 @@ class GeofenceRepository {
       name,
       type,
       active,
+      routeDirection,
       centerLat,
       centerLon,
       radiusMeters,
@@ -341,6 +346,10 @@ class GeofenceRepository {
     if (stayInside !== undefined) {
       values.push(stayInside);
       sets.push(`stay_inside = $${values.length}`);
+    }
+    if (routeDirection !== undefined) {
+      values.push(routeDirection);
+      sets.push(`route_direction = $${values.length}`);
     }
     if (speedLimitKmh !== undefined) {
       values.push(speedLimitKmh);
@@ -412,6 +421,7 @@ class GeofenceRepository {
         geometry: row.geometry as import('geojson').LineString,
         corridorWidthMeters: row.corridor_width_meters as number,
         stayInside: row.stay_inside,
+        routeDirection: row.route_direction ?? 'both',
       };
     }
     return {
