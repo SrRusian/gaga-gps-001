@@ -12,9 +12,14 @@ export interface DeviceGeolocation {
   timestamp: number;
 }
 
+// maximumAge=0 (nunca un fix cacheado) - con 2000 el navegador podía reentregar la misma lectura
+// hasta 2s de antigua en llamadas sucesivas de watchPosition, lo cual se sentía como una alarma de
+// velocidad "tarda en encender" (el valor mostrado/evaluado se quedaba atrás de la velocidad real
+// por hasta 2s). Sin costo real: el watch ya pide continuamente con enableHighAccuracy, esto solo
+// evita que reuse una lectura vieja cuando sí hay una fresca disponible.
 const WATCH_OPTIONS: PositionOptions = {
   enableHighAccuracy: true,
-  maximumAge: 2000,
+  maximumAge: 0,
   timeout: 10000,
 };
 

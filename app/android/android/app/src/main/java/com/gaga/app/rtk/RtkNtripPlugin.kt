@@ -498,6 +498,84 @@ class RtkNtripPlugin : Plugin() {
         if (bt.isConnected()) bt.write(bytes)
     }
 
+    // Aplica de un solo golpe, desde la tableta, el aprovisionamiento que hasta ahora requeria una
+    // PC con u-center (ver UbxConfig.kt y README "Aprovisionamiento de un receptor RTK nuevo") - por
+    // USB (bench, receptor recien llegado) o por Bluetooth (HC-05 ya vinculado, receptor ya en el
+    // vehiculo), el que este vivo. Sin ninguno conectado no hay a donde mandarlo - se rechaza en vez
+    // de fallar en silencio, a diferencia de writeToReceiver() (pensado para RTCM, donde perder un
+    // paquete suelto no importa; aqui sí importa que la persona sepa que no se aplico nada).
+    @PluginMethod
+    fun sendReceiverProvisioning(call: PluginCall) {
+        if (!usb.isConnected() && !bt.isConnected()) {
+            return call.reject("Sin receptor conectado por USB o Bluetooth")
+        }
+        // msgRates: mismo patron ya probado en TraccarSenderPlugin.saveServers() - JSArray de
+        // objetos en vez de parametros planos, mas manejable para una lista variable (hasta 7
+        // mensajes x 3 puertos = 21 entradas) que 42 parametros sueltos
+        val msgRatesInput = call.getArray("msgRates") ?: JSArray()
+        val msgRates = (0 until msgRatesInput.length()).map { i ->
+            val o = msgRatesInput.getJSONObject(i)
+            UbxConfig.MsgRateEntry(
+                message = o.getString("message"),
+                port = o.getString("port"),
+                on = o.optBoolean("on", false),
+                value = o.optInt("value", 1),
+            )
+        }
+        val frame = UbxConfig.buildF9pAutoProvisioning(
+            measRateMs = call.getInt("measRateMs") ?: 100,
+            navRateCyc = call.getInt("navRateCyc") ?: 1,
+            timeRef = call.getInt("timeRef") ?: 1,
+            dynModel = call.getInt("dynModel") ?: 4,
+            highPrecision = call.getBoolean("highPrecision", true) ?: true,
+            qzssEnabled = call.getBoolean("qzssEnabled", false) ?: false,
+            portTarget = call.getString("portTarget") ?: "UART2",
+            portBaudRate = call.getInt("portBaudRate") ?: 115200,
+            portDatabits = call.getInt("portDatabits") ?: 0,
+            portStopbits = call.getInt("portStopbits") ?: 1,
+            portParity = call.getInt("portParity") ?: 0,
+            portI2cAddress = call.getInt("portI2cAddress") ?: 66,
+            portSpiCpol = call.getBoolean("portSpiCpol", false) ?: false,
+            portSpiCpha = call.getBoolean("portSpiCpha", false) ?: false,
+            portProtocolInUbx = call.getBoolean("portProtocolInUbx", true) ?: true,
+            portProtocolInNmea = call.getBoolean("portProtocolInNmea", true) ?: true,
+            portProtocolInRtcm3x = call.getBoolean("portProtocolInRtcm3x", true) ?: true,
+            portProtocolInSpartn = call.getBoolean("portProtocolInSpartn", false) ?: false,
+            portProtocolOutUbx = call.getBoolean("portProtocolOutUbx", false) ?: false,
+            portProtocolOutNmea = call.getBoolean("portProtocolOutNmea", true) ?: true,
+            portProtocolOutRtcm3x = call.getBoolean("portProtocolOutRtcm3x", false) ?: false,
+            // la web siempre manda las 21 combinaciones (7 mensajes x 3 puertos) - un array vacio
+            // solo pasaria si alguien llama al plugin sin pasar msgRates en absoluto, en cuyo caso
+            // el default del propio buildF9pAutoProvisioning() (GGA/RMC/GLL/GSA/GSV/VTG/GST a 1Hz
+            // por UART2, mismo valor que tenia fijo este archivo antes de esta ronda) aplica solo
+            msgRates = msgRates.ifEmpty { UbxConfig.DEFAULT_MSG_RATES },
+            // vista NMEA (CFG-NMEA-DATA2) - defaults iguales a los del propio buildF9pAutoProvisioning()
+            nmeaProtVer = call.getInt("nmeaProtVer") ?: 42,
+            nmeaMaxSvs = call.getInt("nmeaMaxSvs") ?: 0,
+            nmeaCompat = call.getBoolean("nmeaCompat", false) ?: false,
+            nmeaConsider = call.getBoolean("nmeaConsider", true) ?: true,
+            nmeaLimit82 = call.getBoolean("nmeaLimit82", false) ?: false,
+            nmeaSvNumbering = call.getInt("nmeaSvNumbering") ?: 0,
+            nmeaFiltGps = call.getBoolean("nmeaFiltGps", false) ?: false,
+            nmeaFiltSbas = call.getBoolean("nmeaFiltSbas", false) ?: false,
+            nmeaFiltGal = call.getBoolean("nmeaFiltGal", false) ?: false,
+            nmeaFiltQzss = call.getBoolean("nmeaFiltQzss", false) ?: false,
+            nmeaFiltGlo = call.getBoolean("nmeaFiltGlo", false) ?: false,
+            nmeaFiltBds = call.getBoolean("nmeaFiltBds", false) ?: false,
+            nmeaOutInvFix = call.getBoolean("nmeaOutInvFix", false) ?: false,
+            nmeaOutMskFix = call.getBoolean("nmeaOutMskFix", false) ?: false,
+            nmeaOutInvTime = call.getBoolean("nmeaOutInvTime", false) ?: false,
+            nmeaOutInvDate = call.getBoolean("nmeaOutInvDate", false) ?: false,
+            nmeaOutOnlyGps = call.getBoolean("nmeaOutOnlyGps", false) ?: false,
+            nmeaOutFrozenCog = call.getBoolean("nmeaOutFrozenCog", false) ?: false,
+            nmeaMainTalkerId = call.getInt("nmeaMainTalkerId") ?: 0,
+            nmeaGsvTalkerId = call.getInt("nmeaGsvTalkerId") ?: 0,
+            nmeaBdsTalkerId = call.getString("nmeaBdsTalkerId") ?: "",
+        )
+        writeToReceiver(frame)
+        call.resolve()
+    }
+
     @PluginMethod
     fun startNtrip(call: PluginCall) {
         val config = RtkPrefs.getNtripConfig(context)

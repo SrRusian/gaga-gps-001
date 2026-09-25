@@ -428,6 +428,14 @@
   color: #e8eaed;
 }
 
+/* agrupa el boton de configuracion junto al de cerrar - ambos comparten .cfg-close, solo cambia el
+   icono/accion */
+.uc-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .cfg-header-status {
   display: block;
   font-size: 11px;
@@ -463,6 +471,43 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin: 0 0 8px;
+}
+
+/* primer caso real de <select>/<input> sueltos (no en .ds-modal/.ds-card) dentro de un .cfg-panel -
+   sin esto caen al estilo nativo blanco del navegador, ilegible sobre el tema oscuro */
+.cfg-panel input,
+.cfg-panel select {
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: #0b0d10;
+  border: 1px solid #262b33;
+  border-radius: 6px;
+  color: #e8eaed;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.cfg-panel input:focus,
+.cfg-panel select:focus {
+  outline: none;
+  border-color: #4f8ff0;
+}
+
+/* checkbox/radio NUNCA debe heredar el width:100% de arriba - dentro de un .ds-toggle-row (flex),
+   un checkbox con width:100% reclama todo el ancho de la fila como su flex-basis y el texto vecino
+   (ej. "UART1") se queda sin espacio y desaparece, no solo se ve raro - bug real encontrado con
+   captura, no solo estetico. */
+.cfg-panel input[type='checkbox'],
+.cfg-panel input[type='radio'] {
+  width: auto;
+  margin-bottom: 0;
+}
+
+/* dentro de .cfg-version-row (fila flex label+valor) el input es angosto via inline style y no
+   debe llevar el margen vertical de fila completa que sí necesita un select/input de ancho total */
+.cfg-version-row input {
+  margin-bottom: 0;
 }
 
 /* divisor de grupo - full width por defecto (bloque normal); grid-column solo hace falta dentro
@@ -1095,7 +1140,8 @@
   color: #e8eaed;
   margin-bottom: 14px;
 }
-.ds-modal input {
+.ds-modal input,
+.ds-modal select {
   width: 100%;
   padding: 9px 11px;
   margin-bottom: 10px;
@@ -1106,7 +1152,8 @@
   font-size: 13px;
   box-sizing: border-box;
 }
-.ds-modal input:focus {
+.ds-modal input:focus,
+.ds-modal select:focus {
   outline: none;
   border-color: #4f8ff0;
 }

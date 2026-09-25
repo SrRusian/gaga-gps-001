@@ -104,6 +104,11 @@ export interface ServerToClientEvents {
   // "actualizar ahora" pedido desde el panel de Sistema (ver app-update.routes.ts POST
   // /force-update) - solo lo recibe la tableta si su socket esta conectado en este momento
   'device:force_update': () => void;
+
+  // "el servidor le dice al dispositivo la regla, no al reves" - config que solo el servidor
+  // conoce (hoy: si debe permanecer dentro de una zona permitida). Llega al conectar (justo
+  // despues de device:hello) y en cuanto un admin la cambia - ver FleetSocketServer/devices.routes.ts
+  'device:config': (payload: { restrictedToAllowedZone: boolean }) => void;
 }
 
 export interface DeviceHelloPayload {

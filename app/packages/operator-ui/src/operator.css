@@ -158,31 +158,58 @@
   color: #0b0d10;
 }
 
-/* aviso silencioso de proximidad - discreto a propósito (badge chico, sin pulsar, sin sonido),
-   deliberadamente distinto de #op-alert-overlay/#op-alert-message (esos sí son la alerta real) */
-.op-proximity-notice {
+/* contenedor de avisos NO críticos (proximidad silenciosa + conectividad de otro vehículo) -
+   discretos a propósito (badge chico, sin pulsar, sin sonido en el caso de red), deliberadamente
+   distintos de #op-alert-overlay/#op-alert-message (esos sí son la alerta real de ESTE vehículo) */
+.op-notice-stack {
   position: absolute;
   top: 60px;
   left: 12px;
   right: 12px;
   z-index: 9;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.op-proximity-notice,
+.op-network-notice {
+  display: flex;
   align-items: center;
   gap: 8px;
   background: rgba(20, 23, 28, 0.92);
-  border: 1px solid var(--op-warning);
   border-radius: 8px;
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 500;
   color: var(--op-text);
 }
-.op-proximity-notice-dot {
+.op-proximity-notice {
+  border: 1px solid var(--op-warning);
+}
+.op-proximity-notice-dot,
+.op-network-notice-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--op-warning);
   flex-shrink: 0;
+}
+.op-proximity-notice-dot {
+  background: var(--op-warning);
+}
+/* aviso de que OTRO vehículo perdió/recuperó señal (canal separado a propósito del overlay
+   principal - ver NetworkNotice en useOperatorSocket.ts). Color por severidad, igual que el
+   overlay real, pero nunca pulsa ni roba el sonido de una alerta propia */
+.op-network-notice--warning {
+  border: 1px solid var(--op-warning);
+}
+.op-network-notice--danger {
+  border: 1px solid var(--op-danger);
+}
+.op-network-notice--warning .op-network-notice-dot {
+  background: var(--op-warning);
+}
+.op-network-notice--danger .op-network-notice-dot {
+  background: var(--op-danger);
 }
 
 .op-floating-actions {

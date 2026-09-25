@@ -105,6 +105,7 @@ describe('GeofenceAlertService', () => {
     findMatchingSpatial = vi.fn<FindMatchingSpatial>().mockResolvedValue([]);
     service = new GeofenceAlertService({
       evaluateAreaAlerts: true,
+      evaluateRestrictedZone: true,
       geofenceRepo: { findMatchingSpatial },
       socketServer,
     });
@@ -437,7 +438,8 @@ describe('GeofenceAlertService', () => {
     it('un dispositivo RESTRINGIDO genera alert:critical + infraccion al salir de "allowed"', async () => {
       const create = vi.fn().mockResolvedValue(undefined);
       const withRepo = new GeofenceAlertService({
-      evaluateAreaAlerts: true,
+        evaluateAreaAlerts: true,
+        evaluateRestrictedZone: true,
         geofenceRepo: {
           findMatchingSpatial: vi
             .fn()
@@ -466,7 +468,8 @@ describe('GeofenceAlertService', () => {
 
     it('un dispositivo RESTRINGIDO recibe alert:clear al regresar a "allowed"', async () => {
       const withRepo = new GeofenceAlertService({
-      evaluateAreaAlerts: true,
+        evaluateAreaAlerts: true,
+        evaluateRestrictedZone: true,
         geofenceRepo: {
           findMatchingSpatial: vi
             .fn()
@@ -490,15 +493,26 @@ describe('GeofenceAlertService', () => {
       );
     });
 
-    it('no dispara nada si nunca estuvo dentro de "allowed" (sin importar restriccion)', async () => {
+    it('dispara la violacion desde la primera evaluacion si un dispositivo restringido ya esta afuera (bug real corregido 25 sep - antes solo disparaba en una transicion adentro->afuera)', async () => {
       findMatchingSpatial.mockResolvedValue([]);
       await service.evaluate({ ...pos(), restrictedToAllowedZone: true });
+      expect(socketServer.broadcastToProject).toHaveBeenCalledWith(
+        7,
+        'alert:critical',
+        expect.objectContaining({ type: 'restricted_zone_violation' }),
+      );
+    });
+
+    it('sin restriccion no dispara nada aunque nunca haya estado dentro de "allowed"', async () => {
+      findMatchingSpatial.mockResolvedValue([]);
+      await service.evaluate(pos());
       expect(socketServer.broadcastToProject).not.toHaveBeenCalled();
     });
 
     it('no re-emite la alerta en cada tick posterior fuera de la zona (restringido)', async () => {
       const withRepo = new GeofenceAlertService({
-      evaluateAreaAlerts: true,
+        evaluateAreaAlerts: true,
+        evaluateRestrictedZone: true,
         geofenceRepo: {
           findMatchingSpatial: vi
             .fn()

@@ -34,7 +34,7 @@ import {
   type ServerProfile,
 } from '@gaga-gps/client';
 import { useEffect, useState } from 'react';
-import { UCenterView } from './UCenterView';
+import { UCenterView, type ReceiverProvisioningOptions } from './UCenterView';
 import './device-settings.css';
 import {
   deleteNtripProfile,
@@ -676,6 +676,39 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
     }
   }
 
+  // aplica de un solo golpe (UBX-CFG-VALSET, ver UbxConfig.kt) lo que hasta ahora requeria una PC
+  // con u-center conectada por USB - README "Aprovisionamiento de un receptor RTK nuevo", pasos 4 y
+  // 5. Requiere el receptor ya conectado (USB o Bluetooth) - RtkNtrip.sendReceiverProvisioning()
+  // rechaza si no hay ninguno.
+  const [provisioningBusy, setProvisioningBusy] = useState(false);
+  const [provisioningMessage, setProvisioningMessage] = useState('');
+  const [provisioningError, setProvisioningError] = useState('');
+
+  async function applyReceiverProvisioning(options: ReceiverProvisioningOptions) {
+    const confirmed = confirm(
+      `Esto reconfigura el receptor RTK con los valores elegidos (periodo de medicion ` +
+        `${options.measRateMs}ms, tasa de navegacion ${options.navRateCyc} ciclo(s), modelo ` +
+        `dinamico ${options.dynModel}, ${options.highPrecision ? 'alta precision NMEA' : 'precision NMEA normal'}, ` +
+        `QZSS ${options.qzssEnabled ? 'activado' : 'desactivado'}, puerto ${options.portTarget}` +
+        `${options.portTarget === 'USB' ? '' : ` a ${options.portBaudRate} baudios`}) y lo guarda en ` +
+        'la memoria del receptor de una vez. Necesita el receptor conectado ahora mismo (USB o Bluetooth).\n\n¿Continuar?',
+    );
+    if (!confirmed) return;
+    setProvisioningBusy(true);
+    setProvisioningError('');
+    setProvisioningMessage('');
+    try {
+      await RtkNtrip.sendReceiverProvisioning(options);
+      setProvisioningMessage(
+        'Enviado. Verifica en el panel Data: la posicion debe traer 7 decimales y actualizarse unas 10 veces por segundo.',
+      );
+    } catch (e) {
+      setProvisioningError(e instanceof Error ? e.message : 'No se pudo aplicar la configuracion');
+    } finally {
+      setProvisioningBusy(false);
+    }
+  }
+
   async function handleActivateOperatorMode() {
     if (operatorModeCodeInput.trim() !== OPERATOR_MODE_CODE) {
       setOperatorModeError('Codigo incorrecto');
@@ -1068,6 +1101,12 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
                       onFetchFromServer: fetchNtripFromServer,
                       fetchFromServerBusy: ntripFetchBusy,
                       fetchFromServerError: ntripFetchError,
+                    }}
+                    provisioning={{
+                      onApply: applyReceiverProvisioning,
+                      busy: provisioningBusy,
+                      message: provisioningMessage,
+                      error: provisioningError,
                     }}
                   />
                 )}

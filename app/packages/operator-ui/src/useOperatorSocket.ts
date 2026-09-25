@@ -10,7 +10,13 @@ import type {
 import type { EquipmentMarkerData } from '@gaga-gps/map-core';
 import { useEffect, useRef, useState } from 'react';
 import { useAlertSound } from './useAlertSound';
-import { cacheGeofences, loadCachedGeofences } from './offlineStore';
+import {
+  cacheGeofences,
+  cacheRestrictedToAllowedZone,
+  loadCachedGeofences,
+  loadCachedRestrictedToAllowedZone,
+  loadGeofencesReady,
+} from './offlineStore';
 
 function toMarkerData(eq: StaticEquipment): EquipmentMarkerData {
   return {
@@ -57,6 +63,19 @@ export interface ProximityNotice {
   message: string;
 }
 
+// aviso de conectividad de OTRO vehiculo (senal perdida/recuperada de un tercero) - separado a
+// proposito del slot `alert` de arriba. Bug real reportado: el mismo evento signal:lost:levelX que
+// el backend manda en tercera persona a todo el proyecto ("VEHICULO X SIN SEÑAL") se procesaba
+// aqui sin filtrar por deviceId, así que sobreescribia (visualmente Y en el sonido - useAlertSound
+// corta cualquier sonido en curso antes de tocar uno nuevo) una alerta real y propia que ya
+// estuviera en pantalla/sonando. Este es solo un aviso de precaucion sobre alguien mas - nunca debe
+// competir con el overlay/sonido de un peligro real de ESTE vehiculo
+export interface NetworkNotice {
+  severity: 'warning' | 'danger';
+  message: string;
+  deviceId: string;
+}
+
 // mismos umbrales que SignalLostService del backend (5s/15s) - no es codigo compartido, es el mismo
 // criterio a proposito: el operador se entera de que perdio conexion al mismo tiempo que el resto
 // del proyecto. Ademas, estando sin red este vigilante local es el UNICO que puede aplicarle el
@@ -71,6 +90,15 @@ export function useOperatorSocket(deviceId: string | null) {
   // ya dibujadas y evaluables aunque arranque sin red (pedido explicito: el Operador debe poder
   // operar sin restricciones sin conexion)
   const [geofences, setGeofences] = useState<Geofence[]>(() => loadCachedGeofences());
+  // ver offlineStore.ts - distingue "nunca llego un geofences:update real" de "llego y esta vacio"
+  const [geofencesReady, setGeofencesReady] = useState(() => loadGeofencesReady());
+  // "el servidor le dice al dispositivo la regla, no al reves" - se hidrata del cache local igual
+  // que las geocercas (funciona sin red desde el arranque) y se actualiza via device:config, que
+  // llega al conectar y en cuanto un admin cambia el valor (ver useLocalAlerts.ts, que la usa para
+  // evaluar la violacion 100% local)
+  const [restrictedToAllowedZone, setRestrictedToAllowedZone] = useState(() =>
+    loadCachedRestrictedToAllowedZone(),
+  );
   const [equipment, setEquipment] = useState<EquipmentMarkerData[]>([]);
   const [activeMaps, setActiveMaps] = useState<ActiveMap[]>([]);
   const [myPosition, setMyPosition] = useState<Position | null>(null);
@@ -82,6 +110,7 @@ export function useOperatorSocket(deviceId: string | null) {
   const [activeGeofenceId, setActiveGeofenceId] = useState<number | null>(null);
   const [incidents, setIncidents] = useState<Record<number, IncidentReportedPayload>>({});
   const [proximityNotice, setProximityNotice] = useState<ProximityNotice | null>(null);
+  const [networkNotice, setNetworkNotice] = useState<NetworkNotice | null>(null);
   const { playWarningSound, playDangerSound, stopSound } = useAlertSound();
   const soundsRef = useRef({ playWarningSound, playDangerSound, stopSound });
   soundsRef.current = { playWarningSound, playDangerSound, stopSound };
@@ -99,6 +128,13 @@ export function useOperatorSocket(deviceId: string | null) {
     const showDanger = (message: string) => setAlert({ severity: 'danger', message });
     const showInfo = (message: string) => setAlert({ severity: 'info', message });
     const clearAlertState = () => setAlert({ severity: null, message: '' });
+    // colision/proximidad se emiten SIN filtro de proyecto en el backend (gap de aislamiento ya
+    // documentado, io.emit global) - sin este chequeo, cualquier par de vehiculos en TODO el
+    // sistema podia hijackear el overlay/sonido de este operador. deviceId1/deviceId2 llegan como
+    // number en CollisionPayload (typo historico, en runtime son strings) - String() normaliza los
+    // dos casos con la misma funcion
+    const involvesMe = (a: string | number, b: string | number) =>
+      String(a) === deviceId || String(b) === deviceId;
 
     socket.on('connect', () => {
       setConnected(true);
@@ -127,7 +163,13 @@ export function useOperatorSocket(deviceId: string | null) {
     socket.on('maps:active_update', ({ maps }) => setActiveMaps(maps));
     socket.on('geofences:update', (gs) => {
       setGeofences(gs);
+      setGeofencesReady(true);
       cacheGeofences(gs); // sobreviven a cerrar la app y a quedarse sin red
+    });
+    socket.on('device:config', (data: { restrictedToAllowedZone?: boolean }) => {
+      if (typeof data.restrictedToAllowedZone !== 'boolean') return;
+      setRestrictedToAllowedZone(data.restrictedToAllowedZone);
+      cacheRestrictedToAllowedZone(data.restrictedToAllowedZone);
     });
     socket.on('equipment:update', (eqs: StaticEquipment[]) => setEquipment(eqs.map(toMarkerData)));
 
@@ -195,33 +237,55 @@ export function useOperatorSocket(deviceId: string | null) {
     socket.on('route:distance_clear', () => setNearestOnRoute(null));
 
     // el backend ya decide el mensaje segun la audiencia (SignalLostService.ts): al propio
-    // vehiculo afectado le llega en primera persona via un evento dirigido solo a el, al resto del
-    // proyecto en tercera persona ("VEHICULO X SIN SEÑAL") por seguridad - aqui solo se muestra
-    // el que de verdad llego, sin filtrar de nuevo
+    // vehiculo afectado le llega en primera persona via un evento dirigido solo a el (sendToDevice),
+    // al resto del proyecto en tercera persona ("VEHICULO X SIN SEÑAL") por seguridad
+    // (broadcastToProjectExceptDevice) - MISMO nombre de evento en los dos casos. Bug real: antes
+    // esto se mostraba siempre en el overlay/sonido principal sin distinguir de quien se trataba, asi
+    // que el aviso de que un vehiculo AJENO perdio señal podia tapar (visual y auditivamente) una
+    // alerta real y propia. Ahora: si es sobre este vehiculo, sigue siendo el overlay/sonido
+    // principal de siempre (es un peligro real para mi); si es sobre otro, va al canal de aviso de
+    // red (silencioso, banner aparte) - ver NetworkNotice arriba
     socket.on('signal:lost:level1', (data) => {
-      showWarning(data.message);
-      soundsRef.current.playWarningSound();
+      if (data.deviceId === deviceId) {
+        showWarning(data.message);
+        soundsRef.current.playWarningSound();
+      } else {
+        setNetworkNotice({ severity: 'warning', message: data.message, deviceId: data.deviceId });
+      }
     });
     socket.on('signal:lost:level2', (data) => {
-      showDanger(data.message);
-      soundsRef.current.playDangerSound(data.loop);
+      if (data.deviceId === deviceId) {
+        showDanger(data.message);
+        soundsRef.current.playDangerSound(data.loop);
+      } else {
+        setNetworkNotice({ severity: 'danger', message: data.message, deviceId: data.deviceId });
+      }
     });
-    socket.on('signal:recovered', () => {
-      clearAlertState();
-      soundsRef.current.stopSound();
+    socket.on('signal:recovered', (data) => {
+      if (data.deviceId === deviceId) {
+        clearAlertState();
+        soundsRef.current.stopSound();
+      } else {
+        // solo limpia si el aviso activo es justo de ESE vehiculo - la recuperacion de uno no debe
+        // borrar un aviso de red vigente sobre otro vehiculo distinto todavia caido
+        setNetworkNotice((prev) => (prev?.deviceId === data.deviceId ? null : prev));
+      }
     });
 
     socket.on('collision:proximity', (data) => {
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
       showWarning(data.message);
       soundsRef.current.playWarningSound();
     });
     socket.on('collision:critical', (data) => {
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
       showDanger(data.message);
       soundsRef.current.playDangerSound(data.loop);
       const otherId = String(data.deviceId1) === deviceId ? data.deviceId2 : data.deviceId1;
       setThreat({ deviceId: String(otherId), distance: data.distance });
     });
-    socket.on('collision:clear', () => {
+    socket.on('collision:clear', (data) => {
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
       clearAlertState();
       soundsRef.current.stopSound();
       setThreat(null);
@@ -233,16 +297,19 @@ export function useOperatorSocket(deviceId: string | null) {
       }
     });
     socket.on('proximity:warning', (data) => {
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
       showWarning(data.message);
       soundsRef.current.playWarningSound();
     });
     socket.on('proximity:critical', (data) => {
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
       showDanger(data.message);
       soundsRef.current.playDangerSound(data.loop);
       const otherId = data.deviceId1 === deviceId ? data.deviceId2 : data.deviceId1;
       setThreat({ deviceId: otherId, distance: data.distance });
     });
-    socket.on('proximity:clear', () => {
+    socket.on('proximity:clear', (data) => {
+      if (!involvesMe(data.deviceId1, data.deviceId2)) return;
       clearAlertState();
       soundsRef.current.stopSound();
       setThreat(null);
@@ -385,6 +452,9 @@ export function useOperatorSocket(deviceId: string | null) {
     activeGeofenceId,
     incidents,
     proximityNotice,
+    networkNotice,
+    restrictedToAllowedZone,
+    geofencesReady,
     // la evaluacion local (useLocalAlerts) suena por su cuenta, compartiendo esta MISMA instancia:
     // dos useAlertSound distintos tendrian cada uno su propio bucle y ninguno podria callar al otro
     sounds: { playWarningSound, playDangerSound, stopSound },

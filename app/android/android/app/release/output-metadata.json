@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 90,
-      "versionName": "1.0.83-settings-manual-columns",
+      "versionCode": 118,
+      "versionName": "1.1.02-restricted-zone-empty-zones-fix",
       "outputFile": "app-release.apk"
     }
   ],

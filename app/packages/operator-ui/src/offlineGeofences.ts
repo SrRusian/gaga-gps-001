@@ -1,14 +1,14 @@
 import type { Geofence, GeofenceType } from '@gaga-gps/shared-types';
 
-// Evaluacion de geocercas del lado del cliente, SOLO para cuando no hay conexion. Mientras el
-// socket este conectado manda el backend sin excepcion (regla ya documentada: la alerta la decide
-// el servidor para que el HUD del operador y el panel de supervisor nunca disientan) - esto entra
-// unicamente como reemplazo mientras no hay servidor con quien coincidir.
+// Evaluacion de geocercas del lado del cliente - la tableta es la unica que decide, SIEMPRE, con o
+// sin conexion (ver useLocalAlerts.ts). El servidor solo notifica los cambios de geocerca en vivo
+// (geofences:update) y registra lo que la tableta ya decidio; nunca vuelve a evaluar geometria.
 //
 // Duplicacion deliberada de backend/src/services/alerts/GeofenceAlertService.ts (tablas de
-// severidad/texto) y del WHERE de GeofenceRepository.findMatchingSpatial (las 5 ramas de forma) -
-// shared-types no puede exportar valores reales, mismo criterio que PositionFilterService y
-// GEOFENCE_COLORS. Si se cambia el criterio en el backend, replicar aqui.
+// severidad/texto, ya sin uso en produccion mas alla de referencia) y del WHERE de
+// GeofenceRepository.findMatchingSpatial (las 5 ramas de forma) - shared-types no puede exportar
+// valores reales, mismo criterio que PositionFilterService y GEOFENCE_COLORS. Si se cambia el
+// criterio, replicar aqui.
 
 const AREA_SEVERITY: Partial<Record<GeofenceType, 'warning' | 'danger' | 'info'>> = {
   danger: 'danger',
@@ -163,4 +163,12 @@ export function evaluateGeofencesOffline(
   }
 
   return best;
+}
+
+// "zona permitida" (allowed) es el limite operativo real (ej. contorno de la mina) - sin severidad
+// propia, asi que no pasa por evaluateGeofencesOffline. Se pregunta aparte, solo para dispositivos
+// restringidos (ver useLocalAlerts.ts) - mismo isTriggered que el resto, misma semantica que el
+// servidor (GeofenceAlertService.evaluate(), matches.find(g => g.type === 'allowed')).
+export function isInsideAllowedZone(lat: number, lon: number, geofences: Geofence[]): boolean {
+  return geofences.some((g) => g.type === 'allowed' && isTriggered(lat, lon, g));
 }

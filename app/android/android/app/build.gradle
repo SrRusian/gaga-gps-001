@@ -8,8 +8,8 @@ android {
         applicationId "com.gaga.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 90
-        versionName "1.0.83-settings-manual-columns"
+        versionCode 118
+        versionName "1.1.02-restricted-zone-empty-zones-fix"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

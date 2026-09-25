@@ -190,6 +190,7 @@ const socketServer = new FleetSocketServer({
   mapRepo,
   alertEventRepo,
   equipmentManager,
+  deviceRepo,
 });
 // mismo patrón de ciclo evitado que socketServer.incidentAlertService abajo
 geofenceService.socketServer = socketServer;

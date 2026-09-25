@@ -138,6 +138,11 @@ export interface RtkFixEvent {
   timestamp: number;
 }
 
+// los 7 mensajes NMEA que este proyecto ya usa (README "Aprovisionamiento de un receptor RTK
+// nuevo") - vista MSG real de u-center expone muchos mas, alcance recortado a proposito (misma
+// decision ya tomada para "Puertos": solo lo que el hardware real de este proyecto necesita)
+export type NmeaMessageId = 'GGA' | 'RMC' | 'GLL' | 'GSA' | 'GSV' | 'VTG' | 'GST';
+
 export interface RtkStatus {
   usbConnected: boolean;
   connectedUsbDeviceName: string | null;
@@ -214,6 +219,66 @@ export interface RtkNtripPlugin {
   setCorrectionMode(options: { mode: CorrectionMode }): Promise<void>;
   startNtrip(): Promise<void>;
   stopNtrip(): Promise<void>;
+  // aplica de un solo golpe (UBX-CFG-VALSET) el aprovisionamiento del receptor que hasta ahora
+  // requeria una PC con u-center - measRateMs/navRateCyc/timeRef son los MISMOS campos que la vista
+  // RATE de u-center real deja escribir; portTarget/portBaudRate/etc son los mismos campos de la
+  // vista PRT (Ports), ahora con los 5 targets reales (I2C/UART1/UART2/USB/SPI) - ver UbxConfig.kt
+  // (Kotlin) para el detalle completo de que clave corresponde a cada campo, y para los limites
+  // reales de databits/stopbits/parity/protocolo (la clave moderna no soporta todo lo que u-center
+  // muestra en su vista legada, generica para toda la familia u-blox - ver comentario ahi).
+  sendReceiverProvisioning(options: {
+    measRateMs: number;
+    navRateCyc: number;
+    timeRef: number;
+    dynModel: number;
+    highPrecision: boolean;
+    qzssEnabled: boolean;
+    portTarget: 'I2C' | 'UART1' | 'UART2' | 'USB' | 'SPI';
+    portBaudRate: number;
+    portDatabits: number;
+    portStopbits: number;
+    portParity: number;
+    portI2cAddress: number;
+    portSpiCpol: boolean;
+    portSpiCpha: boolean;
+    portProtocolInUbx: boolean;
+    portProtocolInNmea: boolean;
+    portProtocolInRtcm3x: boolean;
+    portProtocolInSpartn: boolean;
+    portProtocolOutUbx: boolean;
+    portProtocolOutNmea: boolean;
+    portProtocolOutRtcm3x: boolean;
+    // vista MSG real de u-center: un mensaje NMEA por fila, On+valor (divisor de epoca) POR
+    // PUERTO - mismo alcance ya decidido para "Puertos" (solo UART1/UART2/USB, sin I2C/SPI - el
+    // Target de "Puertos" se amplio a los 5 reales, pero MSG sigue acotado a proposito)
+    msgRates: { message: NmeaMessageId; port: 'UART1' | 'UART2' | 'USB'; on: boolean; value: number }[];
+    // vista NMEA real de u-center (CFG-NMEA-DATA2) - 22 campos con clave moderna real, incluido
+    // "Galileo" (CFG-NMEA-FILT_GAL) y NMEA Version 4.11 (V411=42) - agregados en firmware posterior
+    // al manual usado en la ronda anterior, ver UbxConfig.kt para el detalle completo de la
+    // correccion. nmeaCompat/nmeaLimit82 son excluyentes con highPrecision - la UI debe apagar el
+    // otro lado al activar cualquiera de los dos.
+    nmeaProtVer: number;
+    nmeaMaxSvs: number;
+    nmeaCompat: boolean;
+    nmeaConsider: boolean;
+    nmeaLimit82: boolean;
+    nmeaSvNumbering: number;
+    nmeaFiltGps: boolean;
+    nmeaFiltSbas: boolean;
+    nmeaFiltGal: boolean;
+    nmeaFiltQzss: boolean;
+    nmeaFiltGlo: boolean;
+    nmeaFiltBds: boolean;
+    nmeaOutInvFix: boolean;
+    nmeaOutMskFix: boolean;
+    nmeaOutInvTime: boolean;
+    nmeaOutInvDate: boolean;
+    nmeaOutOnlyGps: boolean;
+    nmeaOutFrozenCog: boolean;
+    nmeaMainTalkerId: number;
+    nmeaGsvTalkerId: number;
+    nmeaBdsTalkerId: string;
+  }): Promise<void>;
   // rumbo ya corregido por la auto-calibracion de montaje (ver headingCalibration.ts) - lo usa el
   // envio al servidor cuando el rumbo GPS no es confiable (vehiculo detenido), para que Admin y
   // Supervisor vean hacia donde apunta el vehiculo igual que el operador en su propia pantalla
@@ -295,6 +360,7 @@ const webRtkFallback: RtkNtripPlugin = {
   setCorrectionMode: async () => unavailable('RtkNtrip'),
   startNtrip: async () => unavailable('RtkNtrip'),
   stopNtrip: async () => unavailable('RtkNtrip'),
+  sendReceiverProvisioning: async () => unavailable('RtkNtrip'),
   setCompassHeading: async () => unavailable('RtkNtrip'),
   startMockLocation: async () => unavailable('RtkNtrip'),
   stopMockLocation: async () => unavailable('RtkNtrip'),

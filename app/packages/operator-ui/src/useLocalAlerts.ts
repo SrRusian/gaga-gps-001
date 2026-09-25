@@ -1,6 +1,6 @@
 import type { Geofence } from '@gaga-gps/shared-types';
 import { useEffect, useRef, useState } from 'react';
-import { evaluateGeofencesOffline, type OfflineGeofenceMatch } from './offlineGeofences';
+import { evaluateGeofencesOffline, isInsideAllowedZone, type OfflineGeofenceMatch } from './offlineGeofences';
 import { evaluateSpeed, NO_SPEED_LIMITS, type SpeedLimits } from './localSpeed';
 import { flushDeviceEvents, reportDeviceEvent, type DeviceEvent } from './deviceEvents';
 
@@ -13,13 +13,32 @@ import { flushDeviceEvents, reportDeviceEvent, type DeviceEvent } from './device
 // Solo se evalua lo que la tableta puede resolver sola con datos que ya tiene en mano. Lo que
 // necesita comparar contra OTROS vehiculos (colision, proximidad) o contra geometria pesada de
 // PostGIS (zona restringida, tiers elasticos de acercamiento) lo sigue decidiendo el servidor.
+//
+// Geocercas: TODA transicion (entrar/salir) se reporta al servidor sin importar severidad - el
+// servidor guarda el historial completo en geofence_events para poder calcular tiempo en zona a
+// futuro (pedido explicito). Lo que SI queda 100% en la tableta es la decision de que mostrar/sonar
+// en pantalla (`pickAlert`/`setAlert` de abajo) - eso nunca depende de si el evento se reporto.
+//
+// Velocidad: distinto criterio, sin cambios - solo el exceso real (danger) deja registro, el aviso
+// al 90% es para corregir a tiempo y no genera ni evento ni infraccion.
+//
+// Zona restringida: el servidor le manda a la tableta la REGLA (devices.restricted_to_allowed_zone,
+// via el evento de socket device:config - ver useOperatorSocket.ts), cacheada localmente para que
+// siga vigente sin conexion. La tableta evalua "¿estoy afuera de 'allowed' ahora mismo?" por NIVEL,
+// no por transicion (mismo criterio ya corregido en el backend - un dispositivo restringido que
+// arranca ya afuera debe alertar de inmediato, no solo el que "sale"), y reporta el cambio via
+// device-events (kind: 'restricted_zone') - el servidor solo registra/difunde, no vuelve a decidir.
+// Restringido + CERO geocercas 'allowed' en el proyecto = SIEMPRE violando (pedido explicito) - no
+// hay ninguna zona valida en la que estar, asi que "afuera" es el unico estado posible.
 
 export interface LocalAlert {
   severity: 'warning' | 'danger' | 'info';
   message: string;
-  source: 'geofence' | 'speed';
+  source: 'geofence' | 'speed' | 'restricted_zone';
   geofenceId: number | null;
 }
+
+const RESTRICTED_ZONE_MESSAGE = 'FUERA DE ZONA PERMITIDA - REGRESE DE INMEDIATO';
 
 // el fix propio puede llegar a 10Hz; una transicion de zona o de limite no necesita esa frecuencia
 const EVALUATION_INTERVAL_MS = 500;
@@ -48,11 +67,17 @@ export function useLocalAlerts(
   limits: SpeedLimits = NO_SPEED_LIMITS,
   connected = false,
   sounds?: AlertSounds,
+  restrictedToAllowedZone = false,
+  geofencesReady = false,
 ) {
   const [alert, setAlert] = useState<LocalAlert | null>(null);
 
   const geofenceRef = useRef<OfflineGeofenceMatch | null>(null);
   const speedSeverityRef = useRef<'warning' | 'danger' | null>(null);
+  const inAllowedZoneRef = useRef(false);
+  // por NIVEL ("¿esta violando ahora mismo?"), no por transicion - mismo criterio que el fix del
+  // backend (GeofenceAlertService.activeRestrictedViolations)
+  const restrictedViolatingRef = useRef(false);
   const lastEvalAtRef = useRef(0);
   const alertSeverityRef = useRef<'warning' | 'danger' | 'info' | null>(null);
   const soundsRef = useRef(sounds);
@@ -61,6 +86,10 @@ export function useLocalAlerts(
   geofencesRef.current = geofences;
   const limitsRef = useRef(limits);
   limitsRef.current = limits;
+  const restrictedRef = useRef(restrictedToAllowedZone);
+  restrictedRef.current = restrictedToAllowedZone;
+  const geofencesReadyRef = useRef(geofencesReady);
+  geofencesReadyRef.current = geofencesReady;
 
   // al recuperar red se vacia lo que se haya acumulado sin conexion
   useEffect(() => {
@@ -87,6 +116,8 @@ export function useLocalAlerts(
     const changed = (match?.geofenceId ?? null) !== (previous?.geofenceId ?? null);
 
     if (changed) {
+      // toda transicion se reporta, sin importar severidad - el servidor necesita el historial
+      // completo (entrada/salida) para calcular tiempo en zona a futuro
       if (previous) {
         send({
           ...base,
@@ -96,7 +127,6 @@ export function useLocalAlerts(
           message: `SALIÓ DE "${previous.geofenceName}"`,
           geofenceId: previous.geofenceId,
           geofenceName: previous.geofenceName,
-          inAllowedZone: isInExemptZone(fix, geofencesRef.current),
         });
       }
       if (match) {
@@ -108,10 +138,41 @@ export function useLocalAlerts(
           message: match.message,
           geofenceId: match.geofenceId,
           geofenceName: match.geofenceName,
-          inAllowedZone: isInExemptZone(fix, geofencesRef.current),
         });
       }
       geofenceRef.current = match;
+    }
+
+    // --- zona exenta (estacionamiento/permitida) ---
+    // independiente de la severidad de arriba: el servidor necesita saber esto para no alarmar al
+    // proyecto si la tableta se queda sin señal justo despues, estando estacionada donde puede
+    // estarlo - sin esto quedaria atado a que ademas ocurriera una alerta grave al mismo tiempo
+    const inAllowedZone = isInExemptZone(fix, geofencesRef.current);
+    if (inAllowedZone !== inAllowedZoneRef.current) {
+      inAllowedZoneRef.current = inAllowedZone;
+      send({ ...base, kind: 'zone_status', state: 'raised', severity: 'info', message: '', inAllowedZone });
+    }
+
+    // --- zona restringida ---
+    // un solo punto de decision (nunca if/else-if con varias ramas) - "¿esta violando ahora mismo?"
+    // se recalcula completo en cada tick elegible y se compara contra el valor anterior. Sin
+    // geocercas cargadas todavia (geofencesReady=false, arranque en frio) cae a "no violando" -
+    // seguro por default, se corrige solo en el siguiente tick en cuanto geofences:update llegue.
+    // Restringido + CERO geocercas 'allowed' en el proyecto = SIEMPRE violando (pedido explicito:
+    // no hay zona valida en la que estar, no depende de que exista ninguna)
+    const currentlyViolating =
+      restrictedRef.current && geofencesReadyRef.current
+        ? !isInsideAllowedZone(fix.latitude, fix.longitude, geofencesRef.current)
+        : false;
+    if (currentlyViolating !== restrictedViolatingRef.current) {
+      restrictedViolatingRef.current = currentlyViolating;
+      send({
+        ...base,
+        kind: 'restricted_zone',
+        state: currentlyViolating ? 'raised' : 'cleared',
+        severity: 'danger',
+        message: RESTRICTED_ZONE_MESSAGE,
+      });
     }
 
     // --- velocidad ---
@@ -144,8 +205,8 @@ export function useLocalAlerts(
       speedSeverityRef.current = speed.severity;
     }
 
-    // en pantalla gana lo mas grave de las dos evaluaciones
-    const next = pickAlert(match, speed.severity, speed.message);
+    // en pantalla gana lo mas grave de las tres evaluaciones
+    const next = pickAlert(match, speed.severity, speed.message, restrictedViolatingRef.current);
     setAlert(next);
 
     // el sonido solo cambia cuando cambia la severidad, no en cada evaluacion - si no, el pitido
@@ -188,7 +249,19 @@ function pickAlert(
   match: OfflineGeofenceMatch | null,
   speedSeverity: 'warning' | 'danger' | null,
   speedMessage: string,
+  restrictedViolating: boolean,
 ): LocalAlert | null {
+  // zona restringida siempre es 'danger' - gana sobre cualquier warning, pero se compara igual
+  // contra el resto para que un peligro real (danger de geocerca/velocidad) no quede opacado
+  if (restrictedViolating) {
+    return {
+      severity: 'danger',
+      message: RESTRICTED_ZONE_MESSAGE,
+      source: 'restricted_zone',
+      geofenceId: null,
+    };
+  }
+
   const rank = { info: 1, warning: 2, danger: 3 } as const;
   const geofenceRank = match ? rank[match.severity] : 0;
   const speedRank = speedSeverity ? rank[speedSeverity] : 0;

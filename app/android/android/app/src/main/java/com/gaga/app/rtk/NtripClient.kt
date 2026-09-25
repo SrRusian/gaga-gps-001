@@ -1,5 +1,7 @@
 package com.gaga.app.rtk
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,16 +31,41 @@ class NtripClient(
     private val onStatus: (connected: Boolean, error: String?) -> Unit,
     private val currentGga: () -> String?,
 ) {
+    companion object {
+        // mismo criterio que BluetoothSerialManager: reintento fijo, sin backoff exponencial - el
+        // proyecto prefiere "cero toques" (se reconecta solo) sobre optimizar el ritmo del reintento
+        private const val RETRY_DELAY_MS = 5000L
+    }
+
     private var socket: Socket? = null
     private var outputStream: OutputStream? = null
     private val scope = CoroutineScope(Dispatchers.IO + Job())
     private var readJob: Job? = null
     private var ggaJob: Job? = null
+    private val retryHandler = Handler(Looper.getMainLooper())
+
+    // bug real reportado en campo: el caster cerraba la conexion ("Software caused connection
+    // abort" - tipico de que Android mate el socket al pasar a segundo plano/Doze, o un reset del
+    // lado del caster) y NTRIP se quedaba muerto para siempre - RtkNtripPlugin.onReceiverConnected()
+    // solo reintenta si `ntrip == null`, y esta MISMA instancia seguia viva referenciando un socket
+    // ya cerrado. La unica forma de recuperarlo era matar el proceso completo (onCreate vuelve a
+    // arrancar todo desde cero). Mismo patron ya probado en BluetoothSerialManager: `connect()`
+    // marca la intencion de seguir conectado, cualquier caida NO intencional (cualquier camino que
+    // no sea `disconnect()`) programa un reintento solo
+    @Volatile private var shouldStayConnected = false
+    private var lastConfig: NtripConfig? = null
 
     fun isConnected(): Boolean = socket?.isConnected == true && socket?.isClosed == false
 
     fun connect(config: NtripConfig) {
-        disconnect()
+        shouldStayConnected = true
+        lastConfig = config
+        retryHandler.removeCallbacksAndMessages(null)
+        teardown()
+        attemptConnect(config)
+    }
+
+    private fun attemptConnect(config: NtripConfig) {
         readJob = scope.launch {
             try {
                 val s = Socket(config.host, config.port)
@@ -72,7 +99,6 @@ class NtripClient(
                 val statusLine = readNtripLine(input)
                 if (statusLine == null || (!statusLine.contains("200") && !statusLine.contains("ICY 200"))) {
                     onStatus(false, "Caster rechazo la conexion: ${statusLine ?: "sin respuesta"}")
-                    disconnect()
                     return@launch
                 }
                 // consumir el resto de los headers HTTP hasta la linea en blanco
@@ -96,9 +122,19 @@ class NtripClient(
             } catch (e: Exception) {
                 onStatus(false, "Error NTRIP: ${e.message}")
             } finally {
-                disconnect()
+                teardown()
+                scheduleRetry()
             }
         }
+    }
+
+    private fun scheduleRetry() {
+        if (!shouldStayConnected) return
+        val config = lastConfig ?: return
+        retryHandler.removeCallbacksAndMessages(null)
+        retryHandler.postDelayed({
+            if (shouldStayConnected) attemptConnect(config)
+        }, RETRY_DELAY_MS)
     }
 
     private fun startGgaHeartbeat() {
@@ -116,7 +152,18 @@ class NtripClient(
         }
     }
 
+    // parada INTENCIONAL (stopNtrip()/onReceiverDisconnected() sin ningun transporte vivo) - a
+    // diferencia de teardown(), esta corta el reintento automatico. Sin este flag, un `disconnect()`
+    // intencional se hubiera reconectado solo 5s despues, deshaciendo la intencion de apagarlo
     fun disconnect() {
+        shouldStayConnected = false
+        retryHandler.removeCallbacksAndMessages(null)
+        teardown()
+    }
+
+    // limpieza de socket/jobs sin tocar shouldStayConnected - la usan tanto connect() (antes de
+    // abrir una conexion nueva) como el finally de attemptConnect() (conexion caida, no intencional)
+    private fun teardown() {
         ggaJob?.cancel()
         readJob?.cancel()
         try {

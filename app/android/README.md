@@ -166,9 +166,34 @@ Eso es todo del lado de la tableta. La app detecta sola el módulo ya vinculado,
 
 En Android 12+ hace falta el permiso `BLUETOOTH_CONNECT`: en una tableta ya aprovisionada como Device Owner la app se lo concede sola sin diálogo; si no lo es, el botón "Permitir Bluetooth" de Ajustes abre el diálogo normal.
 
-### Paso 4 - Configurar el receptor en u-center
+### Paso 4 - Configurar el receptor en u-center (o desde la propia tableta)
 
-Conecta el receptor a la PC por **USB-C** y abre u-center (`Receiver > Connection` → el COM correspondiente, 115200). Después `View > Configuration View`.
+**Alternativa sin PC**: el menú u-center de la app (Ajustes > Receptor RTK y NTRIP > Abrir u-center)
+tiene un botón de engranaje junto a la `X` de cerrar - "Configuración del receptor". Aplica de un
+solo golpe, por el mismo USB o Bluetooth que ya esté conectado, exactamente los pasos 4 y 5 de esta
+sección (10 Hz, NMEA de alta precisión, UART2 a 115200 para el HC-05, los mensajes NMEA de la tabla
+de abajo, modelo dinámico Automotive, QZSS desactivado) y lo guarda en la memoria del receptor en el
+mismo mensaje - no hace falta un paso de guardado aparte. Usa `UBX-CFG-VALSET` (interfaz moderna de
+configuración por claves de u-blox, protocolo 27+), no los mensajes legados que usa u-center - mismo
+resultado final, mecanismo distinto. Implementado en `UbxConfig.kt`, cada clave verificada contra el
+manual oficial "u-blox ZED-F9P Interface Description" (UBX-18010854).
+
+**Limitaciones honestas de esta alternativa**: no reemplaza los Pasos 1-3 (programar el HC-05,
+cablear, vincular por Bluetooth) - eso sigue siendo manual, es trabajo físico/de otro chip, no algo
+que un comando UBX pueda hacer. Tampoco desactiva SBAS (a diferencia de QZSS, que sí tiene una clave
+moderna simple) - este receptor/firmware no expone una clave `CFG-SIGNAL-SBAS_ENA`, la única vía es
+el mensaje legado `UBX-CFG-GNSS` (bloques de tamaño variable, requiere leer la configuración actual
+antes de modificarla para no mandar un valor inválido) - se dejó fuera a propósito por el riesgo de
+mandar una configuración GNSS mal formada sin poder verificarla en este entorno de desarrollo; si se
+quiere ese canal libre, se sigue haciendo desde u-center real. Sin confirmación de éxito en pantalla
+más allá de lo que ya se ve en los paneles de abajo (Data, Satellite Position) - el mensaje puede
+volver `UBX-ACK-NAK` si algo sale mal, pero la app no lo escucha todavía (ver "Sin verificar en
+hardware real" más abajo); verifica igual que en el Paso 6: 7 decimales en la posición y ~10
+actualizaciones por segundo.
+
+**Camino con PC (u-center real), sigue funcionando igual que siempre**: conecta el receptor a la PC
+por **USB-C** y abre u-center (`Receiver > Connection` → el COM correspondiente, 115200). Después
+`View > Configuration View`.
 
 **Cada vista necesita su propio botón `Send`.** Dejar las casillas bien en pantalla no aplica nada. En la vista `MSG`, el `Send` aplica **solo el mensaje seleccionado en el dropdown** - si cambias de mensaje sin enviar, pierdes el cambio.
 

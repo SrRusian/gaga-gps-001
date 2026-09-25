@@ -12,6 +12,10 @@ import type StaticEquipmentManager from '../services/static_equipment/StaticEqui
 import { toPublicShape } from '../services/maps/mapShape';
 import type FleetStateManager from '../services/telemetry/FleetStateManager';
 
+interface DeviceRepoLike {
+  findByUniqueId(uniqueId: string): Promise<{ restricted_to_allowed_zone: boolean } | null>;
+}
+
 export interface FleetSocketServerDeps {
   io: Server;
   fleetState: FleetStateManager;
@@ -20,6 +24,7 @@ export interface FleetSocketServerDeps {
   mapRepo?: MapRepository;
   alertEventRepo?: AlertEventRepository;
   equipmentManager?: StaticEquipmentManager;
+  deviceRepo?: DeviceRepoLike;
 }
 
 // cuarto de socket por tableta (deviceId), aparte de los de rol/proyecto - unico lugar donde el
@@ -54,6 +59,7 @@ class FleetSocketServer {
   mapRepo?: MapRepository;
   alertEventRepo?: AlertEventRepository;
   equipmentManager?: StaticEquipmentManager;
+  deviceRepo?: DeviceRepoLike;
   incidentAlertService?: IncidentAlertService; // asignado post-construcción desde app.ts, evita ciclo
 
   constructor({
@@ -64,6 +70,7 @@ class FleetSocketServer {
     mapRepo,
     alertEventRepo,
     equipmentManager,
+    deviceRepo,
   }: FleetSocketServerDeps) {
     this.io = io;
     this.fleetState = fleetState;
@@ -72,6 +79,7 @@ class FleetSocketServer {
     this.mapRepo = mapRepo;
     this.alertEventRepo = alertEventRepo;
     this.equipmentManager = equipmentManager;
+    this.deviceRepo = deviceRepo;
 
     this._registerConnectionHandler();
   }
@@ -207,9 +215,26 @@ class FleetSocketServer {
       }
 
       // el Operador manda su propio deviceId apenas conecta (useOperatorSocket.ts) - unico dato
-      // que permite dirigir un evento a esta tableta en particular (ver sendToDevice abajo)
+      // que permite dirigir un evento a esta tableta en particular (ver sendToDevice abajo). De
+      // paso le manda la config del dispositivo que solo el servidor conoce (ahora mismo, si debe
+      // permanecer dentro de una zona permitida) - mismo patron que geofences:update al conectar,
+      // asi la tableta se pone al dia de inmediato aunque haya estado desconectada cuando cambio.
       socket.on('device:hello', ({ deviceId }: { deviceId?: string }) => {
-        if (deviceId) socket.join(deviceRoom(deviceId));
+        if (!deviceId) return;
+        socket.join(deviceRoom(deviceId));
+        if (this.deviceRepo) {
+          this.deviceRepo
+            .findByUniqueId(deviceId)
+            .then((device) => {
+              if (!device) return;
+              socket.emit('device:config', {
+                restrictedToAllowedZone: device.restricted_to_allowed_zone,
+              });
+            })
+            .catch((err: Error) =>
+              console.error('FleetSocketServer - error mandando device:config:', err.message),
+            );
+        }
       });
 
       socket.on('disconnect', () => {

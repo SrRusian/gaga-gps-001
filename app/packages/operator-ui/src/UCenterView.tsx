@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   KioskStatus,
+  NmeaMessageId,
   NtripMountpoint,
   RtkFix,
   RtkFixLabel,
@@ -896,6 +897,878 @@ export interface UCenterNtripProps {
   fetchFromServerError: string;
 }
 
+// aprovisionamiento del receptor (UBX-CFG-VALSET) - ver UbxConfig.kt para el detalle exacto de que
+// se manda; esta pantalla deja editar los mismos campos que u-center real expone en sus vistas
+// RATE/NMEA/NAV5/GNSS, para no aplicar un preset ciego sin poder ajustarlo
+export interface ReceiverProvisioningOptions {
+  measRateMs: number;
+  navRateCyc: number;
+  dynModel: number;
+  highPrecision: boolean;
+  qzssEnabled: boolean;
+  portTarget: 'I2C' | 'UART1' | 'UART2' | 'USB' | 'SPI';
+  portBaudRate: number;
+  portDatabits: number;
+  portStopbits: number;
+  portParity: number;
+  portI2cAddress: number;
+  portSpiCpol: boolean;
+  portSpiCpha: boolean;
+  portProtocolInUbx: boolean;
+  portProtocolInNmea: boolean;
+  portProtocolInRtcm3x: boolean;
+  portProtocolInSpartn: boolean;
+  portProtocolOutUbx: boolean;
+  portProtocolOutNmea: boolean;
+  portProtocolOutRtcm3x: boolean;
+  timeRef: number;
+  msgRates: { message: NmeaMessageId; port: 'UART1' | 'UART2' | 'USB'; on: boolean; value: number }[];
+  nmeaProtVer: number;
+  nmeaMaxSvs: number;
+  nmeaCompat: boolean;
+  nmeaConsider: boolean;
+  nmeaLimit82: boolean;
+  nmeaSvNumbering: number;
+  nmeaFiltGps: boolean;
+  nmeaFiltSbas: boolean;
+  nmeaFiltGal: boolean;
+  nmeaFiltQzss: boolean;
+  nmeaFiltGlo: boolean;
+  nmeaFiltBds: boolean;
+  nmeaOutInvFix: boolean;
+  nmeaOutMskFix: boolean;
+  nmeaOutInvTime: boolean;
+  nmeaOutInvDate: boolean;
+  nmeaOutOnlyGps: boolean;
+  nmeaOutFrozenCog: boolean;
+  nmeaMainTalkerId: number;
+  nmeaGsvTalkerId: number;
+  nmeaBdsTalkerId: string;
+}
+
+export interface UCenterProvisioningProps {
+  onApply: (options: ReceiverProvisioningOptions) => void;
+  busy: boolean;
+  message: string;
+  error: string;
+}
+
+// mismas constantes que CFG-NAVSPG-DYNMODEL (ver UbxConfig.kt) - Automotive es el default porque es
+// el unico modelo relevante para este proyecto, pero el resto son valores reales del receptor, no
+// inventados, por si algun dia hace falta un equipo distinto (embarcacion, caminando, etc)
+const DYN_MODEL_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: 'Portable' },
+  { value: 2, label: 'Stationary' },
+  { value: 3, label: 'Pedestrian' },
+  { value: 4, label: 'Automotive' },
+  { value: 5, label: 'Sea' },
+  { value: 6, label: 'Airborne <1g' },
+  { value: 7, label: 'Airborne <2g' },
+  { value: 8, label: 'Airborne <4g' },
+  { value: 9, label: 'Wrist watch' },
+];
+
+// CFG-UARTn-BAUDRATE, PORT_TARGET_OPTIONS - Target ahora incluye los 5 puertos reales del ZED-F9P
+// (I2C=0, UART1=1, UART2=2, USB=3, SPI=4 - misma numeracion de portID que u-center usa), pedido
+// explicito tras confirmar contra el manual mas reciente (u-blox F9 HPG 1.32, UBX-22008968-R01) que
+// las 5 secciones de configuracion (CFG-I2C*/CFG-UART1*/CFG-UART2*/CFG-USB*/CFG-SPI*) existen y
+// siguen exactamente el mismo patron de bases in/out ya usado - ver UbxConfig.kt.
+const BAUD_RATE_OPTIONS = [4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
+
+const PORT_TARGET_OPTIONS: { value: 'I2C' | 'UART1' | 'UART2' | 'USB' | 'SPI'; label: string }[] = [
+  { value: 'I2C', label: '0 - I2C' },
+  { value: 'UART1', label: '1 - UART1' },
+  { value: 'UART2', label: '2 - UART2' },
+  { value: 'USB', label: '3 - USB' },
+  { value: 'SPI', label: '4 - SPI' },
+];
+
+// CFG-UARTn-DATABITS solo soporta estos 2 (la vista legada de u-center tambien lista 5/6, pero esa
+// clave moderna no los tiene) - RE-VERIFICADO contra el manual mas reciente (HPG 1.32, Table 63),
+// sigue siendo asi, no es un caso de manual desactualizado como paso con NMEA/Galileo/4.11.
+const DATABITS_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: '8' },
+  { value: 1, label: '7' },
+];
+
+// CFG-UARTn-STOPBITS - las 4 constantes reales (Table 62 del manual HPG 1.32): HALF(0)=0.5,
+// ONE(1)=1.0, ONEHALF(2)=1.5, TWO(3)=2.0. HALF se habia excluido antes asumiendo (sin verificar)
+// que u-center no la ofrecia - correccion real: SI es una constante real y documentada, se agrega
+// por completitud (mismo criterio ya aplicado a GQ=7 en Main Talker ID de la vista NMEA).
+const STOPBITS_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: '0.5' },
+  { value: 1, label: '1' },
+  { value: 2, label: '1.5' },
+  { value: 3, label: '2' },
+];
+
+// CFG-UARTn-PARITY solo soporta estos 3 (Space/Mark de la vista legada de u-center no existen aqui)
+// - RE-VERIFICADO contra el manual mas reciente (HPG 1.32, Table 64), confirmado sin cambios.
+const PARITY_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: 'None' },
+  { value: 1, label: 'Odd' },
+  { value: 2, label: 'Even' },
+];
+
+// Protocol in/out de u-center real es UN solo desplegable por direccion (no checkboxes
+// independientes) con combinaciones predefinidas. RE-VERIFICADO contra el manual mas reciente
+// (HPG 1.32) tras la correccion de NMEA/Galileo/4.11 - esta vez el resultado fue el MISMO que antes,
+// no un cambio: RTCM2(2)/RAW(3)/USER0-3(12-15) siguen sin clave moderna (`CFG-UARTnINPROT-*`/
+// `OUTPROT-*` solo tienen UBX/NMEA/RTCM3X/SPARTN - Table 65/66) y el propio mensaje LEGADO
+// UBX-CFG-PRT (el que u-center usa bajo el capo, tambien re-verificado en el manual actual, no uno
+// viejo) solo define 4 bits de entrada (UBX/NMEA/RTCM2/RTCM3) y 3 de salida (UBX/NMEA/RTCM3) - ni
+// RAW ni USER0-3 existen ahi tampoco, ni en la version actual del firmware. u-center los muestra
+// igual porque su dropdown es generico para TODA la familia de receptores u-blox que soporta (M8 y
+// anteriores si tenian esos bits), no especifico de este ZED-F9P.
+// SPARTN (6) SI es real y nueva - confirmado en Table 65 (`CFG-UARTnINPROT-SPARTN`), agregada en
+// firmware posterior al primer manual usado en esta sesion, solo existe como protocolo de ENTRADA
+// (Table 66 de salida no la lista) - por eso solo aparece en PROTOCOL_IN_OPTIONS, nunca en OUT.
+const PROTOCOL_IN_OPTIONS: { value: string; label: string; ubx: boolean; nmea: boolean; rtcm3x: boolean; spartn: boolean }[] = [
+  { value: 'none', label: 'none', ubx: false, nmea: false, rtcm3x: false, spartn: false },
+  { value: 'ubx', label: '0 - UBX', ubx: true, nmea: false, rtcm3x: false, spartn: false },
+  { value: 'nmea', label: '1 - NMEA', ubx: false, nmea: true, rtcm3x: false, spartn: false },
+  { value: 'rtcm3x', label: '5 - RTCM3', ubx: false, nmea: false, rtcm3x: true, spartn: false },
+  { value: 'spartn', label: '6 - SPARTN', ubx: false, nmea: false, rtcm3x: false, spartn: true },
+  { value: 'ubx+nmea', label: '0+1 - UBX+NMEA', ubx: true, nmea: true, rtcm3x: false, spartn: false },
+  { value: 'ubx+nmea+rtcm3x', label: '0+1+5 - UBX+NMEA+RTCM3', ubx: true, nmea: true, rtcm3x: true, spartn: false },
+  {
+    value: 'ubx+nmea+rtcm3x+spartn',
+    label: '0+1+5+6 - UBX+NMEA+RTCM3+SPARTN',
+    ubx: true,
+    nmea: true,
+    rtcm3x: true,
+    spartn: true,
+  },
+];
+
+const PROTOCOL_OUT_OPTIONS: { value: string; label: string; ubx: boolean; nmea: boolean; rtcm3x: boolean }[] = [
+  { value: 'none', label: 'none', ubx: false, nmea: false, rtcm3x: false },
+  { value: 'ubx', label: '0 - UBX', ubx: true, nmea: false, rtcm3x: false },
+  { value: 'nmea', label: '1 - NMEA', ubx: false, nmea: true, rtcm3x: false },
+  { value: 'rtcm3x', label: '5 - RTCM3', ubx: false, nmea: false, rtcm3x: true },
+  { value: 'ubx+nmea', label: '0+1 - UBX+NMEA', ubx: true, nmea: true, rtcm3x: false },
+  { value: 'ubx+nmea+rtcm3x', label: '0+1+5 - UBX+NMEA+RTCM3', ubx: true, nmea: true, rtcm3x: true },
+];
+
+function protocolInFlags(key: string) {
+  return PROTOCOL_IN_OPTIONS.find((o) => o.value === key) ?? PROTOCOL_IN_OPTIONS[0];
+}
+function protocolOutFlags(key: string) {
+  return PROTOCOL_OUT_OPTIONS.find((o) => o.value === key) ?? PROTOCOL_OUT_OPTIONS[0];
+}
+
+// CFG-RATE-TIMEREF (Table 38, manual HPG 1.32) - Time Source de la vista RATE real de u-center
+const TIME_REF_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: '0 - UTC Time' },
+  { value: 1, label: '1 - GPS Time' },
+  { value: 2, label: '2 - GLO Time' },
+  { value: 3, label: '3 - BDS Time' },
+  { value: 4, label: '4 - GAL Time' },
+  { value: 5, label: '5 - NavIC Time' },
+];
+
+// vista MSG real de u-center: un mensaje NMEA por fila, con las mismas etiquetas F0-xx que
+// muestra el selector real - alcance recortado a proposito a los 7 mensajes que este proyecto ya
+// usa (README "Aprovisionamiento de un receptor RTK nuevo"), sobre UART1/UART2/USB (mismo alcance
+// ya decidido para "Puertos" - sin I2C/SPI, hardware real no los usa)
+const NMEA_MESSAGES: { id: NmeaMessageId; label: string }[] = [
+  { id: 'GGA', label: 'F0-00 NMEA GxGGA' },
+  { id: 'GLL', label: 'F0-01 NMEA GxGLL' },
+  { id: 'GSA', label: 'F0-02 NMEA GxGSA' },
+  { id: 'GSV', label: 'F0-03 NMEA GxGSV' },
+  { id: 'RMC', label: 'F0-04 NMEA GxRMC' },
+  { id: 'VTG', label: 'F0-05 NMEA GxVTG' },
+  { id: 'GST', label: 'F0-07 NMEA GxGST' },
+];
+
+type MsgPort = 'UART1' | 'UART2' | 'USB';
+const MSG_PORTS: MsgPort[] = ['UART1', 'UART2', 'USB'];
+
+type MsgRateState = Record<NmeaMessageId, Record<MsgPort, { on: boolean; value: number }>>;
+
+// mismo comportamiento fijo que este archivo tenia antes de esta ronda (GGA/RMC cada epoca de
+// navegacion, el resto a ~1Hz, todo por UART2) - ahora es solo el punto de partida del formulario,
+// editable como en u-center real
+function defaultMsgRates(): MsgRateState {
+  const everyEpoch = { on: true, value: 1 };
+  const housekeeping = { on: true, value: 10 };
+  const off = { on: false, value: 1 };
+  const row = (uart2: { on: boolean; value: number }): Record<MsgPort, { on: boolean; value: number }> => ({
+    UART1: { ...off },
+    UART2: { ...uart2 },
+    USB: { ...off },
+  });
+  return {
+    GGA: row(everyEpoch),
+    RMC: row(everyEpoch),
+    GLL: row(housekeeping),
+    GSA: row(housekeeping),
+    GSV: row(housekeeping),
+    VTG: row(housekeeping),
+    GST: row(housekeeping),
+  };
+}
+
+function flattenMsgRates(state: MsgRateState): ReceiverProvisioningOptions['msgRates'] {
+  const out: ReceiverProvisioningOptions['msgRates'] = [];
+  for (const { id: message } of NMEA_MESSAGES) {
+    for (const port of MSG_PORTS) {
+      const entry = state[message][port];
+      out.push({ message, port, on: entry.on, value: entry.value });
+    }
+  }
+  return out;
+}
+
+// vista NMEA real de u-center (CFG-NMEA-DATA2) - valores reales de CFG-NMEA-PROTVER, verificados
+// contra el manual "u-blox F9 HPG 1.32 Interface Description" (UBX-22008968-R01, mas reciente que
+// el R04 usado en la ronda anterior) - V411=42 (NMEA 4.11) es real, agregado en firmware HPG 1.13+.
+// Labels en ingles, iguales a u-center real (Emmanuel pidio priorizar el texto original del programa
+// sobre traducir).
+const NMEA_VERSION_OPTIONS: { value: number; label: string }[] = [
+  { value: 21, label: '2.1' },
+  { value: 23, label: '2.3' },
+  { value: 40, label: '4.0' },
+  { value: 41, label: '4.10' },
+  { value: 42, label: '4.11' },
+];
+
+// CFG-NMEA-MAXSVS - texto real de u-center (captura de Emmanuel)
+const MAX_SVS_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: '0 - Standard' },
+  { value: 8, label: '8 - 8 Channel Receiver' },
+  { value: 12, label: '12 - 12 Channel Receiver' },
+  { value: 16, label: '16 - 16 Channel Receiver' },
+];
+
+// CFG-NMEA-SVNUMBERING - texto real de u-center (captura de Emmanuel)
+const SV_NUMBERING_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: '0 - Strict (not output)' },
+  { value: 1, label: '1 - Extended (3 digit)' },
+];
+
+// CFG-NMEA-MAINTALKERID - texto real de u-center (captura de Emmanuel) + GQ=7, agregado en
+// firmware posterior al manual R04 (verificado contra HPG 1.32) - no aparece en la captura de
+// Emmanuel pero es una constante real y documentada, no una opcion inventada
+const MAIN_TALKER_ID_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: '0 - System dependent' },
+  { value: 1, label: '1 - GP (GPS)' },
+  { value: 2, label: '2 - GL (GLONASS)' },
+  { value: 3, label: '3 - GN (Combined receiver)' },
+  { value: 4, label: '4 - GA (Galileo)' },
+  { value: 5, label: '5 - GB (BeiDou)' },
+  { value: 7, label: '7 - GQ (QZSS)' },
+];
+
+// CFG-NMEA-GSVTALKERID
+const GSV_TALKER_ID_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: '0 - GNSS Specific' },
+  { value: 1, label: '1 - Main Talker ID' },
+];
+
+// Selector "CFG-NMEA-DATA0/1/2" del menu superior de la vista NMEA real de u-center - variantes de
+// LARGO del mensaje LEGADO UBX-CFG-NMEA (0x06 0x17): DATA0 es el payload original mas corto (solo
+// Filters/NMEA Version/Max SVs/Compatibility+Consider), DATA1 le agrega GNSS to filter out/
+// Numbering/Main+GSV Talker ID, DATA2 el mas completo agrega ademas BeiDou Talker ID/High precision/
+// Strict limit82 - asi u-center soporta receptores viejos que no entienden el mensaje completo.
+// Puramente informativo aqui: esta app SIEMPRE usa la interfaz moderna UBX-CFG-VALSET (nunca el
+// mensaje legado), y el ZED-F9P (protocolo 27+) siempre soporta las 22 claves sin importar que
+// "DATA level" se elija - el selector solo deshabilita los campos en pantalla para verse igual que
+// u-center real, nunca deja de mandar esas claves en el mensaje que se aplica.
+type NmeaDataLevel = 'DATA0' | 'DATA1' | 'DATA2';
+const NMEA_DATA_LEVEL_OPTIONS: { value: NmeaDataLevel; label: string }[] = [
+  { value: 'DATA2', label: 'CFG-NMEA-DATA2' },
+  { value: 'DATA1', label: 'CFG-NMEA-DATA1' },
+  { value: 'DATA0', label: 'CFG-NMEA-DATA0' },
+];
+
+function ReceiverProvisioningModal({ provisioning, onClose }: { provisioning: UCenterProvisioningProps; onClose: () => void }) {
+  const [measRateMs, setMeasRateMs] = useState(100);
+  const [navRateCyc, setNavRateCyc] = useState(1);
+  const [timeRef, setTimeRef] = useState(1); // CFG-RATE-TIMEREF, default 1=GPS (factory default real)
+  const [dynModel, setDynModel] = useState(4);
+  const [highPrecision, setHighPrecisionRaw] = useState(true);
+  const [qzssEnabled, setQzssEnabled] = useState(false);
+
+  // vista NMEA (CFG-NMEA-DATA2) - defaults = valores de fabrica reales (ver UbxConfig.kt)
+  const [nmeaProtVer, setNmeaProtVer] = useState(42);
+  const [nmeaMaxSvs, setNmeaMaxSvs] = useState(0);
+  const [nmeaCompat, setNmeaCompatRaw] = useState(false);
+  const [nmeaConsider, setNmeaConsider] = useState(true);
+  const [nmeaLimit82, setNmeaLimit82Raw] = useState(false);
+  const [nmeaSvNumbering, setNmeaSvNumbering] = useState(0);
+  const [nmeaFiltGps, setNmeaFiltGps] = useState(false);
+  const [nmeaFiltSbas, setNmeaFiltSbas] = useState(false);
+  const [nmeaFiltGal, setNmeaFiltGal] = useState(false);
+  const [nmeaFiltQzss, setNmeaFiltQzss] = useState(false);
+  const [nmeaFiltGlo, setNmeaFiltGlo] = useState(false);
+  const [nmeaFiltBds, setNmeaFiltBds] = useState(false);
+  const [nmeaOutInvFix, setNmeaOutInvFix] = useState(false);
+  const [nmeaOutMskFix, setNmeaOutMskFix] = useState(false);
+  const [nmeaOutInvTime, setNmeaOutInvTime] = useState(false);
+  const [nmeaOutInvDate, setNmeaOutInvDate] = useState(false);
+  const [nmeaOutOnlyGps, setNmeaOutOnlyGps] = useState(false);
+  const [nmeaOutFrozenCog, setNmeaOutFrozenCog] = useState(false);
+  const [nmeaMainTalkerId, setNmeaMainTalkerId] = useState(0);
+  const [nmeaGsvTalkerId, setNmeaGsvTalkerId] = useState(0);
+  const [nmeaBdsTalkerId, setNmeaBdsTalkerId] = useState('');
+  // CFG-NMEA-DATA0/1/2: puramente visual, ver comentario en NMEA_DATA_LEVEL_OPTIONS - default
+  // DATA2 (todo habilitado), igual que el comportamiento de siempre antes de este selector
+  const [nmeaDataLevel, setNmeaDataLevel] = useState<NmeaDataLevel>('DATA2');
+  const nmeaDisableData1Fields = nmeaDataLevel !== 'DATA2'; // BeiDou Talker ID/High precision/Limit82
+  const nmeaDisableData0Fields = nmeaDataLevel === 'DATA0'; // + GNSS filter/Numbering/Talker ID
+
+  // CFG-NMEA-HIGHPREC no puede convivir con COMPAT ni LIMIT82 (el receptor lo rechaza) - activar
+  // cualquiera de los 3 apaga los otros dos automaticamente, nunca se manda una combinacion invalida
+  function setHighPrecision(v: boolean) {
+    setHighPrecisionRaw(v);
+    if (v) {
+      setNmeaCompatRaw(false);
+      setNmeaLimit82Raw(false);
+    }
+  }
+  function setNmeaCompat(v: boolean) {
+    setNmeaCompatRaw(v);
+    if (v) setHighPrecisionRaw(false);
+  }
+  function setNmeaLimit82(v: boolean) {
+    setNmeaLimit82Raw(v);
+    if (v) setHighPrecisionRaw(false);
+  }
+
+  const [portTarget, setPortTarget] = useState<'I2C' | 'UART1' | 'UART2' | 'USB' | 'SPI'>('UART2');
+  const [portBaudRate, setPortBaudRate] = useState(115200);
+  const [portDatabits, setPortDatabits] = useState(0);
+  const [portStopbits, setPortStopbits] = useState(1);
+  const [portParity, setPortParity] = useState(0);
+  const [portI2cAddress, setPortI2cAddress] = useState(66); // CFG-I2C-ADDRESS, 0x42 = default real de fabrica
+  const [portSpiCpol, setPortSpiCpol] = useState(false); // CFG-SPI-CPOLARITY, false = Mode 0 (el default real)
+  const [portSpiCpha, setPortSpiCpha] = useState(false); // CFG-SPI-CPHASE, false = Mode 0
+  // default UART2 real: in = UBX+NMEA+RTCM3, out = solo NMEA
+  const [portProtocolIn, setPortProtocolIn] = useState('ubx+nmea+rtcm3x');
+  const [portProtocolOut, setPortProtocolOut] = useState('nmea');
+  const isUartTarget = portTarget === 'UART1' || portTarget === 'UART2';
+  const isI2cTarget = portTarget === 'I2C';
+  const isSpiTarget = portTarget === 'SPI';
+
+  const [msgRates, setMsgRates] = useState<MsgRateState>(defaultMsgRates);
+  const [selectedMessage, setSelectedMessage] = useState<NmeaMessageId>('GGA');
+  function updateMsgRate(message: NmeaMessageId, port: MsgPort, patch: Partial<{ on: boolean; value: number }>) {
+    setMsgRates((prev) => ({
+      ...prev,
+      [message]: { ...prev[message], [port]: { ...prev[message][port], ...patch } },
+    }));
+  }
+
+  // solo lectura, calculados - igual que "Measurement Frequency"/"Navigation Frequency" en la
+  // vista RATE de u-center real, que tampoco se mandan al receptor, son puro derivado en pantalla
+  const measFreqHz = measRateMs > 0 ? 1000 / measRateMs : 0;
+  const navFreqHz = navRateCyc > 0 ? measFreqHz / navRateCyc : 0;
+
+  return (
+    <div className="ds-modal-overlay" onClick={onClose}>
+      <div className="cfg-shell" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-header">
+          <h3>Configuración del receptor</h3>
+          <button className="cfg-close" onClick={onClose} aria-label="Cerrar">
+            ×
+          </button>
+        </div>
+        <div className="cfg-body">
+          <p className="cfg-mini-hint">
+            Reemplaza el aprovisionamiento que antes requería una PC con u-center conectada por USB -
+            se manda por el mismo cable/Bluetooth que ya está en uso.
+          </p>
+
+          <div className="cfg-row">
+            <div className="cfg-col">
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">RATE (Rates)</h4>
+                <label className="cfg-version-row">
+                  <span>Measurement Period (ms)</span>
+                  <input
+                    type="number"
+                    min={50}
+                    max={1000}
+                    style={{ width: 90 }}
+                    value={measRateMs}
+                    onChange={(e) => setMeasRateMs(Number(e.target.value))}
+                  />
+                </label>
+                <div className="cfg-version-row">
+                  <span>Measurement Frequency</span>
+                  <span className="cfg-chip">{measFreqHz.toFixed(2)} Hz</span>
+                </div>
+                <label className="cfg-version-row">
+                  <span>Navigation Rate (cyc)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={127}
+                    style={{ width: 90 }}
+                    value={navRateCyc}
+                    onChange={(e) => setNavRateCyc(Number(e.target.value))}
+                  />
+                </label>
+                <div className="cfg-version-row">
+                  <span>Navigation Frequency</span>
+                  <span className="cfg-chip">{navFreqHz.toFixed(2)} Hz</span>
+                </div>
+
+                <label className="ds-label">Time Source</label>
+                <select value={timeRef} onChange={(e) => setTimeRef(Number(e.target.value))}>
+                  {TIME_REF_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">Configuración general</h4>
+                <label className="ds-label">Modelo dinámico</label>
+                <select value={dynModel} onChange={(e) => setDynModel(Number(e.target.value))}>
+                  {DYN_MODEL_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+
+                <label className="ds-toggle-row">
+                  <input type="checkbox" checked={qzssEnabled} onChange={(e) => setQzssEnabled(e.target.checked)} />
+                  Activar QZSS (regional de Japón, sin uso en México)
+                </label>
+              </div>
+            </div>
+
+            <div className="cfg-col">
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">PRT (Ports)</h4>
+                <label className="ds-label">Target</label>
+                <select
+                  value={portTarget}
+                  onChange={(e) => setPortTarget(e.target.value as 'I2C' | 'UART1' | 'UART2' | 'USB' | 'SPI')}
+                >
+                  {PORT_TARGET_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+
+                <label className="ds-label">Protocol in</label>
+                <select value={portProtocolIn} onChange={(e) => setPortProtocolIn(e.target.value)}>
+                  {PROTOCOL_IN_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+
+                <label className="ds-label">Protocol out</label>
+                <select value={portProtocolOut} onChange={(e) => setPortProtocolOut(e.target.value)}>
+                  {PROTOCOL_OUT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+
+                {isUartTarget && (
+                  <>
+                    <label className="ds-label">Baudrate</label>
+                    <select value={portBaudRate} onChange={(e) => setPortBaudRate(Number(e.target.value))}>
+                      {BAUD_RATE_OPTIONS.map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </select>
+
+                    <label className="ds-label">Databits</label>
+                    <select value={portDatabits} onChange={(e) => setPortDatabits(Number(e.target.value))}>
+                      {DATABITS_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <label className="ds-label">Stopbits</label>
+                    <select value={portStopbits} onChange={(e) => setPortStopbits(Number(e.target.value))}>
+                      {STOPBITS_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <label className="ds-label">Parity</label>
+                    <select value={portParity} onChange={(e) => setPortParity(Number(e.target.value))}>
+                      {PARITY_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+
+                {isI2cTarget && (
+                  <>
+                    <label className="ds-label">I2C Address</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={127}
+                      value={portI2cAddress}
+                      onChange={(e) => setPortI2cAddress(Number(e.target.value))}
+                    />
+                  </>
+                )}
+
+                {isSpiTarget && (
+                  <>
+                    <label className="ds-toggle-row">
+                      <input type="checkbox" checked={portSpiCpol} onChange={(e) => setPortSpiCpol(e.target.checked)} />
+                      Clock Polarity (Active Low - SCLK idles high)
+                    </label>
+                    <label className="ds-toggle-row">
+                      <input type="checkbox" checked={portSpiCpha} onChange={(e) => setPortSpiCpha(e.target.checked)} />
+                      Clock Phase (data capturada en el 2do flanco de SCLK)
+                    </label>
+                  </>
+                )}
+
+                <p className="cfg-mini-hint">
+                  Databits/Parity/Protocol muestran solo lo que este receptor puede recibir de verdad -
+                  verificado contra el mensaje legado UBX-CFG-PRT completo (los 4 puertos), no solo la
+                  interfaz moderna: 5/6 databits y Space/Mark parity no existen en NINGUN mensaje (el
+                  propio manual los marca "not supported"), igual que Bit Order (LSB/MSB First, sin
+                  ningun campo para eso) y RAW/USER0-3 de Protocol (ni un solo bit en ningun protoMask).
+                  RTCM2 (Protocol in) si es real mediante ese mensaje legado, pero deprecated y sin uso
+                  en este proyecto (solo UBX+NMEA+RTCM3X hace falta) - se dejo fuera a proposito.
+                </p>
+              </div>
+            </div>
+
+            <div className="cfg-col">
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">MSG (Messages)</h4>
+                <label className="ds-label">Message</label>
+                <select value={selectedMessage} onChange={(e) => setSelectedMessage(e.target.value as NmeaMessageId)}>
+                  {NMEA_MESSAGES.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                {MSG_PORTS.map((port) => {
+                  const entry = msgRates[selectedMessage][port];
+                  return (
+                    <div className="cfg-version-row" key={port}>
+                      <label className="ds-toggle-row" style={{ flex: 1, marginBottom: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={entry.on}
+                          onChange={(e) => updateMsgRate(selectedMessage, port, { on: e.target.checked })}
+                        />
+                        {port}
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={255}
+                        style={{ width: 70 }}
+                        disabled={!entry.on}
+                        value={entry.value}
+                        onChange={(e) => updateMsgRate(selectedMessage, port, { value: Number(e.target.value) })}
+                      />
+                    </div>
+                  );
+                })}
+                <p className="cfg-mini-hint">
+                  Cada mensaje se activa/desactiva por puerto, con su propio divisor de la época de
+                  navegación (1 = cada época, mayor = mas espaciado) - cambia de mensaje sin perder lo
+                  ya ajustado en los demás.
+                </p>
+              </div>
+            </div>
+
+            <div className="cfg-col">
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">NMEA (NMEA Protocol)</h4>
+                <select value={nmeaDataLevel} onChange={(e) => setNmeaDataLevel(e.target.value as NmeaDataLevel)}>
+                  {NMEA_DATA_LEVEL_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+
+                <p className="uc-config-subtitle">Filters</p>
+                <label className="ds-toggle-row">
+                  <input type="checkbox" checked={nmeaOutInvFix} onChange={(e) => setNmeaOutInvFix(e.target.checked)} />
+                  Permit position output for failed and invalid fixes
+                </label>
+                <label className="ds-toggle-row">
+                  <input type="checkbox" checked={nmeaOutMskFix} onChange={(e) => setNmeaOutMskFix(e.target.checked)} />
+                  Permit position output for invalid fixes
+                </label>
+                <label className="ds-toggle-row">
+                  <input type="checkbox" checked={nmeaOutInvTime} onChange={(e) => setNmeaOutInvTime(e.target.checked)} />
+                  Permit time output for invalid times
+                </label>
+                <label className="ds-toggle-row">
+                  <input type="checkbox" checked={nmeaOutInvDate} onChange={(e) => setNmeaOutInvDate(e.target.checked)} />
+                  Permit date output for invalid dates
+                </label>
+                <label className="ds-toggle-row">
+                  <input type="checkbox" checked={nmeaOutOnlyGps} onChange={(e) => setNmeaOutOnlyGps(e.target.checked)} />
+                  Restrict output to GPS SVs only
+                </label>
+                <label className="ds-toggle-row">
+                  <input type="checkbox" checked={nmeaOutFrozenCog} onChange={(e) => setNmeaOutFrozenCog(e.target.checked)} />
+                  Permit COG output even if COG frozen
+                </label>
+
+                <label className="ds-label">NMEA Version</label>
+                <select value={nmeaProtVer} onChange={(e) => setNmeaProtVer(Number(e.target.value))}>
+                  {NMEA_VERSION_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+
+                <label className="ds-label">Max SVs per Talker Id</label>
+                <select value={nmeaMaxSvs} onChange={(e) => setNmeaMaxSvs(Number(e.target.value))}>
+                  {MAX_SVS_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+
+                <p className="uc-config-subtitle">Mode Flags</p>
+                <label className="ds-toggle-row">
+                  <input type="checkbox" checked={nmeaCompat} onChange={(e) => setNmeaCompat(e.target.checked)} />
+                  Compatibility mode
+                </label>
+                <label className="ds-toggle-row">
+                  <input type="checkbox" checked={nmeaConsider} onChange={(e) => setNmeaConsider(e.target.checked)} />
+                  Consider mode
+                </label>
+                <label className="ds-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={nmeaLimit82}
+                    disabled={nmeaDisableData1Fields}
+                    onChange={(e) => setNmeaLimit82(e.target.checked)}
+                  />
+                  Strict limit 82 chars max
+                </label>
+                <label className="ds-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={highPrecision}
+                    disabled={nmeaDisableData1Fields}
+                    onChange={(e) => setHighPrecision(e.target.checked)}
+                  />
+                  High precision mode (7 decimales en vez de 5)
+                </label>
+                <p className="cfg-mini-hint">
+                  High precision es excluyente con Compatibility/Strict limit 82 - activar cualquiera
+                  de los tres apaga los otros dos.
+                </p>
+
+                <p className="uc-config-subtitle">GNSS to filter out</p>
+                <label className="ds-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={nmeaFiltGps}
+                    disabled={nmeaDisableData0Fields}
+                    onChange={(e) => setNmeaFiltGps(e.target.checked)}
+                  />
+                  GPS
+                </label>
+                <label className="ds-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={nmeaFiltSbas}
+                    disabled={nmeaDisableData0Fields}
+                    onChange={(e) => setNmeaFiltSbas(e.target.checked)}
+                  />
+                  SBAS
+                </label>
+                <label className="ds-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={nmeaFiltGal}
+                    disabled={nmeaDisableData0Fields}
+                    onChange={(e) => setNmeaFiltGal(e.target.checked)}
+                  />
+                  Galileo
+                </label>
+                <label className="ds-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={nmeaFiltQzss}
+                    disabled={nmeaDisableData0Fields}
+                    onChange={(e) => setNmeaFiltQzss(e.target.checked)}
+                  />
+                  QZSS
+                </label>
+                <label className="ds-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={nmeaFiltGlo}
+                    disabled={nmeaDisableData0Fields}
+                    onChange={(e) => setNmeaFiltGlo(e.target.checked)}
+                  />
+                  GLONASS
+                </label>
+                <label className="ds-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={nmeaFiltBds}
+                    disabled={nmeaDisableData0Fields}
+                    onChange={(e) => setNmeaFiltBds(e.target.checked)}
+                  />
+                  BeiDou
+                </label>
+
+                <label className="ds-label">Numbering used for SVs not supported by NMEA</label>
+                <select
+                  value={nmeaSvNumbering}
+                  disabled={nmeaDisableData0Fields}
+                  onChange={(e) => setNmeaSvNumbering(Number(e.target.value))}
+                >
+                  {SV_NUMBERING_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+
+                <label className="ds-label">Main Talker ID</label>
+                <select
+                  value={nmeaMainTalkerId}
+                  disabled={nmeaDisableData0Fields}
+                  onChange={(e) => setNmeaMainTalkerId(Number(e.target.value))}
+                >
+                  {MAIN_TALKER_ID_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+
+                <label className="ds-label">GSV Talker ID</label>
+                <select
+                  value={nmeaGsvTalkerId}
+                  disabled={nmeaDisableData0Fields}
+                  onChange={(e) => setNmeaGsvTalkerId(Number(e.target.value))}
+                >
+                  {GSV_TALKER_ID_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+
+                <label className="ds-label">BeiDou Talker ID (2 caracteres, opcional)</label>
+                <input
+                  type="text"
+                  maxLength={2}
+                  placeholder="Vacio = por defecto"
+                  disabled={nmeaDisableData1Fields}
+                  value={nmeaBdsTalkerId}
+                  onChange={(e) => setNmeaBdsTalkerId(e.target.value.toUpperCase())}
+                />
+                <p className="cfg-mini-hint">
+                  El selector de arriba imita las 3 variantes del mensaje legado que u-center real
+                  ofrece por compatibilidad con receptores viejos - esta app siempre usa la interfaz
+                  moderna (UBX-CFG-VALSET), que el ZED-F9P soporta completa sin importar el nivel
+                  elegido aqui. Solo deshabilita los campos en pantalla para verse igual, nunca deja
+                  de aplicar esos valores al presionar "Aplicar configuración".
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <p className="cfg-mini-hint">
+            Se guarda en la memoria del receptor de una vez. SBAS sigue necesitando u-center real.
+          </p>
+          <div className="ds-actions">
+            <button
+              onClick={() => {
+                const inFlags = protocolInFlags(portProtocolIn);
+                const outFlags = protocolOutFlags(portProtocolOut);
+                provisioning.onApply({
+                  measRateMs,
+                  navRateCyc,
+                  timeRef,
+                  dynModel,
+                  highPrecision,
+                  qzssEnabled,
+                  portTarget,
+                  portBaudRate,
+                  portDatabits,
+                  portStopbits,
+                  portParity,
+                  portI2cAddress,
+                  portSpiCpol,
+                  portSpiCpha,
+                  portProtocolInUbx: inFlags.ubx,
+                  portProtocolInNmea: inFlags.nmea,
+                  portProtocolInRtcm3x: inFlags.rtcm3x,
+                  portProtocolInSpartn: inFlags.spartn,
+                  portProtocolOutUbx: outFlags.ubx,
+                  portProtocolOutNmea: outFlags.nmea,
+                  portProtocolOutRtcm3x: outFlags.rtcm3x,
+                  msgRates: flattenMsgRates(msgRates),
+                  nmeaProtVer,
+                  nmeaMaxSvs,
+                  nmeaCompat,
+                  nmeaConsider,
+                  nmeaLimit82,
+                  nmeaSvNumbering,
+                  nmeaFiltGps,
+                  nmeaFiltSbas,
+                  nmeaFiltGal,
+                  nmeaFiltQzss,
+                  nmeaFiltGlo,
+                  nmeaFiltBds,
+                  nmeaOutInvFix,
+                  nmeaOutMskFix,
+                  nmeaOutInvTime,
+                  nmeaOutInvDate,
+                  nmeaOutOnlyGps,
+                  nmeaOutFrozenCog,
+                  nmeaMainTalkerId,
+                  nmeaGsvTalkerId,
+                  nmeaBdsTalkerId,
+                });
+              }}
+              disabled={provisioning.busy}
+            >
+              {provisioning.busy ? 'Aplicando...' : 'Aplicar configuración'}
+            </button>
+            <button className="ds-remove" onClick={onClose}>
+              Cerrar
+            </button>
+          </div>
+          {provisioning.message && <p className="cfg-mini-hint">{provisioning.message}</p>}
+          {provisioning.error && <div className="ds-error-block">{provisioning.error}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NtripProfileModal({
   form,
   isEditing,
@@ -1087,6 +1960,7 @@ interface UCenterViewProps {
   onClose: () => void;
   connection: UCenterConnectionProps;
   ntrip: UCenterNtripProps;
+  provisioning: UCenterProvisioningProps;
 }
 
 // Réplica de u-center dentro de la app - conexion/correccion (Receptor, NTRIP Client) y las vistas
@@ -1096,9 +1970,10 @@ interface UCenterViewProps {
 // en una tableta). "World Position" NO es el mapa real del Operador (MapView, con tiles reales) -
 // es puramente informativo dentro de este menu de diagnostico, para ver donde cae aproximadamente
 // cada satelite sobre el globo (ver satelliteSubpoint()), nunca se usa para navegar.
-export function UCenterView({ status, onClose, connection, ntrip }: UCenterViewProps) {
+export function UCenterView({ status, onClose, connection, ntrip, provisioning }: UCenterViewProps) {
   const mode = fixModeLabel(status);
   const precision = formatHeaderPrecision(status.lastFix);
+  const [showProvisioning, setShowProvisioning] = useState(false);
   return (
     <div className="ds-modal-overlay" onClick={onClose}>
       <div className="cfg-shell" onClick={(e) => e.stopPropagation()}>
@@ -1114,10 +1989,18 @@ export function UCenterView({ status, onClose, connection, ntrip }: UCenterViewP
               </span>
             )}
           </div>
-          <button className="cfg-close" onClick={onClose} aria-label="Cerrar">
-            ×
-          </button>
+          <div className="uc-header-actions">
+            <button className="cfg-close" onClick={() => setShowProvisioning(true)} aria-label="Configuración del receptor" title="Configuración del receptor">
+              ⚙
+            </button>
+            <button className="cfg-close" onClick={onClose} aria-label="Cerrar">
+              ×
+            </button>
+          </div>
         </div>
+        {showProvisioning && (
+          <ReceiverProvisioningModal provisioning={provisioning} onClose={() => setShowProvisioning(false)} />
+        )}
         <div className="cfg-body">
           <div className="uc-config-row">
             <ReceiverSection status={status} connection={connection} />

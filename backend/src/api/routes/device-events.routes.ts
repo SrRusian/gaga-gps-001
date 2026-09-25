@@ -13,6 +13,12 @@ import type InfractionRepository from '../../repositories/InfractionRepository';
 const MAX_DEVICE_EVENTS = 500;
 const VALID_SEVERITIES = new Set(['info', 'warning', 'danger']);
 
+// gravedad fija para "salio de zona permitida siendo un dispositivo restringido" - no es una zona
+// de peligro real, es un limite operativo. Mismo valor que RESTRICTED_ZONE_INFRACTION_SEVERITY en
+// GeofenceAlertService.ts (duplicado a proposito, ese codigo ya no corre en produccion pero se deja
+// como referencia canonica - ver evaluateRestrictedZone)
+const RESTRICTED_ZONE_INFRACTION_SEVERITY = 7;
+
 // gravedad de la infraccion por exceso: misma escala que utils/infractionSeverity.ts del backend
 function speedInfractionSeverity(speedKmh: number, limitKmh: number): number {
   const over = (speedKmh - limitKmh) / limitKmh;
@@ -90,24 +96,35 @@ export function buildDeviceEventsRouter({
 
   async function handleEvent(event: Record<string, unknown>): Promise<boolean> {
     const deviceId = event?.deviceId ? String(event.deviceId) : null;
-    const severity = String(event?.severity) as 'info' | 'warning' | 'danger';
     const kind = String(event?.kind);
+    if (!deviceId) return false;
+
+    // aviso puro de "estoy en zona permitida/estacionamiento", desacoplado de cualquier severidad -
+    // no genera alerta ni infraccion, solo actualiza el estado que SignalLostService usa para no
+    // alarmar al proyecto si la tableta se queda sin señal justo despues de estacionarse
+    if (kind === 'zone_status') {
+      if (typeof event.inAllowedZone === 'boolean') {
+        signalLostService?.setZoneExempt(deviceId, event.inAllowedZone);
+      }
+      return true;
+    }
+
+    const severity = String(event?.severity) as 'info' | 'warning' | 'danger';
     const state = String(event?.state);
     const occurredAt = new Date(String(event?.occurredAt));
 
-    if (!deviceId || !VALID_SEVERITIES.has(severity)) return false;
-    if (kind !== 'geofence' && kind !== 'speed') return false;
+    if (!VALID_SEVERITIES.has(severity)) return false;
+    if (kind !== 'geofence' && kind !== 'speed' && kind !== 'restricted_zone') return false;
     if (Number.isNaN(occurredAt.getTime())) return false;
 
-    // lo ultimo que la tableta reporto sobre si estaba estacionada donde puede estarlo - se usa
-    // para no alarmar al proyecto si justo despues se queda sin señal (ver SignalLostService)
+    // compatibilidad hacia atras: si algun evento geofence/speed sigue trayendo este campo
     if (typeof event.inAllowedZone === 'boolean') {
       signalLostService?.setZoneExempt(deviceId, event.inAllowedZone);
     }
 
     const device = await deviceRepo.findByUniqueId(deviceId);
     const projectId = device?.project_id ?? null;
-    const alertType = kind === 'speed' ? 'speed' : 'geofence';
+    const alertType = kind === 'speed' ? 'speed' : kind === 'restricted_zone' ? 'restricted_zone' : 'geofence';
     const message = event?.message ? String(event.message) : null;
 
     if (state === 'cleared') {
@@ -160,7 +177,9 @@ export function buildDeviceEventsRouter({
         severity:
           kind === 'speed' && speedKmh !== null && limitKmh !== null
             ? speedInfractionSeverity(speedKmh, limitKmh)
-            : 8,
+            : kind === 'restricted_zone'
+              ? RESTRICTED_ZONE_INFRACTION_SEVERITY
+              : 8,
         occurredAt,
         metadata: { reportedByDevice: true, ...pickMetadata(event) },
       });
@@ -180,7 +199,12 @@ export function buildDeviceEventsRouter({
     });
     socketServer?.broadcastToProject(projectId, 'supervisor:alert', {
       deviceId,
-      type: kind === 'speed' ? 'speed_danger' : 'geofence_red',
+      type:
+        kind === 'speed'
+          ? 'speed_danger'
+          : kind === 'restricted_zone'
+            ? 'restricted_zone_violation'
+            : 'geofence_red',
       severity,
       message,
       timestamp: new Date().toISOString(),

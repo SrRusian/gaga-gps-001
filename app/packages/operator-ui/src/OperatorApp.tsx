@@ -59,6 +59,9 @@ export default function OperatorApp() {
     activeGeofenceId,
     incidents,
     proximityNotice,
+    networkNotice,
+    restrictedToAllowedZone,
+    geofencesReady,
     sounds,
   } = useOperatorSocket(deviceId);
   const [mapMode, setMapMode] = useMapMode('gaga_operator_map_mode');
@@ -89,6 +92,8 @@ export default function OperatorApp() {
     speedLimits,
     connected,
     sounds,
+    restrictedToAllowedZone,
+    geofencesReady,
   );
 
   const SEVERITY_RANK = { info: 1, warning: 2, danger: 3 } as const;
@@ -254,10 +259,20 @@ export default function OperatorApp() {
               <MapModeSelector mode={mapMode} onChange={setMapMode} />
             </div>
 
-            {proximityNotice && (
-              <div className="op-proximity-notice">
-                <span className="op-proximity-notice-dot" />
-                {proximityNotice.message} ({Math.round(proximityNotice.distanceMeters)} m)
+            {(proximityNotice || networkNotice) && (
+              <div className="op-notice-stack">
+                {proximityNotice && (
+                  <div className="op-proximity-notice">
+                    <span className="op-proximity-notice-dot" />
+                    {proximityNotice.message} ({Math.round(proximityNotice.distanceMeters)} m)
+                  </div>
+                )}
+                {networkNotice && (
+                  <div className={`op-network-notice op-network-notice--${networkNotice.severity}`}>
+                    <span className="op-network-notice-dot" />
+                    {networkNotice.message}
+                  </div>
+                )}
               </div>
             )}
 

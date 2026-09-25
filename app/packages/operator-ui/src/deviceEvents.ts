@@ -15,7 +15,11 @@ const BATCH_SIZE = 500; // debe coincidir con MAX_DEVICE_EVENTS del backend
 const MAX_QUEUED = 5000;
 
 export interface DeviceEvent {
-  kind: 'geofence' | 'speed';
+  // 'zone_status' es un aviso puro de "estoy en zona permitida/estacionamiento" - no genera alerta
+  // ni infraccion, solo actualiza el estado que SignalLostService usa (ver useLocalAlerts.ts).
+  // 'restricted_zone' es la violacion real (dispositivo restringido, fuera de "allowed") - SI
+  // genera alerta/infraccion, mismo criterio que danger de geocerca.
+  kind: 'geofence' | 'speed' | 'zone_status' | 'restricted_zone';
   state: 'raised' | 'cleared';
   deviceId: string;
   severity: 'warning' | 'danger' | 'info';
