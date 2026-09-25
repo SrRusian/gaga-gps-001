@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 123,
-      "versionName": "1.1.07-alert-banner-slide-animation",
+      "versionCode": 127,
+      "versionName": "1.1.11-config-diff-confirm",
       "outputFile": "app-release.apk"
     }
   ],

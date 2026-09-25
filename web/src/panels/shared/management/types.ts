@@ -43,6 +43,9 @@ export interface VehicleTypeRow {
   length_meters: number;
   width_meters: number;
   max_speed_kmh: number | null;
+  // decide comportamientos reales en la tableta (congelado de posicion con el vehiculo detenido,
+  // aviso anticipado de velocidad), no es solo una etiqueta - ver 001_init.sql
+  category: 'transport' | 'machinery';
 }
 
 export interface AppReleaseRow {

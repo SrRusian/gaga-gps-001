@@ -277,4 +277,47 @@ describe('SignalLostService', () => {
     );
     expect(deviceManager.markOffline).toHaveBeenCalledWith('TABLETA-VIEJA');
   });
+
+  // Bug real de campo: con la tableta parada en el mismo lugar todo un dia, 32 alertas de senal
+  // perdida por huecos de 5-15s del receptor GNSS (perdida de fix bajo techo). Un vehiculo parado
+  // que pierde senal unos segundos no es una emergencia; uno EN MOVIMIENTO que desaparece si.
+  describe('umbral ampliado cuando el vehiculo llevaba rato detenido', () => {
+    // llena el historial: 90s reportando a 0 km/h, para que quede marcado como parado
+    function parkFor90s(deviceId: string) {
+      for (let i = 0; i < 9; i++) {
+        service.recordPosition(deviceId, null, 0);
+        vi.advanceTimersByTime(10000);
+      }
+      service.recordPosition(deviceId, null, 0);
+    }
+
+    it('parado: 10s de hueco ya NO alerta (antes si)', () => {
+      parkFor90s('T1');
+      vi.advanceTimersByTime(10000);
+      service.checkAllDevices();
+      expect(socketServer.broadcastToProjectExceptDevice).not.toHaveBeenCalled();
+    });
+
+    it('parado: a los 30s si alerta - no se silencia para siempre', () => {
+      parkFor90s('T1');
+      vi.advanceTimersByTime(30000);
+      service.checkAllDevices();
+      expect(socketServer.broadcastToProjectExceptDevice).toHaveBeenCalled();
+    });
+
+    it('en movimiento conserva el umbral corto de 5s', () => {
+      parkFor90s('T1');
+      service.recordPosition('T1', null, 40); // arranco de verdad
+      vi.advanceTimersByTime(5000);
+      service.checkAllDevices();
+      expect(socketServer.broadcastToProjectExceptDevice).toHaveBeenCalled();
+    });
+
+    it('un vehiculo recien visto no cuenta como "parado hace rato"', () => {
+      service.recordPosition('T1', null, 0);
+      vi.advanceTimersByTime(5000);
+      service.checkAllDevices();
+      expect(socketServer.broadcastToProjectExceptDevice).toHaveBeenCalled();
+    });
+  });
 });

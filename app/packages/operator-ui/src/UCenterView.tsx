@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   KioskStatus,
   NmeaMessageId,
@@ -944,10 +944,35 @@ export interface ReceiverProvisioningOptions {
   nmeaMainTalkerId: number;
   nmeaGsvTalkerId: number;
   nmeaBdsTalkerId: string;
+  staticHoldSpeedCmS: number;
+  staticHoldExitDistanceM: number;
 }
 
+// lo que devuelve la lectura del receptor: los mismos campos que se escriben (todos opcionales -
+// el receptor puede no contestar alguno) mas cuantas claves contesto de las que se pidieron
+// un ajuste que de verdad cambio respecto a lo que se leyo del receptor - alimenta el aviso de
+// confirmacion, que antes era un texto fijo que listaba siempre los mismos campos sin importar que
+// hubieras tocado
+export interface ReceiverConfigChange {
+  label: string;
+  from: string;
+  to: string;
+}
+
+export type ReceiverConfigRead = Partial<ReceiverProvisioningOptions> & {
+  complete: boolean;
+  readCount: number;
+  expectedCount: number;
+};
+
 export interface UCenterProvisioningProps {
-  onApply: (options: ReceiverProvisioningOptions) => void;
+  onApply: (options: ReceiverProvisioningOptions, changes: ReceiverConfigChange[]) => void;
+  // lee la configuracion REAL del receptor al abrir el panel - sin esto los campos mostrarian los
+  // defaults del codigo y darle "Aplicar" sobreescribiria lo que el receptor de verdad tenga
+  onRead: (
+    portTarget: ReceiverProvisioningOptions['portTarget'],
+    msgRates: ReceiverProvisioningOptions['msgRates'],
+  ) => Promise<ReceiverConfigRead>;
   busy: boolean;
   message: string;
   error: string;
@@ -1055,6 +1080,22 @@ function protocolInFlags(key: string) {
 }
 function protocolOutFlags(key: string) {
   return PROTOCOL_OUT_OPTIONS.find((o) => o.value === key) ?? PROTOCOL_OUT_OPTIONS[0];
+}
+
+// inversas: del juego de banderas que reporta el receptor de vuelta a la opcion del desplegable.
+// Si el receptor trae una combinacion que este desplegable no ofrece (posible, el protocolo permite
+// mas de las que se exponen), se deja la seleccion actual en vez de inventar una equivalencia.
+function protocolInKey(f: { ubx: boolean; nmea: boolean; rtcm3x: boolean; spartn: boolean }): string | null {
+  return (
+    PROTOCOL_IN_OPTIONS.find(
+      (o) => o.ubx === f.ubx && o.nmea === f.nmea && o.rtcm3x === f.rtcm3x && o.spartn === f.spartn,
+    )?.value ?? null
+  );
+}
+function protocolOutKey(f: { ubx: boolean; nmea: boolean; rtcm3x: boolean }): string | null {
+  return (
+    PROTOCOL_OUT_OPTIONS.find((o) => o.ubx === f.ubx && o.nmea === f.nmea && o.rtcm3x === f.rtcm3x)?.value ?? null
+  );
 }
 
 // CFG-RATE-TIMEREF (Table 38, manual HPG 1.32) - Time Source de la vista RATE real de u-center
@@ -1182,11 +1223,110 @@ const NMEA_DATA_LEVEL_OPTIONS: { value: NmeaDataLevel; label: string }[] = [
   { value: 'DATA0', label: 'CFG-NMEA-DATA0' },
 ];
 
+// nombre legible de cada ajuste para el aviso de confirmacion - los que tienen desplegable
+// muestran la etiqueta real de la opcion, no el numero crudo
+const FIELD_LABEL: Record<string, string> = {
+  measRateMs: 'Measurement Period (ms)',
+  navRateCyc: 'Navigation Rate (cyc)',
+  timeRef: 'Time Source',
+  dynModel: 'Modelo dinamico',
+  qzssEnabled: 'QZSS',
+  staticHoldSpeedCmS: 'Static Hold Threshold',
+  staticHoldExitDistanceM: 'Static Hold Exit Distance',
+  highPrecision: 'Precision NMEA alta',
+  nmeaCompat: 'Compatibility mode',
+  nmeaLimit82: 'Strict limit 82 chars',
+  nmeaConsider: 'Consider mode',
+  nmeaProtVer: 'NMEA Version',
+  nmeaMaxSvs: 'Max SVs per Talker Id',
+  nmeaSvNumbering: 'SV numbering',
+  nmeaFiltGps: 'Filtrar GPS',
+  nmeaFiltSbas: 'Filtrar SBAS',
+  nmeaFiltGal: 'Filtrar Galileo',
+  nmeaFiltQzss: 'Filtrar QZSS',
+  nmeaFiltGlo: 'Filtrar GLONASS',
+  nmeaFiltBds: 'Filtrar BeiDou',
+  nmeaOutInvFix: 'Permitir fix invalido',
+  nmeaOutMskFix: 'Permitir fix enmascarado',
+  nmeaOutInvTime: 'Permitir hora invalida',
+  nmeaOutInvDate: 'Permitir fecha invalida',
+  nmeaOutOnlyGps: 'Restringir a GPS',
+  nmeaOutFrozenCog: 'Permitir COG congelado',
+  nmeaMainTalkerId: 'Main Talker ID',
+  nmeaGsvTalkerId: 'GSV Talker ID',
+  nmeaBdsTalkerId: 'BeiDou Talker ID',
+  portTarget: 'Target',
+  portBaudRate: 'Baudrate',
+  portDatabits: 'Databits',
+  portStopbits: 'Stopbits',
+  portParity: 'Parity',
+  portI2cAddress: 'I2C Address',
+  portSpiCpol: 'SPI Clock Polarity',
+  portSpiCpha: 'SPI Clock Phase',
+  portProtocolInUbx: 'Protocol in - UBX',
+  portProtocolInNmea: 'Protocol in - NMEA',
+  portProtocolInRtcm3x: 'Protocol in - RTCM3',
+  portProtocolInSpartn: 'Protocol in - SPARTN',
+  portProtocolOutUbx: 'Protocol out - UBX',
+  portProtocolOutNmea: 'Protocol out - NMEA',
+  portProtocolOutRtcm3x: 'Protocol out - RTCM3',
+};
+
+function optionLabel(list: { value: number; label: string }[], v: number): string {
+  return list.find((o) => o.value === v)?.label ?? String(v);
+}
+
+function fieldText(field: string, value: unknown): string {
+  if (typeof value === 'boolean') return value ? 'si' : 'no';
+  if (typeof value === 'number') {
+    if (field === 'dynModel') return optionLabel(DYN_MODEL_OPTIONS, value);
+    if (field === 'timeRef') return optionLabel(TIME_REF_OPTIONS, value);
+    if (field === 'nmeaProtVer') return optionLabel(NMEA_VERSION_OPTIONS, value);
+    if (field === 'staticHoldSpeedCmS') return `${value} (${(value * 0.036).toFixed(1)} km/h)`;
+    return String(value);
+  }
+  if (value === '' || value === undefined) return '(vacio)';
+  return String(value);
+}
+
+// compara lo que se leyo del receptor contra lo que el formulario tiene ahora. Un campo que el
+// receptor no contesto no se puede comparar, asi que no se reporta como cambio (no se sabe si lo es).
+function diffProvisioning(
+  baseline: ReceiverConfigRead | null,
+  next: ReceiverProvisioningOptions,
+): ReceiverConfigChange[] {
+  if (!baseline) return [];
+  const changes: ReceiverConfigChange[] = [];
+  for (const [field, value] of Object.entries(next)) {
+    if (field === 'msgRates') continue;
+    const before = (baseline as Record<string, unknown>)[field];
+    if (before === undefined || before === value) continue;
+    changes.push({
+      label: FIELD_LABEL[field] ?? field,
+      from: fieldText(field, before),
+      to: fieldText(field, value),
+    });
+  }
+  for (const r of next.msgRates) {
+    const before = baseline.msgRates?.find((x) => x.message === r.message && x.port === r.port);
+    if (!before || (before.on === r.on && before.value === r.value)) continue;
+    changes.push({
+      label: `Mensaje ${r.message} por ${r.port}`,
+      from: before.on ? `cada ${before.value}` : 'apagado',
+      to: r.on ? `cada ${r.value}` : 'apagado',
+    });
+  }
+  return changes;
+}
+
 function ReceiverProvisioningModal({ provisioning, onClose }: { provisioning: UCenterProvisioningProps; onClose: () => void }) {
   const [measRateMs, setMeasRateMs] = useState(100);
   const [navRateCyc, setNavRateCyc] = useState(1);
   const [timeRef, setTimeRef] = useState(1); // CFG-RATE-TIMEREF, default 1=GPS (factory default real)
   const [dynModel, setDynModel] = useState(4);
+  // 111 cm/s = 4 km/h (pedido explicito: ningun vehiculo de esta flota se mueve mas lento de verdad)
+  const [staticHoldSpeedCmS, setStaticHoldSpeedCmS] = useState(111);
+  const [staticHoldExitDistanceM, setStaticHoldExitDistanceM] = useState(5);
   const [highPrecision, setHighPrecisionRaw] = useState(true);
   const [qzssEnabled, setQzssEnabled] = useState(false);
 
@@ -1253,6 +1393,127 @@ function ReceiverProvisioningModal({ provisioning, onClose }: { provisioning: UC
 
   const [msgRates, setMsgRates] = useState<MsgRateState>(defaultMsgRates);
   const [selectedMessage, setSelectedMessage] = useState<NmeaMessageId>('GGA');
+
+  // Lectura inicial: el panel arranca con lo que el receptor TIENE, no con los defaults del
+  // codigo. Sin esto, abrir y darle "Aplicar" sobreescribia silenciosamente la configuracion real
+  // con valores inventados - justo lo que u-center evita no dejando abrir sus vistas CFG sin
+  // receptor conectado.
+  // lo ultimo leido del receptor - referencia contra la que se calcula que cambio de verdad
+  const [baseline, setBaseline] = useState<ReceiverConfigRead | null>(null);
+  const [reading, setReading] = useState(true);
+  const [readError, setReadError] = useState('');
+  const [readNote, setReadNote] = useState('');
+
+  const readFromReceiver = useCallback(async () => {
+    setReading(true);
+    setReadError('');
+    setReadNote('');
+    try {
+      const cfg = await provisioning.onRead(portTarget, flattenMsgRates(msgRates));
+      applySnapshot(cfg);
+      setBaseline(cfg);
+      if (!cfg.complete) {
+        setReadNote(
+          `El receptor contesto ${cfg.readCount} de ${cfg.expectedCount} ajustes. Los que falten se quedaron en su valor anterior.`,
+        );
+      }
+    } catch (e) {
+      setBaseline(null);
+      setReadError(e instanceof Error ? e.message : 'No se pudo leer la configuracion del receptor');
+    } finally {
+      setReading(false);
+    }
+    // applySnapshot/msgRates se leen al vuelo a proposito - esto corre al abrir y al cambiar de
+    // puerto, no en cada tecleo del formulario
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portTarget]);
+
+  useEffect(() => {
+    void readFromReceiver();
+  }, [readFromReceiver]);
+
+  function applySnapshot(cfg: ReceiverConfigRead) {
+    const n = (v: number | undefined, set: (x: number) => void) => {
+      if (typeof v === 'number') set(v);
+    };
+    const b = (v: boolean | undefined, set: (x: boolean) => void) => {
+      if (typeof v === 'boolean') set(v);
+    };
+    n(cfg.measRateMs, setMeasRateMs);
+    n(cfg.navRateCyc, setNavRateCyc);
+    n(cfg.timeRef, setTimeRef);
+    n(cfg.dynModel, setDynModel);
+    n(cfg.staticHoldSpeedCmS, setStaticHoldSpeedCmS);
+    n(cfg.staticHoldExitDistanceM, setStaticHoldExitDistanceM);
+    b(cfg.qzssEnabled, setQzssEnabled);
+    n(cfg.nmeaProtVer, setNmeaProtVer);
+    n(cfg.nmeaMaxSvs, setNmeaMaxSvs);
+    n(cfg.nmeaSvNumbering, setNmeaSvNumbering);
+    n(cfg.nmeaMainTalkerId, setNmeaMainTalkerId);
+    n(cfg.nmeaGsvTalkerId, setNmeaGsvTalkerId);
+    if (typeof cfg.nmeaBdsTalkerId === 'string') setNmeaBdsTalkerId(cfg.nmeaBdsTalkerId);
+    // los 3 excluyentes se escriben crudos (setXRaw), sin pasar por la exclusion mutua de la UI -
+    // el receptor ya garantiza que solo uno puede estar activo, forzarla aqui apagaria el que si
+    // vino activo en el orden equivocado
+    b(cfg.highPrecision, setHighPrecisionRaw);
+    b(cfg.nmeaCompat, setNmeaCompatRaw);
+    b(cfg.nmeaLimit82, setNmeaLimit82Raw);
+    b(cfg.nmeaConsider, setNmeaConsider);
+    b(cfg.nmeaFiltGps, setNmeaFiltGps);
+    b(cfg.nmeaFiltSbas, setNmeaFiltSbas);
+    b(cfg.nmeaFiltGal, setNmeaFiltGal);
+    b(cfg.nmeaFiltQzss, setNmeaFiltQzss);
+    b(cfg.nmeaFiltGlo, setNmeaFiltGlo);
+    b(cfg.nmeaFiltBds, setNmeaFiltBds);
+    b(cfg.nmeaOutInvFix, setNmeaOutInvFix);
+    b(cfg.nmeaOutMskFix, setNmeaOutMskFix);
+    b(cfg.nmeaOutInvTime, setNmeaOutInvTime);
+    b(cfg.nmeaOutInvDate, setNmeaOutInvDate);
+    b(cfg.nmeaOutOnlyGps, setNmeaOutOnlyGps);
+    b(cfg.nmeaOutFrozenCog, setNmeaOutFrozenCog);
+    n(cfg.portBaudRate, setPortBaudRate);
+    n(cfg.portDatabits, setPortDatabits);
+    n(cfg.portStopbits, setPortStopbits);
+    n(cfg.portParity, setPortParity);
+    n(cfg.portI2cAddress, setPortI2cAddress);
+    b(cfg.portSpiCpol, setPortSpiCpol);
+    b(cfg.portSpiCpha, setPortSpiCpha);
+    if (
+      typeof cfg.portProtocolInUbx === 'boolean' &&
+      typeof cfg.portProtocolInNmea === 'boolean' &&
+      typeof cfg.portProtocolInRtcm3x === 'boolean' &&
+      typeof cfg.portProtocolInSpartn === 'boolean'
+    ) {
+      const key = protocolInKey({
+        ubx: cfg.portProtocolInUbx,
+        nmea: cfg.portProtocolInNmea,
+        rtcm3x: cfg.portProtocolInRtcm3x,
+        spartn: cfg.portProtocolInSpartn,
+      });
+      if (key) setPortProtocolIn(key);
+    }
+    if (
+      typeof cfg.portProtocolOutUbx === 'boolean' &&
+      typeof cfg.portProtocolOutNmea === 'boolean' &&
+      typeof cfg.portProtocolOutRtcm3x === 'boolean'
+    ) {
+      const key = protocolOutKey({
+        ubx: cfg.portProtocolOutUbx,
+        nmea: cfg.portProtocolOutNmea,
+        rtcm3x: cfg.portProtocolOutRtcm3x,
+      });
+      if (key) setPortProtocolOut(key);
+    }
+    if (cfg.msgRates && cfg.msgRates.length > 0) {
+      setMsgRates((prev) => {
+        const next: MsgRateState = JSON.parse(JSON.stringify(prev));
+        for (const r of cfg.msgRates!) {
+          if (next[r.message]?.[r.port]) next[r.message][r.port] = { on: r.on, value: r.value };
+        }
+        return next;
+      });
+    }
+  }
   function updateMsgRate(message: NmeaMessageId, port: MsgPort, patch: Partial<{ on: boolean; value: number }>) {
     setMsgRates((prev) => ({
       ...prev,
@@ -1276,9 +1537,25 @@ function ReceiverProvisioningModal({ provisioning, onClose }: { provisioning: UC
         </div>
         <div className="cfg-body">
           <p className="cfg-mini-hint">
-            Reemplaza el aprovisionamiento que antes requería una PC con u-center conectada por USB -
-            se manda por el mismo cable/Bluetooth que ya está en uso.
+            Los valores mostrados se leyeron del receptor, no son defaults - lo que veas aquí es lo
+            que tiene configurado ahora mismo. Se manda por el mismo cable/Bluetooth ya en uso.
           </p>
+
+          <div className="cfg-status-row">
+            <span className={`cfg-status-dot${reading ? '' : readError ? '' : ' cfg-status-dot--on'}`} />
+            <span className="cfg-status-text">
+              {reading
+                ? 'Leyendo configuración del receptor...'
+                : readError
+                  ? readError
+                  : readNote || 'Configuración leída del receptor'}
+            </span>
+            {!reading && (
+              <button className="uc-link-button" onClick={() => void readFromReceiver()}>
+                Volver a leer
+              </button>
+            )}
+          </div>
 
           <div className="cfg-row">
             <div className="cfg-col">
@@ -1340,6 +1617,41 @@ function ReceiverProvisioningModal({ provisioning, onClose }: { provisioning: UC
                   <input type="checkbox" checked={qzssEnabled} onChange={(e) => setQzssEnabled(e.target.checked)} />
                   Activar QZSS (regional de Japón, sin uso en México)
                 </label>
+              </div>
+
+              <div className="cfg-panel">
+                <h4 className="cfg-panel-title">MOT (Static Hold)</h4>
+                <div className="cfg-version-row">
+                  <span>Static Hold Threshold</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={255}
+                    style={{ width: 90 }}
+                    value={staticHoldSpeedCmS}
+                    onChange={(e) => setStaticHoldSpeedCmS(Number(e.target.value))}
+                  />
+                </div>
+                <div className="cfg-version-row">
+                  <span>Velocidad equivalente</span>
+                  <span className="cfg-chip">{(staticHoldSpeedCmS * 0.036).toFixed(1)} km/h</span>
+                </div>
+                <div className="cfg-version-row">
+                  <span>Static Hold Exit Distance</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={65535}
+                    style={{ width: 90 }}
+                    value={staticHoldExitDistanceM}
+                    onChange={(e) => setStaticHoldExitDistanceM(Number(e.target.value))}
+                  />
+                </div>
+                <p className="cfg-mini-hint">
+                  Debajo del umbral el receptor congela la posición y reporta 0 km/h hasta detectar
+                  movimiento real. Viene apagado de fábrica. Umbral en cm/s, distancia en metros;
+                  0 en cualquiera de los dos lo deja en el comportamiento por defecto (apagado).
+                </p>
               </div>
             </div>
 
@@ -1707,7 +2019,7 @@ function ReceiverProvisioningModal({ provisioning, onClose }: { provisioning: UC
               onClick={() => {
                 const inFlags = protocolInFlags(portProtocolIn);
                 const outFlags = protocolOutFlags(portProtocolOut);
-                provisioning.onApply({
+                const options: ReceiverProvisioningOptions = {
                   measRateMs,
                   navRateCyc,
                   timeRef,
@@ -1751,11 +2063,14 @@ function ReceiverProvisioningModal({ provisioning, onClose }: { provisioning: UC
                   nmeaMainTalkerId,
                   nmeaGsvTalkerId,
                   nmeaBdsTalkerId,
-                });
+                  staticHoldSpeedCmS,
+                  staticHoldExitDistanceM,
+                };
+                provisioning.onApply(options, diffProvisioning(baseline, options));
               }}
-              disabled={provisioning.busy}
+              disabled={provisioning.busy || reading || readError !== ''}
             >
-              {provisioning.busy ? 'Aplicando...' : 'Aplicar configuración'}
+              {provisioning.busy ? 'Aplicando...' : reading ? 'Leyendo...' : 'Aplicar configuración'}
             </button>
             <button className="ds-remove" onClick={onClose}>
               Cerrar
@@ -1974,6 +2289,13 @@ export function UCenterView({ status, onClose, connection, ntrip, provisioning }
   const mode = fixModeLabel(status);
   const precision = formatHeaderPrecision(status.lastFix);
   const [showProvisioning, setShowProvisioning] = useState(false);
+  // mismo criterio que u-center real: sus vistas CFG no abren sin receptor conectado, porque no
+  // tienen de donde leer la configuracion actual. Aqui es igual de importante - sin lectura previa
+  // el panel mostraria defaults del codigo y "Aplicar" los escribiria encima de los reales.
+  const receiverConnected = status.usbConnected || status.bluetoothConnected;
+  useEffect(() => {
+    if (!receiverConnected) setShowProvisioning(false);
+  }, [receiverConnected]);
   return (
     <div className="ds-modal-overlay" onClick={onClose}>
       <div className="cfg-shell" onClick={(e) => e.stopPropagation()}>
@@ -1990,7 +2312,17 @@ export function UCenterView({ status, onClose, connection, ntrip, provisioning }
             )}
           </div>
           <div className="uc-header-actions">
-            <button className="cfg-close" onClick={() => setShowProvisioning(true)} aria-label="Configuración del receptor" title="Configuración del receptor">
+            <button
+              className="cfg-close"
+              onClick={() => setShowProvisioning(true)}
+              disabled={!receiverConnected}
+              aria-label="Configuración del receptor"
+              title={
+                receiverConnected
+                  ? 'Configuración del receptor'
+                  : 'Conecta el receptor RTK para ver su configuración'
+              }
+            >
               ⚙
             </button>
             <button className="cfg-close" onClick={onClose} aria-label="Cerrar">
@@ -1998,7 +2330,7 @@ export function UCenterView({ status, onClose, connection, ntrip, provisioning }
             </button>
           </div>
         </div>
-        {showProvisioning && (
+        {showProvisioning && receiverConnected && (
           <ReceiverProvisioningModal provisioning={provisioning} onClose={() => setShowProvisioning(false)} />
         )}
         <div className="cfg-body">

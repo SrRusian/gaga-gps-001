@@ -20,6 +20,7 @@ export interface DeviceRow {
   vehicle_type_length_meters?: number | null;
   vehicle_type_width_meters?: number | null;
   vehicle_type_max_speed_kmh?: number | null;
+  vehicle_type_category?: 'transport' | 'machinery' | null;
   group_speed_limit_kmh?: number | null;
 }
 
@@ -29,6 +30,7 @@ export interface DeviceRow {
 const SELECT_WITH_VEHICLE_TYPE = `
   SELECT d.*, vt.name AS vehicle_type_name, vt.length_meters AS vehicle_type_length_meters,
     vt.width_meters AS vehicle_type_width_meters, vt.max_speed_kmh AS vehicle_type_max_speed_kmh,
+    vt.category AS vehicle_type_category,
     g.speed_limit_kmh AS group_speed_limit_kmh
   FROM devices d
   LEFT JOIN vehicle_types vt ON vt.id = d.vehicle_type_id

@@ -34,7 +34,7 @@ import {
   type ServerProfile,
 } from '@gaga-gps/client';
 import { useEffect, useState } from 'react';
-import { UCenterView, type ReceiverProvisioningOptions } from './UCenterView';
+import { UCenterView, type ReceiverConfigChange, type ReceiverProvisioningOptions } from './UCenterView';
 import './device-settings.css';
 import {
   deleteNtripProfile,
@@ -684,14 +684,30 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
   const [provisioningMessage, setProvisioningMessage] = useState('');
   const [provisioningError, setProvisioningError] = useState('');
 
-  async function applyReceiverProvisioning(options: ReceiverProvisioningOptions) {
+  // lee del receptor lo que de verdad tiene configurado, para que el panel no muestre defaults
+  async function readReceiverConfig(
+    portTarget: ReceiverProvisioningOptions['portTarget'],
+    msgRates: ReceiverProvisioningOptions['msgRates'],
+  ) {
+    return RtkNtrip.readReceiverConfig({ portTarget, msgRates });
+  }
+
+  // el aviso lista SOLO lo que de verdad cambia respecto a lo que se leyo del receptor. Antes era
+  // un texto fijo que nombraba siempre los mismos 6 campos sin importar que hubieras tocado, asi
+  // que no servia para confirmar nada.
+  async function applyReceiverProvisioning(
+    options: ReceiverProvisioningOptions,
+    changes: ReceiverConfigChange[],
+  ) {
+    if (changes.length === 0) {
+      alert('No hay ningun cambio respecto a lo que el receptor ya tiene configurado.');
+      return;
+    }
+    const detail = changes.map((c) => `- ${c.label}: ${c.from} -> ${c.to}`).join('\n');
     const confirmed = confirm(
-      `Esto reconfigura el receptor RTK con los valores elegidos (periodo de medicion ` +
-        `${options.measRateMs}ms, tasa de navegacion ${options.navRateCyc} ciclo(s), modelo ` +
-        `dinamico ${options.dynModel}, ${options.highPrecision ? 'alta precision NMEA' : 'precision NMEA normal'}, ` +
-        `QZSS ${options.qzssEnabled ? 'activado' : 'desactivado'}, puerto ${options.portTarget}` +
-        `${options.portTarget === 'USB' ? '' : ` a ${options.portBaudRate} baudios`}) y lo guarda en ` +
-        'la memoria del receptor de una vez. Necesita el receptor conectado ahora mismo (USB o Bluetooth).\n\n¿Continuar?',
+      `Se van a cambiar ${changes.length} ajuste(s) del receptor RTK:\n\n${detail}\n\n` +
+        'El resto se reescribe igual que como ya esta. Se guarda en la memoria del receptor de una vez.' +
+        '\n\n¿Continuar?',
     );
     if (!confirmed) return;
     setProvisioningBusy(true);
@@ -1104,6 +1120,7 @@ export function DeviceSettingsPanel({ onClose }: DeviceSettingsPanelProps) {
                     }}
                     provisioning={{
                       onApply: applyReceiverProvisioning,
+                      onRead: readReceiverConfig,
                       busy: provisioningBusy,
                       message: provisioningMessage,
                       error: provisioningError,

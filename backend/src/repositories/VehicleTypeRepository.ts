@@ -6,6 +6,8 @@ export interface VehicleTypeRow {
   length_meters: number;
   width_meters: number;
   max_speed_kmh: number | null;
+  // decide comportamientos reales, no es una etiqueta - ver 001_init.sql
+  category: 'transport' | 'machinery';
   created_at: Date;
 }
 
@@ -35,17 +37,19 @@ class VehicleTypeRepository {
     lengthMeters,
     widthMeters,
     maxSpeedKmh,
+    category,
   }: {
     name: string;
     lengthMeters: number;
     widthMeters: number;
     maxSpeedKmh?: number | null;
+    category?: 'transport' | 'machinery';
   }): Promise<VehicleTypeRow> {
     try {
       const { rows } = await query<VehicleTypeRow>(
-        `INSERT INTO vehicle_types (name, length_meters, width_meters, max_speed_kmh)
-         VALUES ($1, $2, $3, $4) RETURNING *`,
-        [name, lengthMeters, widthMeters, maxSpeedKmh ?? null],
+        `INSERT INTO vehicle_types (name, length_meters, width_meters, max_speed_kmh, category)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [name, lengthMeters, widthMeters, maxSpeedKmh ?? null, category ?? 'transport'],
       );
       return rows[0];
     } catch (err) {
@@ -61,7 +65,14 @@ class VehicleTypeRepository {
       lengthMeters,
       widthMeters,
       maxSpeedKmh,
-    }: { name?: string; lengthMeters?: number; widthMeters?: number; maxSpeedKmh?: number | null },
+      category,
+    }: {
+      name?: string;
+      lengthMeters?: number;
+      widthMeters?: number;
+      maxSpeedKmh?: number | null;
+      category?: 'transport' | 'machinery';
+    },
   ): Promise<VehicleTypeRow | null> {
     const sets: string[] = [];
     const values: unknown[] = [id];
@@ -76,6 +87,10 @@ class VehicleTypeRepository {
     if (widthMeters !== undefined) {
       values.push(widthMeters);
       sets.push(`width_meters = $${values.length}`);
+    }
+    if (category !== undefined) {
+      values.push(category);
+      sets.push(`category = $${values.length}`);
     }
     if (maxSpeedKmh !== undefined) {
       values.push(maxSpeedKmh);

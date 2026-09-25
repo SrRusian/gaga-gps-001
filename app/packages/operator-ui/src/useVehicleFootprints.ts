@@ -1,6 +1,6 @@
 import { createApiClient, getStoredToken } from '@gaga-gps/client';
 import { useEffect, useState } from 'react';
-import { NO_SPEED_LIMITS, type SpeedLimits } from './localSpeed';
+import { NO_SPEED_LIMITS, type SpeedLimits, type VehicleCategory } from './localSpeed';
 
 const api = createApiClient({ getToken: getStoredToken });
 
@@ -18,9 +18,20 @@ interface DeviceRow {
   speed_limit_kmh?: number | null;
   group_speed_limit_kmh?: number | null;
   vehicle_type_max_speed_kmh?: number | null;
+  vehicle_type_category?: VehicleCategory | null;
 }
 
 const LIMITS_CACHE_KEY = 'gaga_speed_limits';
+const CATEGORY_CACHE_KEY = 'gaga_vehicle_category';
+
+function loadCachedCategory(): VehicleCategory | null {
+  try {
+    const raw = localStorage.getItem(CATEGORY_CACHE_KEY);
+    return raw === 'machinery' || raw === 'transport' ? raw : null;
+  } catch {
+    return null;
+  }
+}
 
 // silueta real del vehiculo (largo/ancho, metros) por deviceId - GET /api/devices ya trae el join
 // contra vehicle_types (ver DeviceRepository.SELECT_WITH_VEHICLE_TYPE en el backend). Fetch unico
@@ -28,6 +39,10 @@ const LIMITS_CACHE_KEY = 'gaga_speed_limits';
 // no necesita refrescarse en vivo por socket.
 export function useVehicleFootprints(myDeviceId?: string | null) {
   const [footprints, setFootprints] = useState<Record<string, VehicleFootprint>>({});
+  // la categoria decide comportamientos reales (congelado de posicion, aviso anticipado de
+  // velocidad) - se cachea junto a los limites por el mismo motivo: tiene que estar disponible
+  // aunque la tableta arranque sin red
+  const [category, setCategory] = useState<VehicleCategory | null>(() => loadCachedCategory());
   // los limites del propio vehiculo se cachean: desde que la tableta evalua el exceso por su
   // cuenta, tiene que poder hacerlo aunque arranque sin red (ver localSpeed.ts)
   const [limits, setLimits] = useState<SpeedLimits>(() => loadCachedLimits());
@@ -44,6 +59,14 @@ export function useVehicleFootprints(myDeviceId?: string | null) {
             vehicleTypeLimitKmh: mine.vehicle_type_max_speed_kmh ?? null,
           };
           setLimits(next);
+          const nextCategory = mine.vehicle_type_category ?? null;
+          setCategory(nextCategory);
+          try {
+            if (nextCategory) localStorage.setItem(CATEGORY_CACHE_KEY, nextCategory);
+            else localStorage.removeItem(CATEGORY_CACHE_KEY);
+          } catch {
+            // almacenamiento bloqueado - se sigue usando lo que ya esta en memoria
+          }
           try {
             localStorage.setItem(LIMITS_CACHE_KEY, JSON.stringify(next));
           } catch {
@@ -66,7 +89,7 @@ export function useVehicleFootprints(myDeviceId?: string | null) {
       .catch(() => {});
   }, [myDeviceId]);
 
-  return { footprints, limits };
+  return { footprints, limits, category };
 }
 
 function loadCachedLimits(): SpeedLimits {

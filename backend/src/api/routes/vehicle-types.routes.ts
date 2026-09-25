@@ -26,7 +26,7 @@ export function buildVehicleTypesRouter({ vehicleTypeRepo, authMiddleware, requi
 
   router.post('/', authMiddleware, canManage, async (req, res) => {
     try {
-      const { name, lengthMeters, widthMeters, maxSpeedKmh } = req.body;
+      const { name, lengthMeters, widthMeters, maxSpeedKmh, category } = req.body;
       if (!name || !lengthMeters || !widthMeters) {
         return res.status(400).json({ error: 'name, lengthMeters y widthMeters son requeridos' });
       }
@@ -36,11 +36,15 @@ export function buildVehicleTypesRouter({ vehicleTypeRepo, authMiddleware, requi
       if (maxSpeedKmh != null && maxSpeedKmh <= 0) {
         return res.status(400).json({ error: 'maxSpeedKmh debe ser mayor a 0' });
       }
+      if (category != null && category !== 'transport' && category !== 'machinery') {
+        return res.status(400).json({ error: "category debe ser 'transport' o 'machinery'" });
+      }
       const vehicleType = await vehicleTypeRepo.create({
         name,
         lengthMeters,
         widthMeters,
         maxSpeedKmh: maxSpeedKmh ?? null,
+        category: category ?? 'transport',
       });
       res.status(201).json(vehicleType);
     } catch (err) {
@@ -51,7 +55,7 @@ export function buildVehicleTypesRouter({ vehicleTypeRepo, authMiddleware, requi
 
   router.patch('/:id', authMiddleware, canManage, async (req, res) => {
     try {
-      const { name, lengthMeters, widthMeters, maxSpeedKmh } = req.body;
+      const { name, lengthMeters, widthMeters, maxSpeedKmh, category } = req.body;
       if (lengthMeters !== undefined && lengthMeters <= 0) {
         return res.status(400).json({ error: 'lengthMeters debe ser mayor a 0' });
       }
@@ -61,11 +65,15 @@ export function buildVehicleTypesRouter({ vehicleTypeRepo, authMiddleware, requi
       if (maxSpeedKmh != null && maxSpeedKmh <= 0) {
         return res.status(400).json({ error: 'maxSpeedKmh debe ser mayor a 0' });
       }
+      if (category != null && category !== 'transport' && category !== 'machinery') {
+        return res.status(400).json({ error: "category debe ser 'transport' o 'machinery'" });
+      }
       const vehicleType = await vehicleTypeRepo.update(Number(req.params.id), {
         name,
         lengthMeters,
         widthMeters,
         maxSpeedKmh,
+        category,
       });
       if (!vehicleType) return res.status(404).json({ error: 'Tipo de vehículo no encontrado' });
       res.json(vehicleType);

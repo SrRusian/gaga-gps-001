@@ -9,7 +9,13 @@ import {
   type FootprintInput,
   type OfflineGeofenceMatch,
 } from './offlineGeofences';
-import { evaluateSpeed, NO_SPEED_LIMITS, type SpeedLimits } from './localSpeed';
+import {
+  evaluateSpeed,
+  NO_SPEED_LIMITS,
+  usesPredictiveSpeedWarning,
+  type SpeedLimits,
+  type VehicleCategory,
+} from './localSpeed';
 import { flushDeviceEvents, reportDeviceEvent, type DeviceEvent } from './deviceEvents';
 
 // La tableta evalua geocercas y velocidad por su cuenta, SIEMPRE - con o sin conexion - y le
@@ -75,6 +81,9 @@ const TOAST_DURATION_MS = 4500;
 // rectangulo del vehiculo por debajo de esto (se congela el ultimo rumbo confiable conocido)
 const MIN_SPEED_KMH_FOR_HEADING_TRUST = 3;
 
+// mas separadas que esto, dos muestras ya no describen la aceleracion actual
+const MAX_ACCEL_SAMPLE_GAP_S = 3;
+
 export interface LocalFixInput {
   latitude: number;
   longitude: number;
@@ -99,11 +108,16 @@ export function useLocalAlerts(
   restrictedToAllowedZone = false,
   geofencesReady = false,
   footprintDims: VehicleFootprintDims | null = null,
+  vehicleCategory: VehicleCategory | null = null,
 ) {
   const [alerts, setAlerts] = useState<LocalAlert[]>([]);
   const [toast, setToast] = useState<GeofenceToast | null>(null);
 
   const geofenceRef = useRef<OfflineGeofenceMatch | null>(null);
+  // ultima muestra de velocidad, para derivar la aceleracion real
+  const lastSpeedSampleRef = useRef<{ speedKmh: number; at: number } | null>(null);
+  const categoryRef = useRef<VehicleCategory | null>(vehicleCategory);
+  categoryRef.current = vehicleCategory;
   const speedSeverityRef = useRef<'warning' | 'danger' | null>(null);
   const inAllowedZoneRef = useRef(false);
   // por NIVEL ("¿esta violando ahora mismo?"), no por transicion - mismo criterio que el fix del
@@ -239,7 +253,29 @@ export function useLocalAlerts(
     }
 
     // --- velocidad ---
-    const speed = evaluateSpeed(fix.speedKmh, limitsRef.current, matchedGeofence(match, geofencesRef.current));
+    // aceleracion real entre esta muestra y la anterior, para poder avisar ANTES de cruzar el
+    // limite cuando viene un aceleron fuerte (el 75% fijo no da margen a fondo). Se descarta un
+    // hueco largo entre muestras: dividir entre un dt grande da una aceleracion que ya no
+    // representa lo que esta pasando ahora.
+    const sampleAt = Date.now();
+    const prevSample = lastSpeedSampleRef.current;
+    let accelKmhPerS: number | null = null;
+    if (prevSample) {
+      const dt = (sampleAt - prevSample.at) / 1000;
+      if (dt > 0 && dt <= MAX_ACCEL_SAMPLE_GAP_S) {
+        accelKmhPerS = (fix.speedKmh - prevSample.speedKmh) / dt;
+      }
+    }
+    lastSpeedSampleRef.current = { speedKmh: fix.speedKmh, at: sampleAt };
+
+    const speed = evaluateSpeed(
+      fix.speedKmh,
+      limitsRef.current,
+      matchedGeofence(match, geofencesRef.current),
+      // maquinaria no tiene el modo de falla que resuelve el aviso anticipado (acelerar fuerte y
+      // pasarse sin alcanzar a reaccionar) - ahi solo seria ruido encima del aviso al 75%
+      usesPredictiveSpeedWarning(categoryRef.current) ? accelKmhPerS : null,
+    );
     const previousSpeed = speedSeverityRef.current;
     if (speed.severity !== previousSpeed) {
       // solo el exceso real (danger) deja registro - el aviso al 75% es para corregir a tiempo,

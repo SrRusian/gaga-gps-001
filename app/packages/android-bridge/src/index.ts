@@ -201,32 +201,7 @@ export interface NtripMountpoint {
   nmeaRequired: boolean;
 }
 
-export interface RtkNtripPlugin {
-  listUsbDevices(): Promise<{ devices: UsbDeviceInfo[] }>;
-  connectUsb(options: { deviceId: number; baudRate?: number }): Promise<void>;
-  disconnectUsb(): Promise<void>;
-  listBluetoothDevices(): Promise<{ devices: BluetoothDeviceInfo[] }>;
-  connectBluetooth(options: { address: string }): Promise<void>;
-  disconnectBluetooth(): Promise<void>;
-  // en una tableta Device Owner se concede sin dialogo; si no, abre el dialogo normal de Android
-  requestBluetoothPermission(): Promise<void>;
-  getBaudRate(): Promise<{ baudRate: number }>;
-  setBaudRate(options: { baudRate: number }): Promise<void>;
-  setNtripConfig(options: NtripConfig): Promise<void>;
-  getNtripConfig(): Promise<Partial<NtripConfig>>;
-  fetchSourceTable(options: { host: string; port: number }): Promise<{ mountpoints: NtripMountpoint[] }>;
-  getCorrectionMode(): Promise<{ mode: CorrectionMode }>;
-  setCorrectionMode(options: { mode: CorrectionMode }): Promise<void>;
-  startNtrip(): Promise<void>;
-  stopNtrip(): Promise<void>;
-  // aplica de un solo golpe (UBX-CFG-VALSET) el aprovisionamiento del receptor que hasta ahora
-  // requeria una PC con u-center - measRateMs/navRateCyc/timeRef son los MISMOS campos que la vista
-  // RATE de u-center real deja escribir; portTarget/portBaudRate/etc son los mismos campos de la
-  // vista PRT (Ports), ahora con los 5 targets reales (I2C/UART1/UART2/USB/SPI) - ver UbxConfig.kt
-  // (Kotlin) para el detalle completo de que clave corresponde a cada campo, y para los limites
-  // reales de databits/stopbits/parity/protocolo (la clave moderna no soporta todo lo que u-center
-  // muestra en su vista legada, generica para toda la familia u-blox - ver comentario ahi).
-  sendReceiverProvisioning(options: {
+export interface ReceiverConfigSnapshot {
     measRateMs: number;
     navRateCyc: number;
     timeRef: number;
@@ -278,11 +253,54 @@ export interface RtkNtripPlugin {
     nmeaMainTalkerId: number;
     nmeaGsvTalkerId: number;
     nmeaBdsTalkerId: string;
-  }): Promise<void>;
+    // static hold del receptor: congela posicion y pone velocidad en 0 al detectarse detenido.
+    // speed en cm/s (111 = 4 km/h), distancia de salida en metros. 0 = apagado (default de fabrica)
+    staticHoldSpeedCmS: number;
+    staticHoldExitDistanceM: number;
+}
+
+export interface RtkNtripPlugin {
+  listUsbDevices(): Promise<{ devices: UsbDeviceInfo[] }>;
+  connectUsb(options: { deviceId: number; baudRate?: number }): Promise<void>;
+  disconnectUsb(): Promise<void>;
+  listBluetoothDevices(): Promise<{ devices: BluetoothDeviceInfo[] }>;
+  connectBluetooth(options: { address: string }): Promise<void>;
+  disconnectBluetooth(): Promise<void>;
+  // en una tableta Device Owner se concede sin dialogo; si no, abre el dialogo normal de Android
+  requestBluetoothPermission(): Promise<void>;
+  getBaudRate(): Promise<{ baudRate: number }>;
+  setBaudRate(options: { baudRate: number }): Promise<void>;
+  setNtripConfig(options: NtripConfig): Promise<void>;
+  getNtripConfig(): Promise<Partial<NtripConfig>>;
+  fetchSourceTable(options: { host: string; port: number }): Promise<{ mountpoints: NtripMountpoint[] }>;
+  getCorrectionMode(): Promise<{ mode: CorrectionMode }>;
+  setCorrectionMode(options: { mode: CorrectionMode }): Promise<void>;
+  startNtrip(): Promise<void>;
+  stopNtrip(): Promise<void>;
+  // aplica de un solo golpe (UBX-CFG-VALSET) el aprovisionamiento del receptor que hasta ahora
+  // requeria una PC con u-center - measRateMs/navRateCyc/timeRef son los MISMOS campos que la vista
+  // RATE de u-center real deja escribir; portTarget/portBaudRate/etc son los mismos campos de la
+  // vista PRT (Ports), ahora con los 5 targets reales (I2C/UART1/UART2/USB/SPI) - ver UbxConfig.kt
+  // (Kotlin) para el detalle completo de que clave corresponde a cada campo, y para los limites
+  // reales de databits/stopbits/parity/protocolo (la clave moderna no soporta todo lo que u-center
+  // muestra en su vista legada, generica para toda la familia u-blox - ver comentario ahi).
+  sendReceiverProvisioning(options: ReceiverConfigSnapshot): Promise<void>;
+  // Lee la configuracion REAL del receptor (UBX-CFG-VALGET) y la devuelve con los mismos nombres
+  // de campo que acepta sendReceiverProvisioning - el panel se llena con lo que el receptor TIENE,
+  // no con los defaults del codigo. Rechaza sin receptor conectado, o si el puerto no tiene
+  // habilitada la salida UBX (el receptor no puede contestar). `complete` en false = contesto solo
+  // una parte antes del timeout, lo que falte se queda en su valor anterior.
+  readReceiverConfig(options: {
+    portTarget: 'I2C' | 'UART1' | 'UART2' | 'USB' | 'SPI';
+    msgRates: { message: NmeaMessageId; port: 'UART1' | 'UART2' | 'USB'; on: boolean; value: number }[];
+  }): Promise<Partial<ReceiverConfigSnapshot> & { complete: boolean; readCount: number; expectedCount: number }>;
   // rumbo ya corregido por la auto-calibracion de montaje (ver headingCalibration.ts) - lo usa el
   // envio al servidor cuando el rumbo GPS no es confiable (vehiculo detenido), para que Admin y
   // Supervisor vean hacia donde apunta el vehiculo igual que el operador en su propia pantalla
   setCompassHeading(options: { headingDeg: number }): Promise<void>;
+  // umbral de "detenido" de ESTE vehiculo, derivado de su tipo (ver stationaryThresholdKmh) - 0
+  // desactiva el congelado de posicion, correcto para maquinaria lenta
+  setStationaryThreshold(options: { speedKmh: number }): Promise<void>;
   startMockLocation(): Promise<void>;
   stopMockLocation(): Promise<void>;
   startSwMapsOutput(options?: { port?: number }): Promise<void>;
@@ -344,6 +362,8 @@ const webTraccarFallback: TraccarSenderPlugin = {
 };
 
 const webRtkFallback: RtkNtripPlugin = {
+  readReceiverConfig: async () => unavailable('RtkNtrip'),
+  setStationaryThreshold: async () => {},
   listUsbDevices: async () => ({ devices: [] }),
   connectUsb: async () => unavailable('RtkNtrip'),
   disconnectUsb: async () => unavailable('RtkNtrip'),

@@ -1,3 +1,4 @@
+import { RtkNtrip } from '@gaga-gps/android-bridge';
 import { clearSession, getStoredUser } from '@gaga-gps/client';
 import { haversineMeters, useMapMode } from '@gaga-gps/map-core';
 import type { Position } from '@gaga-gps/shared-types';
@@ -20,6 +21,7 @@ import { useOperatorAuth } from './useOperatorAuth';
 import { useOperatorSocket } from './useOperatorSocket';
 import { useLocalAlerts, type GeofenceToast } from './useLocalAlerts';
 import { useNetworkOnline, useNetworkType, type NetworkType } from './useNetworkStatus';
+import { stationaryThresholdKmh } from './localSpeed';
 import { useVehicleFootprints } from './useVehicleFootprints';
 
 const AUTO_FOLLOW_STORAGE_KEY = 'gaga_operator_auto_follow';
@@ -158,7 +160,15 @@ export default function OperatorApp() {
   const networkType = useNetworkType();
   const clockLabel = useClock();
   useDeviceSensorReporter(deviceId);
-  const { footprints: vehicleFootprints, limits: speedLimits } = useVehicleFootprints(deviceId);
+  const { footprints: vehicleFootprints, limits: speedLimits, category: vehicleCategory } = useVehicleFootprints(deviceId);
+
+  // El congelado de posicion con el vehiculo detenido depende del TIPO de vehiculo, no de una
+  // constante global: una excavadora trabaja por debajo del umbral y congelarla escondería trabajo
+  // real. Se empuja al lado nativo en cuanto se conocen los limites (llegan cacheados al instante
+  // si ya se abrio antes, o al primer fetch de /api/devices).
+  useEffect(() => {
+    RtkNtrip.setStationaryThreshold({ speedKmh: stationaryThresholdKmh(vehicleCategory) }).catch(() => {});
+  }, [vehicleCategory]);
 
   // instancia unica compartida por TODO el sistema de alertas (antes vivia dentro de
   // useOperatorSocket y se pasaba hacia abajo a useLocalAlerts) - ahora que el sonido se decide de
@@ -185,6 +195,7 @@ export default function OperatorApp() {
     restrictedToAllowedZone,
     geofencesReady,
     deviceId ? (vehicleFootprints[deviceId] ?? null) : null,
+    vehicleCategory,
   );
 
   // "alguna vez tuvo RTK conectado en esta sesion" - el aviso de RTK desconectado solo tiene
