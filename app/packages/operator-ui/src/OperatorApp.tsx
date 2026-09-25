@@ -1,21 +1,25 @@
 import { clearSession, getStoredUser } from '@gaga-gps/client';
 import { haversineMeters, useMapMode } from '@gaga-gps/map-core';
 import type { Position } from '@gaga-gps/shared-types';
-import { ConnectionStatusDot, MapModeSelector } from '@gaga-gps/ui';
+import { MapModeSelector } from '@gaga-gps/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './operator.css';
+import { sortAlertStack, topSoundAlert, type StackedAlert } from './alertPriority';
 import { MapView, type MapViewHandle } from './MapView';
 import { OperatorLoginOverlay } from './OperatorLoginOverlay';
 import { ReportIncidentOverlay } from './ReportIncidentOverlay';
+import { useAlertSound } from './useAlertSound';
 import { useBatteryLevel } from './useBatteryLevel';
+import { useClock } from './useClock';
 import { useDeviceGeolocation } from './useDeviceGeolocation';
 import { useDeviceSensorReporter } from './useDeviceSensorReporter';
 import { useDeviceId } from './useDeviceId';
 import { useIncidentReporter } from './useIncidentReporter';
 import { useOperatorAuth } from './useOperatorAuth';
 import { useOperatorSocket } from './useOperatorSocket';
-import { useLocalAlerts } from './useLocalAlerts';
+import { useLocalAlerts, type GeofenceToast } from './useLocalAlerts';
+import { useNetworkOnline, useNetworkType, type NetworkType } from './useNetworkStatus';
 import { useVehicleFootprints } from './useVehicleFootprints';
 
 const AUTO_FOLLOW_STORAGE_KEY = 'gaga_operator_auto_follow';
@@ -36,6 +40,77 @@ function useAutoFollow(): [boolean, (next: boolean) => void] {
   return [autoFollow, setAutoFollow];
 }
 
+function networkTypeLabel(type: NetworkType): string {
+  switch (type) {
+    case 'wifi':
+      return 'WiFi';
+    case 'cellular':
+      return 'Datos móviles';
+    case 'ethernet':
+      return 'Ethernet';
+    case 'none':
+      return 'Sin conexión';
+    default:
+      return 'Red';
+  }
+}
+
+// iconos de linea, mismo estilo que los FAB del mapa (viewBox 24, stroke=currentColor) - solo
+// distinguen de que trata cada chip, el color/estado lo sigue llevando el punto de color
+function GpsIcon() {
+  return (
+    <svg className="op-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 22s-7-7.58-7-12.5A7 7 0 0 1 19 9.5C19 14.42 12 22 12 22Z" />
+      <circle cx="12" cy="9.5" r="2.5" />
+    </svg>
+  );
+}
+
+function WifiIcon() {
+  return (
+    <svg className="op-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M2 8.5a16 16 0 0 1 20 0" />
+      <path d="M5 12a11 11 0 0 1 14 0" />
+      <path d="M8.5 15.5a6 6 0 0 1 7 0" />
+      <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function CellularIcon() {
+  return (
+    <svg className="op-status-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <rect x="2" y="15" width="3.5" height="6" rx="0.5" />
+      <rect x="8" y="11" width="3.5" height="10" rx="0.5" />
+      <rect x="14" y="6" width="3.5" height="15" rx="0.5" />
+      <rect x="20" y="2" width="2" height="19" rx="0.5" opacity="0.35" />
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg className="op-status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3.5 2" />
+    </svg>
+  );
+}
+
+// aviso "Entrando a/Saliendo de zona X" - transitorio, sin sonido, tipo Google Maps. Se mantiene
+// SIEMPRE montado (nunca condicional en el arbol) y se controla por clase CSS/transicion en vez de
+// mount/unmount - asi la animacion de salida (opacity/transform, ver operator.css) se ve completa
+// en vez de desaparecer de golpe cuando useLocalAlerts limpia el toast a null
+function GeofenceToastBanner({ toast }: { toast: GeofenceToast | null }) {
+  const [lastMessage, setLastMessage] = useState('');
+  useEffect(() => {
+    if (toast) setLastMessage(toast.message);
+  }, [toast]);
+  return (
+    <div className={`op-geofence-toast${toast ? ' op-geofence-toast--visible' : ''}`}>{lastMessage}</div>
+  );
+}
+
 export default function OperatorApp() {
   const navigate = useNavigate();
   const user = getStoredUser()!;
@@ -44,7 +119,13 @@ export default function OperatorApp() {
     useOperatorAuth(deviceId);
   // se resuelve antes del socket a proposito: sin conexion es la UNICA fuente de posicion, y es la
   // que alimenta la evaluacion local de geocercas dentro de useOperatorSocket
-  const { position: localGeo, error: geoError, supported: geoSupported } = useDeviceGeolocation();
+  const {
+    position: localGeo,
+    error: geoError,
+    supported: geoSupported,
+    gpsSource,
+    rtkConnected,
+  } = useDeviceGeolocation();
   const {
     connected,
     activeCount,
@@ -53,6 +134,7 @@ export default function OperatorApp() {
     activeMaps,
     fleet,
     alert,
+    connectivityAlert,
     nearestVehicle,
     nearestOnRoute,
     threat,
@@ -62,7 +144,6 @@ export default function OperatorApp() {
     networkNotice,
     restrictedToAllowedZone,
     geofencesReady,
-    sounds,
   } = useOperatorSocket(deviceId);
   const [mapMode, setMapMode] = useMapMode('gaga_operator_map_mode');
   const [autoFollow, setAutoFollow] = useAutoFollow();
@@ -73,13 +154,21 @@ export default function OperatorApp() {
     useIncidentReporter(deviceId);
 
   const { level: batteryLevel, charging: batteryCharging } = useBatteryLevel();
+  const networkOnline = useNetworkOnline();
+  const networkType = useNetworkType();
+  const clockLabel = useClock();
   useDeviceSensorReporter(deviceId);
   const { footprints: vehicleFootprints, limits: speedLimits } = useVehicleFootprints(deviceId);
 
+  // instancia unica compartida por TODO el sistema de alertas (antes vivia dentro de
+  // useOperatorSocket y se pasaba hacia abajo a useLocalAlerts) - ahora que el sonido se decide de
+  // forma centralizada aqui (ver el stack mas abajo), tiene que haber una sola instancia real
+  const { playWarningSound, playDangerSound, stopSound } = useAlertSound();
+
   // la tableta decide geocercas y velocidad por su cuenta, con o sin conexion, y le reporta al
-  // servidor lo que decide (ver useLocalAlerts.ts). En pantalla gana lo mas grave entre eso y lo
-  // que el servidor si sigue decidiendo (colision, proximidad, equipo, incidentes, señal)
-  const localAlert = useLocalAlerts(
+  // servidor lo que decide (ver useLocalAlerts.ts) - puede haber varias condiciones activas a la
+  // vez (zona restringida + geocerca + velocidad), a diferencia de antes que solo devolvia una
+  const { alerts: localAlerts, toast: geofenceToast } = useLocalAlerts(
     deviceId,
     geofences,
     localGeo
@@ -91,18 +180,63 @@ export default function OperatorApp() {
       : null,
     speedLimits,
     connected,
-    sounds,
     restrictedToAllowedZone,
     geofencesReady,
   );
 
-  const SEVERITY_RANK = { info: 1, warning: 2, danger: 3 } as const;
-  const effectiveAlert =
-    localAlert &&
-    (!alert.severity || SEVERITY_RANK[localAlert.severity] >= SEVERITY_RANK[alert.severity])
-      ? { severity: localAlert.severity, message: localAlert.message }
-      : alert;
-  const effectiveGeofenceId = localAlert?.geofenceId ?? activeGeofenceId;
+  // "alguna vez tuvo RTK conectado en esta sesion" - el aviso de RTK desconectado solo tiene
+  // sentido si ALGUNA VEZ hubo receptor (si nunca lo hubo, usar el GPS de la tableta es lo normal,
+  // no una degradacion de nada - avisar siempre seria ruido constante para flotas sin RTK)
+  const everConnectedRtkRef = useRef(false);
+  if (rtkConnected) everConnectedRtkRef.current = true;
+
+  // --- sistema de prioridad de alertas: multiples fuentes pueden estar activas a la vez, se ven
+  // todas (sin saturar - la mas urgente arriba, el resto compacto), pero solo UNA suena: la de
+  // mayor prioridad. Si esa se resuelve, la siguiente en la fila retoma el sonido sola (ver
+  // alertPriority.ts). "server" cubre lo que solo el backend puede decidir (colision, proximidad,
+  // equipo, incidentes, parada preventiva); "connectivity" cubre servidor/red desconectados;
+  // "rtk" el receptor desconectado; el resto son las 3 condiciones locales de useLocalAlerts.
+  const alertStack: StackedAlert[] = [];
+  if (alert.severity === 'warning' || alert.severity === 'danger') {
+    alertStack.push({ id: 'server', severity: alert.severity, message: alert.message, loop: alert.loop, sound: !alert.silent });
+  }
+  if (connectivityAlert) {
+    alertStack.push({ id: 'connectivity', severity: connectivityAlert.severity, message: connectivityAlert.message, loop: connectivityAlert.loop, sound: true });
+  }
+  if (everConnectedRtkRef.current && gpsSource === 'tablet') {
+    alertStack.push({
+      id: 'rtk',
+      severity: 'warning',
+      message: 'RECEPTOR RTK DESCONECTADO - USANDO GPS INTERNO',
+      loop: false,
+      sound: true,
+    });
+  }
+  for (const local of localAlerts) {
+    alertStack.push({ id: local.source, severity: local.severity, message: local.message, loop: local.severity === 'danger', sound: true });
+  }
+  const sortedAlerts = sortAlertStack(alertStack);
+  const topAlert = sortedAlerts[0] ?? null;
+  const topSound = topSoundAlert(sortedAlerts);
+
+  // el sonido solo se toca cuando cambia QUIEN suena (id+severidad+loop) - nunca en cada render,
+  // o el pitido se reiniciaria constantemente y nunca llegaria a sonar completo
+  const soundSignatureRef = useRef<string | null>(null);
+  useEffect(() => {
+    const signature = topSound ? `${topSound.id}:${topSound.severity}:${topSound.loop}` : null;
+    if (signature === soundSignatureRef.current) return;
+    soundSignatureRef.current = signature;
+    if (!topSound) {
+      stopSound();
+    } else if (topSound.severity === 'danger') {
+      playDangerSound(topSound.loop);
+    } else {
+      playWarningSound();
+    }
+  }, [topSound, playDangerSound, playWarningSound, stopSound]);
+
+  const effectiveGeofenceId =
+    localAlerts.find((a) => a.source === 'geofence')?.geofenceId ?? activeGeofenceId;
 
   // posición propia: local tiene prioridad sobre servidor; alertas siguen siendo del servidor
   const displayFleet = useMemo(() => {
@@ -187,6 +321,26 @@ export default function OperatorApp() {
     ? `${myDisplay.deviceName}${myVehicleTypeName ? ` (${myVehicleTypeName})` : ''}`
     : (deviceId ?? 'Sin vehículo asignado');
 
+  // 3 estados reales, no 2: RTK (bueno) vs GPS de la tableta (peor precision, sin RTK detras) vs
+  // sin ningun fix todavia - antes solo distinguia "hay posicion o no", asi que desconectar el RTK
+  // no cambiaba nada en pantalla mientras la tableta siguiera entregando su propio GPS
+  const gpsLabel = !geoSupported
+    ? 'GPS no disponible'
+    : gpsSource === 'rtk'
+      ? 'GPS: RTK'
+      : gpsSource === 'tablet'
+        ? 'GPS: Interno'
+        : 'GPS: Sin señal';
+  const gpsDotClass = !geoSupported
+    ? 'op-status-dot--warning'
+    : gpsSource === 'rtk'
+      ? 'op-status-dot--ok'
+      : gpsSource === 'tablet'
+        ? 'op-status-dot--bad'
+        : 'op-status-dot--danger';
+  const gpsUrgent = geoSupported && gpsSource === null;
+  const networkLabel = networkTypeLabel(networkType);
+
   return (
     <div className="op-app">
       <header className="op-header">
@@ -217,21 +371,48 @@ export default function OperatorApp() {
           </div>
         </div>
         <div className="op-header-row op-status-row">
-          <span className="op-status-chip">
-            <ConnectionStatusDot connected={connected} />
-            {connected ? 'Conectado' : 'Sin conexión'}
+          <span
+            className={`op-status-chip${
+              !networkOnline ? ' op-status-chip--warning' : !connected ? ' op-status-chip--urgent' : ''
+            }`}
+          >
+            <span
+              className={`op-status-dot${
+                !networkOnline ? ' op-status-dot--warning' : connected ? ' op-status-dot--ok' : ' op-status-dot--danger'
+              }`}
+            />
+            {!networkOnline ? 'Sin Red' : connected ? 'Conectada' : 'Desconectado'}
+          </span>
+          <span className={`op-status-chip${gpsUrgent ? ' op-status-chip--urgent' : ''}`}>
+            <span className={`op-status-dot ${gpsDotClass}`} />
+            <GpsIcon />
+            {gpsLabel}
+            {geoError && <span id="op-gps-error"> ({geoError})</span>}
           </span>
           <span className="op-status-chip">
-            <ConnectionStatusDot connected={!!localGeo} />
-            {geoSupported ? (localGeo ? 'GPS local' : 'GPS sin señal') : 'GPS no disponible'}
-            {geoError && <span id="op-gps-error"> ({geoError})</span>}
+            <span className={`op-status-dot${networkOnline ? ' op-status-dot--ok' : ' op-status-dot--warning'}`} />
+            {networkType === 'cellular' ? <CellularIcon /> : <WifiIcon />}
+            {networkLabel}
+          </span>
+          <span className="op-status-chip op-clock">
+            <ClockIcon />
+            {clockLabel}
           </span>
         </div>
       </header>
 
-      <div id="op-alert-message" className={effectiveAlert.severity ?? ''}>
-        {effectiveAlert.message}
-      </div>
+      {sortedAlerts.length > 0 && (
+        <div className="op-alert-stack">
+          {sortedAlerts.map((a, index) => (
+            <div
+              key={a.id}
+              className={`op-alert-message ${a.severity}${index > 0 ? ' op-alert-message--stacked' : ''}`}
+            >
+              {a.message}
+            </div>
+          ))}
+        </div>
+      )}
 
       {!checking && myDisplay && (
         <>
@@ -258,6 +439,8 @@ export default function OperatorApp() {
             <div className="op-map-mode-selector-wrap">
               <MapModeSelector mode={mapMode} onChange={setMapMode} />
             </div>
+
+            <GeofenceToastBanner toast={geofenceToast} />
 
             {(proximityNotice || networkNotice) && (
               <div className="op-notice-stack">
@@ -355,10 +538,7 @@ export default function OperatorApp() {
       )}
 
       {}
-      <div
-        id="op-alert-overlay"
-        className={effectiveAlert.severity === 'info' ? '' : (effectiveAlert.severity ?? '')}
-      />
+      <div id="op-alert-overlay" className={topAlert?.severity ?? ''} />
 
       {!deviceId && (
         <div className="op-full-overlay active">

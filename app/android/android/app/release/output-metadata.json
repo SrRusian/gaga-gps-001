@@ -11,8 +11,8 @@
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 118,
-      "versionName": "1.1.02-restricted-zone-empty-zones-fix",
+      "versionCode": 121,
+      "versionName": "1.1.05-alert-priority-stack-toast",
       "outputFile": "app-release.apk"
     }
   ],

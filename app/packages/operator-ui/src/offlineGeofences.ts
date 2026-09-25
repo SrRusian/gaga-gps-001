@@ -10,24 +10,45 @@ import type { Geofence, GeofenceType } from '@gaga-gps/shared-types';
 // valores reales, mismo criterio que PositionFilterService y GEOFENCE_COLORS. Si se cambia el
 // criterio, replicar aqui.
 
-const AREA_SEVERITY: Partial<Record<GeofenceType, 'warning' | 'danger' | 'info'>> = {
+// Dos categorias, no una escala continua - pedido explicito: "de atencion" (dispara la alerta
+// sonora/visual de verdad) vs "informativa/aviso" (nunca alerta, solo el aviso silencioso de
+// entrar/salir - ver matchedInformativeGeofences). `maintenance`/`parking` se reclasificaron aqui a
+// informativas (antes generaban alerta) - la severidad la decide SIEMPRE el `type`, nunca la forma.
+const AREA_SEVERITY: Partial<Record<GeofenceType, 'warning' | 'danger'>> = {
   danger: 'danger',
   forbidden: 'danger',
   warning: 'warning',
-  maintenance: 'warning',
-  parking: 'info',
 };
 
 const AREA_ALERT_TEXT: Partial<Record<GeofenceType, string>> = {
   danger: 'PELIGRO - DETENER VEHÍCULO INMEDIATAMENTE',
   forbidden: 'ZONA PROHIBIDA - NO INGRESAR - DETENER VEHÍCULO',
   warning: 'PRECAUCIÓN - ZONA DE RIESGO - REDUCIR VELOCIDAD',
-  maintenance: 'ZONA EN MANTENIMIENTO - PRECAUCIÓN',
-  parking: 'ZONA DE ESTACIONAMIENTO',
 };
 
-const SEVERITY_RANK: Record<'info' | 'warning' | 'danger', number> = {
-  info: 1,
+// misma llave que AREA_SEVERITY (los unicos 3 tipos que disparan alerta real) - exportado para que
+// matchedInformativeGeofences (todo lo demas) y el resto del arbol de alertas usen una sola fuente
+// de verdad, en vez de repetir la lista de tipos en dos lugares
+export const ATTENTION_GEOFENCE_TYPES: ReadonlySet<GeofenceType> = new Set(
+  Object.keys(AREA_SEVERITY) as GeofenceType[],
+);
+
+// nombre corto en español de cada tipo, para el aviso "Entrando a X (tipo)" - solo se usa para las
+// informativas en la practica (las de atencion ya tienen su propio texto completo en
+// AREA_ALERT_TEXT), pero se define para los 9 tipos por si algo mas lo necesita a futuro
+export const GEOFENCE_TYPE_LABEL: Record<GeofenceType, string> = {
+  danger: 'Peligro',
+  forbidden: 'Zona prohibida',
+  warning: 'Advertencia',
+  parking: 'Estacionamiento',
+  authorized_route: 'Ruta autorizada',
+  allowed: 'Zona permitida',
+  discharge: 'Descarga',
+  maintenance: 'Mantenimiento',
+  carga: 'Carga',
+};
+
+const SEVERITY_RANK: Record<'warning' | 'danger', number> = {
   warning: 2,
   danger: 3,
 };
@@ -36,7 +57,7 @@ export interface OfflineGeofenceMatch {
   geofenceId: number;
   geofenceName: string;
   geofenceType: GeofenceType;
-  severity: 'warning' | 'danger' | 'info';
+  severity: 'warning' | 'danger';
   message: string;
 }
 
@@ -149,7 +170,7 @@ export function evaluateGeofencesOffline(
 
   for (const geofence of geofences) {
     const severity = AREA_SEVERITY[geofence.type];
-    if (!severity) continue; // allowed/discharge/carga/authorized_route: nunca alertan
+    if (!severity) continue; // allowed/discharge/carga/authorized_route/parking/maintenance: informativas, nunca alertan
     if (!isTriggered(lat, lon, geofence)) continue;
     if (best && SEVERITY_RANK[best.severity] >= SEVERITY_RANK[severity]) continue;
 
@@ -171,4 +192,12 @@ export function evaluateGeofencesOffline(
 // servidor (GeofenceAlertService.evaluate(), matches.find(g => g.type === 'allowed')).
 export function isInsideAllowedZone(lat: number, lon: number, geofences: Geofence[]): boolean {
   return geofences.some((g) => g.type === 'allowed' && isTriggered(lat, lon, g));
+}
+
+// para el aviso "Entrando a/Saliendo de zona X" (toast, sin sonido - ver useLocalAlerts.ts) -
+// TODAS las geocercas informativas activas a la vez, no solo la mas severa (no tienen severidad
+// que comparar): puede haber varias encimadas o contiguas (ej. un estacionamiento dentro de una
+// ruta autorizada) y el operador debe ver el transito de las dos, no solo una.
+export function matchedInformativeGeofences(lat: number, lon: number, geofences: Geofence[]): Geofence[] {
+  return geofences.filter((g) => !ATTENTION_GEOFENCE_TYPES.has(g.type) && isTriggered(lat, lon, g));
 }
